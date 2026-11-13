@@ -425,7 +425,9 @@ func qualifierMatches(pkg pkgmeta.PURL, k, v, codename string, installed *pkgmet
 			// A codename must actually be supplied by this scan, either in
 			// os-release or the package's purl. A same-spelled purl alone
 			// cannot exempt a package evaluated on another release.
-			if v != codename && v != got {
+			// The purl supplies the codename as `jammy` or `ubuntu-jammy`
+			// (PR #316 review).
+			if v != codename && v != got && got != "ubuntu-"+v {
 				return false
 			}
 			if installed.Ecosystem == "" {

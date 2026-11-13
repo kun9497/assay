@@ -27,6 +27,7 @@ type DistroScope struct {
 // scope carries the contradiction through every join, whichever listing is
 // kept.
 func (s DistroScope) ForInstallation(installed string) DistroScope {
+	installed = CanonicalDistroQualifier(installed)
 	switch {
 	case s.Mixed || installed == "":
 		return s
@@ -55,6 +56,9 @@ func (s DistroScope) Merge(other DistroScope) DistroScope {
 // Matches checks the scope of a VEX OS release against the evaluated key
 // and any finer release identified by the installation or its local OS.
 func (s DistroScope) Matches(want, installed, ecosystem string) bool {
+	// The statement's own spelling may be a codename too -- the SBOM purl
+	// copied verbatim into the document (PR #316 review).
+	want, installed = CanonicalDistroQualifier(want), CanonicalDistroQualifier(installed)
 	d, ok := distroFromQualifier(want)
 	if !ok {
 		return false

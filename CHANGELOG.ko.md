@@ -8,6 +8,12 @@
 ## [Unreleased]
 
 ### Fixed
+- VEX: 패키지 purl의 `distro=` 한정자에 적힌 Debian·Ubuntu 코드네임(`bookworm`, `debian-bookworm`, `jammy`)을 그것이
+  가리키는 릴리스로 읽습니다. 같은 메이저의 OS 컴포넌트 포인트 릴리스를 모순 없이 확인하고 — Debian 12.15 OS 곁의
+  `distro=bookworm`이 v0.18.1처럼 다시 12.15 문장을 받으며, 672fe7a는 거부했었음 — 자체 포인트 릴리스는 증명하지
+  않습니다: OS가 12이거나 12.14이거나 다른 코드네임이면 12.15 문장에 면제되지 않습니다. 코드네임으로 적은 문장은
+  메이저 문장이고, operating-system 컴포넌트 없이 purl에 코드네임을 적은 문서는 미평가로 남는 대신 그 릴리스로 키됩니다.
+  (D121; main 672fe7a QA, 2026-11-13)
 - VEX: CycloneDX 문서에서 한 설치를 최상위와 subject 아래에 두 번 적고 purl이 서로 다른 Debian 포인트 릴리스를 적으면
   어느 위치든 공통 메이저까지만 적용됩니다. purl이 로컬 OS와 모순되는 나열의 범위는 모순되는 두 나열이 합쳐질 때와 같이
   처음부터 Mixed이므로, 합칠 때 첫 purl의 포인트 릴리스만 남을 수 없습니다: 최상위 12.15·subject 12.14(OS 12.15)로 적힌

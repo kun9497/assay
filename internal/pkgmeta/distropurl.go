@@ -217,7 +217,10 @@ func ecosystemForQualifiedDistro(p PURL, docEcosystem string, hasDocDistro bool)
 	if hasDocDistro {
 		return docEcosystem
 	}
-	d, ok := distroFromQualifier(p.Qualifiers["distro"])
+	// A codename names its release here too (CanonicalDistroQualifier), so
+	// an OS-less document whose purls say distro=bookworm is keyed to
+	// Debian 12 rather than left unkeyed (PR #316 review).
+	d, ok := distroFromQualifier(CanonicalDistroQualifier(p.Qualifiers["distro"]))
 	if !ok {
 		return ""
 	}
