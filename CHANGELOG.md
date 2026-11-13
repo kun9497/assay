@@ -73,6 +73,18 @@ All notable changes to this project are documented here. The format follows
   suppressed by a 12.15 statement, and kept the other way round; on a fixture database holding
   one unrated advisory the same two shapes written as 12.10/12.11 exited 0 and 1 under
   `--fail-on-unknown`. (D121; main QA of 672fe7a, 2026-11-13)
+- CI examples (`docs/ci/github-actions.yml`, `docs/ci/gitlab-ci.yml`): the install is one `sh -c`
+  line, the READMEs' shape without sudo, so its temporary file, variable and clean-up never reach
+  the job's own steps. GitLab runs `before_script` and `script` in one shell, and the four-line
+  form's `trap 'rm -f "$t"' EXIT` deleted a `report.txt` a later step had put in `t` and left the
+  installer's temporary file behind. `internal/ciguard` holds the one shape and refuses a
+  variable or trap set in the calling shell. (main QA of ef0bc1a, 2026-11-13)
+- VEX: an Ubuntu codename in a statement's `distro=` is held to the same evidence rule however
+  it is spelled -- `jammy`, `JAMMY` and `ubuntu-jammy` alike need the codename in the scan
+  (os-release or the install purl). ef0bc1a had refused the bare lower-case spelling and let the
+  other two pass to the release normalisation, suppressing two advisories and turning exit 1 into
+  0 on a document that carried no codename; the numeric `ubuntu-22.04` still applies on its own
+  and `noble` is still refused. (main QA of ef0bc1a, 2026-11-13)
 
 ## [0.18.1] - 2026-11-12
 

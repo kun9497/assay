@@ -246,6 +246,19 @@ func TestApply_UbuntuCodename(t *testing.T) {
 			"pkg:deb/ubuntu/libssl3?distro=jammy",
 			osFinding("CVE-2031-7001", "pkg:deb/ubuntu/libssl3@3.0.2-0ubuntu1.18?arch=amd64&distro=ubuntu-jammy&upstream=openssl",
 				"libssl3", "3.0.2-0ubuntu1.18", "openssl", "3.0.2-0ubuntu1.18"), Target{}, true},
+		// Main QA of ef0bc1a (2026-11-13): the spelling of the codename
+		// does not change the evidence rule. Without a codename in the scan
+		// every spelling is refused; with one, every spelling applies.
+		{"JAMMY, codename unknown to the scan", "pkg:deb/ubuntu/libssl3?distro=JAMMY", ubuntu, Target{}, false},
+		{"ubuntu-jammy, codename unknown to the scan", "pkg:deb/ubuntu/libssl3?distro=ubuntu-jammy", ubuntu, Target{}, false},
+		{"Ubuntu-Jammy, codename unknown to the scan", "pkg:deb/ubuntu/libssl3?distro=Ubuntu-Jammy", ubuntu, Target{}, false},
+		{"JAMMY on a jammy target", "pkg:deb/ubuntu/libssl3?distro=JAMMY", ubuntu, jammy, true},
+		{"ubuntu-jammy on a jammy target", "pkg:deb/ubuntu/libssl3?distro=ubuntu-jammy", ubuntu, jammy, true},
+		{"JAMMY against a purl spelled jammy, no codename in the scan", "pkg:deb/ubuntu/libssl3?distro=JAMMY",
+			osFinding("CVE-2031-7001", "pkg:deb/ubuntu/libssl3@3.0.2-0ubuntu1.18?arch=amd64&distro=jammy&upstream=openssl",
+				"libssl3", "3.0.2-0ubuntu1.18", "openssl", "3.0.2-0ubuntu1.18"), Target{}, true},
+		{"NOBLE on a jammy target", "pkg:deb/ubuntu/libssl3?distro=NOBLE", ubuntu, jammy, false},
+		{"the release spelled numerically needs no codename", "pkg:deb/ubuntu/libssl3?distro=ubuntu-22.04", ubuntu, Target{}, true},
 		{"source statement with the codename", "pkg:deb/ubuntu/openssl@3.0.2-0ubuntu1.18?arch=source&distro=jammy", ubuntu, jammy, true},
 		{"a Debian package does not answer to it",
 			"pkg:deb/debian/libssl3?distro=jammy",

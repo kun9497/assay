@@ -31,15 +31,13 @@ jobs:
       # The commit the latest release was built from, as in the README (the
       # release job keeps it current) -- never a branch, which moves. The
       # installer verifies the release's checksums signature with openssl,
-      # which ubuntu-latest ships. Download to a temporary file, then run:
-      # the step's shell (bash -e) stops at a failed download, where
-      # `curl | sh` had not, and the workspace's own files are not touched.
+      # which ubuntu-latest ships. One `sh -c` line, the READMEs' shape
+      # without sudo: the temporary file, the download, the run and the
+      # clean-up live and die inside it, nothing of it reaches the rest of
+      # the step, and the line's status is the install's.
       - name: Install assay
         run: |
-          t=$(mktemp)
-          trap 'rm -f "$t"' EXIT
-          curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh
-          sh "$t" -b /usr/local/bin
+          sh -c 't=$(mktemp) && curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh && sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
           assay --version
 
       # Pulls the published OCI database from ghcr.io/kun9497/assay-db — a

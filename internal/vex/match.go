@@ -421,19 +421,25 @@ func qualifierMatches(pkg pkgmeta.PURL, k, v, codename string, installed *pkgmet
 	}
 
 	if pkg.Type == "deb" && strings.EqualFold(pkg.Namespace, "ubuntu") {
-		if release, known := ubuntuReleases[v]; known {
+		// The statement's spelling is read as a codename whatever its case
+		// or prefix (jammy, JAMMY, ubuntu-jammy), so one evidence rule
+		// decides every spelling: main QA of ef0bc1a (2026-11-13) had the
+		// bare lower-case one refused here and the other two slip past to
+		// the release normalisation below, where they suppressed on a
+		// document that carried no codename at all.
+		if cn := pkgmeta.UbuntuCodename(v); cn != "" {
 			// A codename must actually be supplied by this scan, either in
 			// os-release or the package's purl. A same-spelled purl alone
 			// cannot exempt a package evaluated on another release.
-			// The purl supplies the codename as `jammy` or `ubuntu-jammy`
-			// (PR #316 review).
-			if v != codename && v != got && got != "ubuntu-"+v {
+			// os-release spells VERSION_CODENAME in lower case on every
+			// Ubuntu release; the fold is a defence, not a case met.
+			if cn != strings.ToLower(codename) && cn != pkgmeta.UbuntuCodename(got) {
 				return false
 			}
 			if installed.Ecosystem == "" {
 				return true
 			}
-			v = "ubuntu-" + release
+			v = "ubuntu-" + ubuntuReleases[cn]
 		} else if v == codename && codename != "" {
 			// A newly named Ubuntu release read from the image itself.
 			return installed.Ecosystem == "" || strings.HasPrefix(installed.Ecosystem, "Ubuntu:")

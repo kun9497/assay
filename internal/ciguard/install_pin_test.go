@@ -32,25 +32,64 @@ var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
 // downloaded (`curl -o ... && sh ...`).
 var pipedIntoSh = regexp.MustCompile(`install\.(sh|ps1)[^\n]*\|\s*(sudo(\s+-\S+)*\s+)?(sh|bash)\b`)
 
-// The shapes every install.sh one-liner takes instead: curl -f (an HTTP
-// error is a non-zero status) writing the pinned script to a file mktemp
-// made, then sh running THAT file, then the file removed. The READMEs hold
-// it in one `sh -c` line whose exit status is the install's; a CI script
-// holds it in four lines, where the runner's shell stops at the failing
-// download and the EXIT trap removes the file. Held as one pattern each
-// rather than as substrings, so a `;`, a run written before its download or
-// a `|| true` cannot pass (PR #312 review). A fixed name in the working
-// directory is refused: the first revision wrote `./assay-install.sh` and
-// overwrote a file of that name (main QA of 672fe7a, 2026-11-13).
+// The one shape every install.sh one-liner takes instead, READMEs and CI
+// examples alike: one `sh -c` line in which curl -f (an HTTP error is a
+// non-zero status) writes the pinned script to a file mktemp made, sh runs
+// THAT file, the file is removed and the line exits with the install's
+// status. Held as one pattern rather than as substrings, so a `;`, a run
+// written before its download or a `|| true` cannot pass (PR #312 review).
+// A fixed name in the working directory is refused: the first revision wrote
+// `./assay-install.sh` and overwrote a file of that name (main QA of 672fe7a,
+// 2026-11-13). A variable or EXIT trap left in the calling shell is refused
+// too: GitLab runs before_script and script in one shell, and the four-line
+// form's `trap 'rm -f "$t"' EXIT` deleted a report.txt a later job step had
+// put in t (main QA of ef0bc1a, 2026-11-13).
 var (
 	pinnedScript = `https://raw\.githubusercontent\.com/kun9497/assay/[0-9a-f]{40}/install\.sh`
 	// Anchored to the line, so nothing may follow the shape: a trailing
 	// `|| true` or `; exit 0` would hand the caller a success again (PR
 	// #315 review).
-	oneLinerShape = regexp.MustCompile(`(?m)^[ \t]*sh -c 't=\$\(mktemp\) && curl -sSfL -o "\$t" ` + pinnedScript + ` && (?:sudo )?sh "\$t" -b /usr/local/bin; s=\$\?; rm -f "\$t"; exit \$s'$`)
-	ciShape       = regexp.MustCompile(`(?m)^[ \t]*(?:- )?t=\$\(mktemp\)\n[ \t]*(?:- )?trap 'rm -f "\$t"' EXIT\n[ \t]*(?:- )?curl -sSfL -o "\$t" ` + pinnedScript + `\n[ \t]*(?:- )?sh "\$t" -b /usr/local/bin$`)
+	oneLinerShape = regexp.MustCompile(`(?m)^[ \t]*(?:- )?sh -c 't=\$\(mktemp\) && curl -sSfL -o "\$t" ` + pinnedScript + ` && (?:sudo )?sh "\$t" -b /usr/local/bin; s=\$\?; rm -f "\$t"; exit \$s'$`)
 	fixedName     = regexp.MustCompile(`-o +\.?/?assay-install\.sh`)
+	// Any variable holding a mktemp path, or any trap on EXIT, written as a
+	// line of its own (optionally a YAML list item, `export`ed, quoted,
+	// commented) -- the shapes a reader rewriting the four-line form would
+	// produce.
+	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?\w+="?\$\(mktemp\b|^[ \t]*(?:-[ \t]+)?trap[ \t]+['"]`)
 )
+
+// TestInstallOneLiners_LeakGuardCatchesTheFourLineForm holds the guard that
+// refuses a variable or trap left in the calling shell against the four-line
+// form ef0bc1a's docs/ci/gitlab-ci.yml carried, in the spellings a reader
+// would write: without this fixture the guard was held by nothing (PR #319
+// review -- no document carries the shape, so a regex that matched nothing
+// stayed green).
+func TestInstallOneLiners_LeakGuardCatchesTheFourLineForm(t *testing.T) {
+	for _, line := range []string{
+		"    - t=$(mktemp)",
+		"    - trap 'rm -f \"$t\"' EXIT",
+		"          t=$(mktemp)",
+		"          trap 'rm -f \"$t\"' EXIT",
+		"    -   t=\"$(mktemp)\"",
+		"    - export t=$(mktemp)",
+		"    - f=$(mktemp -d)",
+		"    - t=$(mktemp) # the installer's file",
+		"    - trap \"rm -f $t\" EXIT",
+	} {
+		if !leakedIntoJob.MatchString(line + "\n") {
+			t.Errorf("leakedIntoJob does not catch %q", line)
+		}
+	}
+	for _, line := range []string{
+		"    - sh -c 't=$(mktemp) && curl -sSfL -o \"$t\" https://raw.githubusercontent.com/kun9497/assay/0123456789abcdef0123456789abcdef01234567/install.sh && sh \"$t\" -b /usr/local/bin; s=$?; rm -f \"$t\"; exit $s'",
+		"    - apk add --no-cache curl openssl",
+		"    # the temporary file, the download, the run and the clean-up",
+	} {
+		if leakedIntoJob.MatchString(line + "\n") {
+			t.Errorf("leakedIntoJob wrongly catches %q", line)
+		}
+	}
+}
 
 // TestInstallOneLiners_RunTheScriptOnlyAfterItDownloaded holds every install
 // one-liner to the download-then-run shape: never piped into sh, run through
@@ -69,15 +108,18 @@ func TestInstallOneLiners_RunTheScriptOnlyAfterItDownloaded(t *testing.T) {
 		if m := fixedName.FindString(text); m != "" {
 			t.Errorf("%s downloads the installer to a fixed name in the working directory, which overwrites a file of that name: %q", doc, m)
 		}
+		if m := leakedIntoJob.FindString(text); m != "" {
+			t.Errorf("%s sets the installer's variable or trap in the calling shell, which GitLab shares with the job's own steps: %q", doc, strings.TrimSpace(m))
+		}
 		downloads := 0
 		for _, line := range strings.Split(text, "\n") {
 			if strings.Contains(line, "/install.sh") && strings.Contains(line, "curl") {
 				downloads++
 			}
 		}
-		shaped := len(oneLinerShape.FindAllString(text, -1)) + len(ciShape.FindAllString(text, -1))
+		shaped := len(oneLinerShape.FindAllString(text, -1))
 		if downloads == 0 || shaped != downloads {
-			t.Errorf("%s: %d line(s) download install.sh, %d in a download-to-mktemp-then-run-then-remove shape", doc, downloads, shaped)
+			t.Errorf("%s: %d line(s) download install.sh, %d in the one-line download-to-mktemp-then-run-then-remove shape", doc, downloads, shaped)
 		}
 	}
 }
