@@ -67,6 +67,11 @@
   `ubuntu-jammy` 모두 스캔에 코드네임 증거(os-release 또는 설치 purl)가 있어야 합니다. ef0bc1a는 소문자 맨 철자는
   거부하고 나머지 둘은 릴리스 정규화로 넘겨 코드네임이 없는 문서에서 advisory 2건을 억제하고 종료 1을 0으로 바꿨습니다;
   숫자 `ubuntu-22.04`는 전과 같이 단독으로 적용되고 `noble`은 여전히 거부됩니다. (main ef0bc1a QA, 2026-11-13)
+- `internal/ciguard`의 CI 예제 가드가 설치 잡만 읽고 EXIT(또는 `0`) trap만 거부합니다(모든 trap이 아니라):
+  67e2cf6는 예제의 독립된 GitLab 잡에 넣은 `trap 'echo stopping' TERM`을 설치기의 잔재로 거부했습니다.
+  네 줄 설치 형태(호출 셸의 `t=$(mktemp)`와 `trap 'rm -f "$t"' EXIT`)는 설치 잡 안에서 여전히 거부되며,
+  예제 자체는 바뀌지 않았습니다. (main 67e2cf6 QA, 2026-11-13)
+
 
 ## [0.18.1] - 2026-11-12
 

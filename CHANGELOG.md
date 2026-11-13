@@ -90,6 +90,12 @@ All notable changes to this project are documented here. The format follows
   other two pass to the release normalisation, suppressing two advisories and turning exit 1 into
   0 on a document that carried no codename; the numeric `ubuntu-22.04` still applies on its own
   and `noble` is still refused. (main QA of ef0bc1a, 2026-11-13)
+- `internal/ciguard`'s guard on the CI examples reads the install job only and refuses a trap on
+  EXIT (or `0`), not every trap: 67e2cf6 refused `trap 'echo stopping' TERM` in an independent
+  GitLab job of the example as the installer's leftover. The four-line install form (`t=$(mktemp)`
+  and `trap 'rm -f "$t"' EXIT` in the calling shell) is still refused inside the install job;
+  the examples themselves are unchanged. (main QA of 67e2cf6, 2026-11-13)
+
 
 ## [0.18.1] - 2026-11-12
 

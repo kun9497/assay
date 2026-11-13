@@ -51,12 +51,49 @@ var (
 	// #315 review).
 	oneLinerShape = regexp.MustCompile(`(?m)^[ \t]*(?:- )?sh -c 't=\$\(mktemp\) && curl -sSfL -o "\$t" ` + pinnedScript + ` && (?:sudo )?sh "\$t" -b /usr/local/bin; s=\$\?; rm -f "\$t"; exit \$s'$`)
 	fixedName     = regexp.MustCompile(`-o +\.?/?assay-install\.sh`)
-	// Any variable holding a mktemp path, or any trap on EXIT, written as a
-	// line of its own (optionally a YAML list item, `export`ed, quoted,
-	// commented) -- the shapes a reader rewriting the four-line form would
-	// produce.
-	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?\w+="?\$\(mktemp\b|^[ \t]*(?:-[ \t]+)?trap[ \t]+['"]`)
+	// Any variable holding a mktemp path, or a trap on EXIT (or its number,
+	// 0, alone or among other signals), written as a line of its own
+	// (optionally a YAML list item, `export`ed, quoted, commented) -- the
+	// shapes a reader rewriting the four-line form would produce. A trap on
+	// TERM or INT alone is a job's own business, not the installer's
+	// leftover (main QA of 67e2cf6, 2026-11-13: `trap 'echo stopping' TERM`
+	// in an independent GitLab job was refused as one). Read over the
+	// install job only (installJob).
+	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?\w+="?\$\(mktemp\b|^[ \t]*(?:-[ \t]+)?trap[ \t]+(?:'[^'\n]*'|"[^"\n]*")(?:[ \t]+[A-Za-z0-9]+)*?[ \t]+(?:EXIT|0)\b`)
 )
+
+// installJob is the part of a document the install line is a step of: the
+// top-level YAML block holding it -- the GitLab job whose before_script and
+// script share one shell, the `jobs:` tree of a GitHub workflow -- or, in a
+// README, the fenced example around it. What another block sets is that
+// block's own (main QA of 67e2cf6, 2026-11-13: a TERM trap in an independent
+// GitLab job of the example was refused as the installer's leftover). A
+// document with no install line is returned whole, so the leak check still
+// reads it.
+func installJob(text string) string {
+	lines := strings.Split(text, "\n")
+	topLevel := func(line string) bool {
+		return line != "" && line[0] != ' ' && line[0] != '\t' && line[0] != '#'
+	}
+	start := 0
+	for i, line := range lines {
+		if topLevel(line) {
+			start = i
+		}
+		if !strings.Contains(line, "/install.sh") || !strings.Contains(line, "curl") {
+			continue
+		}
+		end := len(lines)
+		for j := i + 1; j < len(lines); j++ {
+			if topLevel(lines[j]) {
+				end = j
+				break
+			}
+		}
+		return strings.Join(lines[start:end], "\n")
+	}
+	return text
+}
 
 // TestInstallOneLiners_LeakGuardCatchesTheFourLineForm holds the guard that
 // refuses a variable or trap left in the calling shell against the four-line
@@ -75,6 +112,9 @@ func TestInstallOneLiners_LeakGuardCatchesTheFourLineForm(t *testing.T) {
 		"    - f=$(mktemp -d)",
 		"    - t=$(mktemp) # the installer's file",
 		"    - trap \"rm -f $t\" EXIT",
+		"    - trap 'rm -f \"$t\"' EXIT TERM",
+		"    - trap 'rm -f \"$t\"' INT TERM EXIT",
+		"    - trap 'rm -f \"$t\"' 0",
 	} {
 		if !leakedIntoJob.MatchString(line + "\n") {
 			t.Errorf("leakedIntoJob does not catch %q", line)
@@ -84,6 +124,12 @@ func TestInstallOneLiners_LeakGuardCatchesTheFourLineForm(t *testing.T) {
 		"    - sh -c 't=$(mktemp) && curl -sSfL -o \"$t\" https://raw.githubusercontent.com/kun9497/assay/0123456789abcdef0123456789abcdef01234567/install.sh && sh \"$t\" -b /usr/local/bin; s=$?; rm -f \"$t\"; exit $s'",
 		"    - apk add --no-cache curl openssl",
 		"    # the temporary file, the download, the run and the clean-up",
+		// A job's own signal handling, not the installer's leftover (main
+		// QA of 67e2cf6, 2026-11-13).
+		"    - trap 'echo stopping' TERM",
+		"    - trap 'cleanup' INT TERM",
+		"    - trap - EXIT",
+		"    - trap 'echo' 10",
 	} {
 		if leakedIntoJob.MatchString(line + "\n") {
 			t.Errorf("leakedIntoJob wrongly catches %q", line)
@@ -108,7 +154,7 @@ func TestInstallOneLiners_RunTheScriptOnlyAfterItDownloaded(t *testing.T) {
 		if m := fixedName.FindString(text); m != "" {
 			t.Errorf("%s downloads the installer to a fixed name in the working directory, which overwrites a file of that name: %q", doc, m)
 		}
-		if m := leakedIntoJob.FindString(text); m != "" {
+		if m := leakedIntoJob.FindString(installJob(text)); m != "" {
 			t.Errorf("%s sets the installer's variable or trap in the calling shell, which GitLab shares with the job's own steps: %q", doc, strings.TrimSpace(m))
 		}
 		downloads := 0
@@ -155,5 +201,49 @@ func TestInstallOneLiners_PinOneCommit(t *testing.T) {
 	}
 	if len(refs) > 1 {
 		t.Errorf("the %d install one-liners pin %d different refs, want one: %v", total, len(refs), refs)
+	}
+}
+
+// TestInstallOneLiners_LeakGuardReadsTheInstallJobOnly holds installJob and
+// the guard together over document shapes: the current GitLab example with
+// an independent job added after it -- one trapping TERM, one trapping EXIT,
+// one making its own temporary file -- or before it passes, since what that
+// job sets is its own (main QA of 67e2cf6, 2026-11-13: the TERM one was
+// refused); the four-line install form ef0bc1a's example carried is still
+// refused inside the install job, and a document with no install line is
+// read whole.
+func TestInstallOneLiners_LeakGuardReadsTheInstallJobOnly(t *testing.T) {
+	b, err := os.ReadFile(repoRoot + "/docs/ci/gitlab-ci.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	current := strings.ReplaceAll(string(b), "\r\n", "\n")
+	if !strings.Contains(current, "assay_scan:\n") {
+		t.Fatalf("docs/ci/gitlab-ci.yml no longer holds the assay_scan job this test composes with")
+	}
+	independent := "independent_report:\n  script:\n    - trap 'rm -f report.tmp' EXIT\n    - t=$(mktemp)\n    - trap 'echo stopping' TERM\n    - echo report > \"$t\"\n"
+	for name, doc := range map[string]string{
+		"TERM trap after":  current + "\nindependent_report:\n  script:\n    - trap 'echo stopping' TERM\n    - echo report\n",
+		"EXIT trap after":  current + "\n" + independent,
+		"EXIT trap before": independent + "\n" + current,
+	} {
+		if m := leakedIntoJob.FindString(installJob(doc)); m != "" {
+			t.Errorf("%s: the guard refused %q outside the install job", name, strings.TrimSpace(m))
+		}
+	}
+	fourLine := strings.Replace(current,
+		"    - sh -c 't=$(mktemp) && curl -sSfL -o \"$t\" ",
+		"    - t=$(mktemp)\n    - trap 'rm -f \"$t\"' EXIT\n    - curl -sSfL -o \"$t\" ", 1)
+	if fourLine == current {
+		t.Fatalf("could not compose the four-line form from the current example")
+	}
+	if m := leakedIntoJob.FindString(installJob(fourLine)); m == "" {
+		t.Errorf("the four-line form inside the install job is not refused")
+	}
+	if m := leakedIntoJob.FindString(installJob(fourLine + "\n" + independent)); m == "" {
+		t.Errorf("the four-line form inside the install job is not refused when another job follows")
+	}
+	if got := installJob("a: 1\nb:\n  - x\n"); got != "a: 1\nb:\n  - x\n" {
+		t.Errorf("a document with no install line is not read whole: %q", got)
 	}
 }
