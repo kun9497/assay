@@ -98,7 +98,11 @@ All notable changes to this project are documented here. The format follows
   exit 1. The revision is a point of the release (`debian-4.0` includes `debian-4.0r9`; a
   statement for `debian-4.0r9` is a point statement); a bare `3` and sid stay refused. (main QA
   of 67e2cf6, 2026-11-13)
-
+- `internal/ciguard`'s guard on the CI examples reads the install job only and refuses a trap on
+  EXIT (or `0`), not every trap: 67e2cf6 refused `trap 'echo stopping' TERM` in an independent
+  GitLab job of the example as the installer's leftover. The four-line install form (`t=$(mktemp)`
+  and `trap 'rm -f "$t"' EXIT` in the calling shell) is still refused inside the install job;
+  the examples themselves are unchanged. (main QA of 67e2cf6, 2026-11-13)
 
 ## [0.18.1] - 2026-11-12
 
