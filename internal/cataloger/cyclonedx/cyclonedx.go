@@ -1140,6 +1140,21 @@ func contextFor(siblings []component, inherited osContext) osContext {
 	// (QA 2026-11-11). An OS whose ID this build does not know ("linux")
 	// declares nothing.
 	var family *pkgmeta.Distro
+	// codename is what the declarations of the one release found agree its
+	// codename is; two that state different ones contradict each other and
+	// the release carries none (PR #323 review: the first declaration's had
+	// won, so [jammy, noble] exempted under a jammy statement and [noble,
+	// jammy] did not -- exit 0 or 1 by component order).
+	codename, codenameConflict := "", false
+	noteCodename := func(d *pkgmeta.Distro) {
+		switch {
+		case d.VersionCodename == "":
+		case codename == "":
+			codename = d.VersionCodename
+		case !strings.EqualFold(codename, d.VersionCodename):
+			codenameConflict = true
+		}
+	}
 	for _, c := range siblings {
 		d := distroOf(c)
 		if d == nil {
@@ -1173,6 +1188,7 @@ func contextFor(siblings []component, inherited osContext) osContext {
 		}
 		if found == nil {
 			found = d
+			noteCodename(d)
 			continue
 		}
 		if !sameDistro(found, d) {
@@ -1181,10 +1197,8 @@ func contextFor(siblings []component, inherited osContext) osContext {
 			return osContext{mixedRelease: true}
 		}
 		// Two declarations of one release are one (D166); a codename only
-		// the later one carries is the release's, whichever came first.
-		if found.VersionCodename == "" {
-			found.VersionCodename = d.VersionCodename
-		}
+		// one of them carries is the release's, whichever came first.
+		noteCodename(d)
 		if !mixedRelease && (found.ID != d.ID || found.VersionID != d.VersionID) {
 			next := releaseScope(d)
 			merged := releaseScope(found).Merge(next)
@@ -1208,6 +1222,10 @@ func contextFor(siblings []component, inherited osContext) osContext {
 		}
 		return inherited
 	}
+	if codenameConflict {
+		codename = ""
+	}
+	found.VersionCodename = codename
 	ctx := osContext{distro: found, mixedRelease: mixedRelease}
 	if eco, err := found.Ecosystem(); err == nil {
 		ctx.ecosystem = eco

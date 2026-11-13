@@ -1169,6 +1169,9 @@ func vexTarget(kind source.TargetKind, target string, image *report.ImageRecord,
 	var t vex.Target
 	if d != nil && d.ID == "ubuntu" {
 		t.UbuntuCodename = d.VersionCodename
+		if eco, err := d.Ecosystem(); err == nil {
+			t.UbuntuCodenameKey = eco
+		}
 	}
 	if kind != source.TargetImage {
 		return t

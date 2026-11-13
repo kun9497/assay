@@ -655,6 +655,9 @@ func resolve(live []liveStatement, f matcher.Finding, target Target, matched []b
 		raw: pkgPURL, parsed: pkgParsed, ok: pkgPURL != "" && pkgErr == nil,
 		pkg: f.Package, codename: target.UbuntuCodename,
 	}
+	if target.UbuntuCodenameKey != "" && f.Package.Ecosystem != "" && f.Package.Ecosystem != target.UbuntuCodenameKey {
+		s.codename = ""
+	}
 
 	var (
 		best     liveStatement

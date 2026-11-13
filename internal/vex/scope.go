@@ -34,6 +34,15 @@ type Target struct {
 	// writes distro=<codename> (distro=jammy) where syft writes
 	// distro=ubuntu-22.04, so an Ubuntu package answers to both spellings.
 	UbuntuCodename string
+	// UbuntuCodenameKey is the ecosystem key of the release UbuntuCodename
+	// was read from, "" when it names none. The codename is evidence for
+	// the packages keyed to that release (or unkeyed) only: an SBOM keys
+	// each branch by its own OS, so a package under a 22.04 branch of a
+	// document whose own OS is another release must not answer to that
+	// release's codename (PR #323 review: a statement spelling a codename
+	// the table does not know exempted a package keyed Ubuntu:22.04:LTS,
+	// while the numeric spelling of the same release was refused).
+	UbuntuCodenameKey string
 }
 
 // imageRef is one image product of a statement, reduced to what can be

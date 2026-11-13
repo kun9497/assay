@@ -95,3 +95,62 @@ func TestRun_VEXUbuntuCodenameFromTheSBOMOperatingSystem(t *testing.T) {
 		})
 	}
 }
+
+// PR #323 review, through Run: the document's own OS is Ubuntu 27.04 with a
+// codename the build's table does not know (tangy), and apt sits under a
+// branch that declares 22.04 and is keyed Ubuntu:22.04:LTS. A statement
+// spelling tangy names 27.04 and must not exempt the 22.04 install, as
+// ubuntu-27.04 does not; the numeric 22.04 statement still applies. And two
+// declarations of 22.04 that disagree on the codename carry none, so a
+// jammy statement is refused in either component order.
+func TestRun_VEXUbuntuCodenameIsEvidenceForItsOwnRelease(t *testing.T) {
+	db := vexDB(t, "Ubuntu:22.04:LTS", vexAdv{"UBUNTU-2031-0106", "CVE-2031-9106", "apt", "2.4.99"})
+	want := pair{"apt", "CVE-2031-9106"}
+	osOf := func(version, pretty, codename string) string {
+		return `{"type":"operating-system","name":"ubuntu","version":"` + version + `","properties":[{"name":"syft:distro:id","value":"ubuntu"},` +
+			`{"name":"syft:distro:versionID","value":"` + version + `"},{"name":"syft:distro:prettyName","value":"` + pretty + `"},` +
+			`{"name":"syft:distro:versionCodename","value":"` + codename + `"}]}`
+	}
+	const apt = `{"type":"library","name":"apt","version":"2.4.14","purl":"pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-22.04"}`
+	write := func(name, components string) string {
+		p := filepath.Join(t.TempDir(), name+".cdx.json")
+		doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[` + components + `]}`
+		if err := os.WriteFile(p, []byte(doc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return "sbom:" + p
+	}
+	branch := write("branch", osOf("27.04", "Ubuntu 27.04", "tangy")+`,{"type":"application","name":"a","version":"1","components":[`+osOf("22.04", "Ubuntu 22.04.5 LTS", "jammy")+`,`+apt+`]}`)
+	jammyNoble := write("jammy-noble", osOf("22.04", "Ubuntu 22.04.5 LTS", "jammy")+","+osOf("22.04", "Ubuntu 22.04.5 LTS", "noble")+","+apt)
+	nobleJammy := write("noble-jammy", osOf("22.04", "Ubuntu 22.04.5 LTS", "noble")+","+osOf("22.04", "Ubuntu 22.04.5 LTS", "jammy")+","+apt)
+	for _, tc := range []struct {
+		name, sbom, statement string
+		suppressed            bool
+	}{
+		{"27.04 document, statement tangy", branch, "tangy", false},
+		{"27.04 document, statement ubuntu-27.04", branch, "ubuntu-27.04", false},
+		{"27.04 document, statement ubuntu-22.04", branch, "ubuntu-22.04", true},
+		{"jammy then noble, statement jammy", jammyNoble, "jammy", false},
+		{"noble then jammy, statement jammy", nobleJammy, "jammy", false},
+		{"jammy then noble, statement ubuntu-22.04", jammyNoble, "ubuntu-22.04", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var out, errOut bytes.Buffer
+			code := Run(context.Background(), db, tc.sbom, Options{Output: "json", FailOnUnknown: true,
+				VEXFiles: []string{writeVEX(t, stmt("CVE-2031-9106", product("pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro="+tc.statement)))}}, &out, &errOut)
+			var doc report.Document
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+				t.Fatalf("stdout is not one JSON document: %v\nstderr: %s", err, errOut.String())
+			}
+			sup, kept := suppressedPairs(doc), pairsOf(doc.Findings)
+			wantCode := 1
+			if tc.suppressed {
+				wantCode = 0
+			}
+			if sup[want] != tc.suppressed || kept[want] == tc.suppressed || code != wantCode {
+				t.Fatalf("suppressed = %v, kept = %v, exit %d; want suppressed %v, exit %d\nstderr: %s",
+					sup[want], kept[want], code, tc.suppressed, wantCode, errOut.String())
+			}
+		})
+	}
+}
