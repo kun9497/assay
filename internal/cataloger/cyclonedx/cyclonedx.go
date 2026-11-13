@@ -1180,6 +1180,11 @@ func contextFor(siblings []component, inherited osContext) osContext {
 			// language package's VEX must retain the conflicting OS evidence.
 			return osContext{mixedRelease: true}
 		}
+		// Two declarations of one release are one (D166); a codename only
+		// the later one carries is the release's, whichever came first.
+		if found.VersionCodename == "" {
+			found.VersionCodename = d.VersionCodename
+		}
 		if !mixedRelease && (found.ID != d.ID || found.VersionID != d.VersionID) {
 			next := releaseScope(d)
 			merged := releaseScope(found).Merge(next)
@@ -1294,6 +1299,15 @@ func distroOf(c component) *pkgmeta.Distro {
 			d.VersionID = p.Value
 		case "syft:distro:prettyName":
 			d.PrettyName = p.Value
+		case "syft:distro:versionCodename":
+			// os-release's VERSION_CODENAME, as syft copies it. On Ubuntu
+			// it is the codename evidence a VEX statement spelled
+			// distro=jammy needs (vex.Target.UbuntuCodename), which the
+			// image path reads from os-release itself: main QA of 67e2cf6
+			// (2026-11-13) had the same JAMMY statement suppress two
+			// advisories on the Ubuntu image and none on syft's SBOM of it,
+			// whose OS component said versionCodename=jammy all along.
+			d.VersionCodename = p.Value
 		}
 	}
 	// Fall back to the component's own fields: the properties are a syft

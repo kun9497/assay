@@ -28,10 +28,11 @@ type Target struct {
 	// the index it was listed in (D119's ImageRecord). Either identifies the
 	// image; a digest the reference was typed with is always one of them.
 	Digests []string
-	// UbuntuCodename is os-release VERSION_CODENAME on an Ubuntu target, ""
-	// otherwise. Canonical's OpenVEX writes distro=<codename> (distro=jammy)
-	// where syft writes distro=ubuntu-22.04, so an Ubuntu package answers to
-	// both spellings.
+	// UbuntuCodename is os-release VERSION_CODENAME on an Ubuntu target --
+	// read from the image, or from an SBOM's operating-system component
+	// (syft:distro:versionCodename) -- "" otherwise. Canonical's OpenVEX
+	// writes distro=<codename> (distro=jammy) where syft writes
+	// distro=ubuntu-22.04, so an Ubuntu package answers to both spellings.
 	UbuntuCodename string
 }
 

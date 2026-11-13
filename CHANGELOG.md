@@ -90,6 +90,15 @@ All notable changes to this project are documented here. The format follows
   other two pass to the release normalisation, suppressing two advisories and turning exit 1 into
   0 on a document that carried no codename; the numeric `ubuntu-22.04` still applies on its own
   and `noble` is still refused. (main QA of ef0bc1a, 2026-11-13)
+- VEX: a CycloneDX operating-system component's `syft:distro:versionCodename` is the scan's
+  codename evidence, as os-release's `VERSION_CODENAME` is on an image, so a `jammy` / `JAMMY` /
+  `ubuntu-jammy` statement applies to syft's SBOM of an Ubuntu image as it does to the image.
+  67e2cf6 read only the id, version and pretty name off the component: the same `JAMMY` document
+  suppressed two advisories on the image and none on its SBOM, whose OS component said
+  `versionCodename=jammy` all along. A codename that contradicts the OS version, an OS with no
+  codename, and an OS declared only in another branch of the document (D166) still exempt
+  nothing. (main QA of 67e2cf6, 2026-11-13)
+
 
 ## [0.18.1] - 2026-11-12
 

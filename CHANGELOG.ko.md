@@ -67,6 +67,13 @@
   `ubuntu-jammy` 모두 스캔에 코드네임 증거(os-release 또는 설치 purl)가 있어야 합니다. ef0bc1a는 소문자 맨 철자는
   거부하고 나머지 둘은 릴리스 정규화로 넘겨 코드네임이 없는 문서에서 advisory 2건을 억제하고 종료 1을 0으로 바꿨습니다;
   숫자 `ubuntu-22.04`는 전과 같이 단독으로 적용되고 `noble`은 여전히 거부됩니다. (main ef0bc1a QA, 2026-11-13)
+- VEX: CycloneDX operating-system 컴포넌트의 `syft:distro:versionCodename`이 이미지의 os-release
+  `VERSION_CODENAME`과 같은 코드네임 증거가 되어, `jammy` / `JAMMY` / `ubuntu-jammy` 문장이 Ubuntu 이미지의
+  syft SBOM에도 이미지와 똑같이 적용됩니다. 67e2cf6는 컴포넌트에서 id·version·prettyName만 읽어, 같은 `JAMMY`
+  문서가 이미지에서는 advisory 2건을 억제하고 SBOM에서는 0건이었습니다(OS 컴포넌트에 `versionCodename=jammy`가
+  있었는데도). OS 버전과 모순되는 코드네임, 코드네임 없는 OS, 문서의 다른 분기에만 선언된 OS(D166)는
+  여전히 아무것도 면제하지 않습니다. (main 67e2cf6 QA, 2026-11-13)
+
 
 ## [0.18.1] - 2026-11-12
 
