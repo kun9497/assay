@@ -515,8 +515,15 @@ func markSourceContradiction(kept *pkgmeta.Package, a, b pkgmeta.Package) {
 // join must not drop what one listing confirmed (release check of main
 // b732cac: the twin's purl replaced the kept one whole, and a VEX statement
 // scoped by the dropped `distro=` no longer reached the install). On a
-// qualifier both state, kept's value stands: the install is the kept
-// listing, and the other's value for the same qualifier is at best the same
+// qualifier both state, kept's value stands -- except that of two spellings
+// of one Ubuntu release the codename is kept whichever listing had it, since
+// it is the evidence a codename statement needs (vex.qualifierMatches) and
+// the numeric spelling states nothing the key does not (main QA of 67e2cf6,
+// 2026-11-13: apt listed as ubuntu-22.04 at the top and jammy under the
+// subject lost the codename, and a JAMMY statement that applied with the
+// listings the other way round was refused -- 2 advisories back, exit 1
+// for the one order). Otherwise the install is the kept listing, and the
+// other's value for the same qualifier is at best the same
 // and at worst another listing's (release check of main 60c512c: a bare
 // twin's `distro=alpine-3.20` overwrote the install's `alpine-3.19`, the
 // release the package was evaluated under, and a VEX statement written for
@@ -560,6 +567,12 @@ func mergePURL(kept, other, ecosystem string) string {
 				}
 			}
 			delete(kp.Qualifiers, "distro")
+		}
+	}
+	if od, ok := op.Qualifiers["distro"]; ok && kp.Type == "deb" && pkgmeta.UbuntuCodename(od) != "" {
+		if kd := kp.Qualifiers["distro"]; pkgmeta.UbuntuCodename(kd) == "" &&
+			pkgmeta.CanonicalDistroQualifier(kd) == pkgmeta.CanonicalDistroQualifier(od) {
+			kp.Qualifiers["distro"] = od
 		}
 	}
 	return kp.String()

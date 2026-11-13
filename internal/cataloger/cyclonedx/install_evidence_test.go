@@ -152,3 +152,36 @@ func TestTwoBareReleaseClaimsLeaveUnkeyedInstallUnevaluated(t *testing.T) {
 		}
 	}
 }
+
+// Main QA of 67e2cf6 (2026-11-13): one apt listed with distro=ubuntu-22.04
+// in one place and distro=jammy in the other is one install, and the
+// merged purl keeps the codename -- the evidence a codename statement
+// needs -- whichever listing came first and however the codename is
+// spelled. A codename of another release is not the same install's and is
+// not taken; a Debian codename is not evidence of anything and the kept
+// listing's spelling stands.
+func TestMergedUbuntuListingsKeepTheCodename(t *testing.T) {
+	const numeric = "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-22.04"
+	for _, tc := range []struct{ top, subject, want string }{
+		{numeric, "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=jammy", "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=jammy"},
+		{"pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=jammy", numeric, "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=jammy"},
+		{numeric, "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=JAMMY", "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=JAMMY"},
+		{numeric, "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-jammy", "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-jammy"},
+		{numeric, numeric, numeric},
+	} {
+		pkgs := parseListingGroups(t, []string{tc.top}, []string{tc.subject})
+		if len(pkgs) != 1 || pkgs[0].PURL != tc.want || pkgs[0].Ecosystem != "Ubuntu:22.04:LTS" {
+			t.Errorf("top %s, subject %s: got %+v, want one apt with purl %s", tc.top, tc.subject, pkgs, tc.want)
+		}
+	}
+	// noble names another release: two installs, each keyed to its own.
+	pkgs := parseListingGroups(t, []string{numeric}, []string{"pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=noble"})
+	if len(pkgs) != 2 || pkgs[0].PURL != numeric {
+		t.Errorf("noble beside ubuntu-22.04: got %+v, want two installs with the first purl unchanged", pkgs)
+	}
+	const bookworm = "pkg:deb/debian/apt@2.6.1?arch=amd64&distro=debian-12"
+	pkgs = parseListingGroups(t, []string{bookworm}, []string{"pkg:deb/debian/apt@2.6.1?arch=amd64&distro=bookworm"})
+	if len(pkgs) != 1 || pkgs[0].PURL != bookworm {
+		t.Errorf("bookworm beside debian-12: got %+v, want one apt keeping the kept spelling", pkgs)
+	}
+}
