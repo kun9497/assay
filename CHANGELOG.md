@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- CI examples (`docs/ci/github-actions.yml`, `docs/ci/gitlab-ci.yml`): the install is one `sh -c`
+  line, the READMEs' shape without sudo, so its temporary file, variable and clean-up never reach
+  the job's own steps. GitLab runs `before_script` and `script` in one shell, and the four-line
+  form's `trap 'rm -f "$t"' EXIT` deleted a `report.txt` a later step had put in `t` and left the
+  installer's temporary file behind. `internal/ciguard` holds the one shape and refuses a
+  variable or trap set in the calling shell. (main QA of ef0bc1a, 2026-11-13)
 - Image scans: `etc/debian_version` (Debian's point release, D121) is asked for on a Debian
   image only, in the exact-path pass every image already makes for Bitnami's legacy marker.
   Asked for in the first pass beside os-release, it had been read, link-followed and charged to

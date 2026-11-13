@@ -8,6 +8,10 @@
 ## [Unreleased]
 
 ### Fixed
+- CI 예제(`docs/ci/github-actions.yml`, `docs/ci/gitlab-ci.yml`): 설치가 README와 같은 모양의 `sh -c` 한 줄(sudo 없이)이라
+  임시 파일·변수·정리가 작업의 다른 단계에 닿지 않습니다. GitLab은 `before_script`와 `script`를 한 셸에서 실행하므로
+  네 줄 형태의 `trap 'rm -f "$t"' EXIT`가 뒤 단계가 `t`에 넣은 `report.txt`를 지우고 설치용 임시 파일을 남겼습니다.
+  `internal/ciguard`가 한 모양만 허용하고 호출 셸에 남는 변수·trap을 거부합니다. (main ef0bc1a QA, 2026-11-13)
 - 이미지 스캔: `etc/debian_version`(Debian 포인트 릴리스, D121)을 Debian 이미지에서만, 모든 이미지가 Bitnami 레거시
   마커를 위해 이미 지나는 정확 경로 패스에서 요청합니다. os-release와 같은 첫 패스에서 요청할 때는 모든 이미지에서 읽고
   링크를 따라가고 읽기 예산에 셌습니다 — 그 이름의 파일이 파일 한도(512 MiB)를 넘는 Alpine 이미지는 패키지를 읽기 전에
