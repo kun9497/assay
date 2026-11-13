@@ -43,7 +43,7 @@ var pipedIntoSh = regexp.MustCompile(`install\.(sh|ps1)[^\n]*\|\s*(sudo(\s+-\S+)
 // directory is refused: the first revision wrote `./assay-install.sh` and
 // overwrote a file of that name (main QA of 672fe7a, 2026-11-13).
 var (
-	pinnedScript  = `https://raw\.githubusercontent\.com/kun9497/assay/[0-9a-f]{40}/install\.sh`
+	pinnedScript = `https://raw\.githubusercontent\.com/kun9497/assay/[0-9a-f]{40}/install\.sh`
 	// Anchored to the line, so nothing may follow the shape: a trailing
 	// `|| true` or `; exit 0` would hand the caller a success again (PR
 	// #315 review).
