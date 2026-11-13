@@ -558,10 +558,13 @@ func mergePURL(kept, other, ecosystem string) string {
 	// Language packages use their language ecosystem regardless of the OS
 	// they are installed on. Their distro qualifier still scopes a VEX.
 	_, language := pkgmeta.EcosystemForPURLType(kp.Type)
+	// A codename spells its release too (CanonicalDistroQualifier): a kept
+	// `distro=noble` under a package the document keys to 22.04 is the same
+	// contradiction as `ubuntu-24.04`, and had passed here unrecognised.
 	if d, ok := kp.Qualifiers["distro"]; ok && ecosystem != "" && !language {
-		if eco, known := pkgmeta.EcosystemForDistroQualifier(d); known && eco != ecosystem {
+		if eco, known := pkgmeta.EcosystemForDistroQualifier(pkgmeta.CanonicalDistroQualifier(d)); known && eco != ecosystem {
 			if od, ok := op.Qualifiers["distro"]; ok {
-				if oeco, known := pkgmeta.EcosystemForDistroQualifier(od); known && oeco == ecosystem {
+				if oeco, known := pkgmeta.EcosystemForDistroQualifier(pkgmeta.CanonicalDistroQualifier(od)); known && oeco == ecosystem {
 					kp.Qualifiers["distro"] = od
 					return kp.String()
 				}

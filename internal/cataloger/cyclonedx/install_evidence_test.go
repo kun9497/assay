@@ -185,3 +185,31 @@ func TestMergedUbuntuListingsKeepTheCodename(t *testing.T) {
 		t.Errorf("bookworm beside debian-12: got %+v, want one apt keeping the kept spelling", pkgs)
 	}
 }
+
+// A codename of ANOTHER release beside the numeric spelling, both keyed by
+// the document's own OS (22.04): the codename is not this install's and is
+// not preferred, and a kept `noble` is the contradiction `ubuntu-24.04`
+// would be -- the merged purl names the release the package is judged on,
+// in either order (mergePURL had read the codename spelling as no release
+// at all and let it stand).
+func TestMergedUbuntuListingsRefuseAnotherReleasesCodename(t *testing.T) {
+	const (
+		start   = `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,`
+		ubuntu  = `{"type":"operating-system","name":"ubuntu","version":"22.04","properties":[{"name":"syft:distro:id","value":"ubuntu"},{"name":"syft:distro:versionID","value":"22.04"}]}`
+		numeric = "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-22.04"
+		noble   = "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=noble"
+	)
+	listing := func(ref, purl string) string {
+		return `{"type":"library","name":"apt","version":"2.4.14","bom-ref":"` + ref + `","purl":"` + purl + `"}`
+	}
+	for _, tc := range [][2]string{{numeric, noble}, {noble, numeric}} {
+		doc := start + `"components":[` + ubuntu + `,` + listing("first", tc[0]) + `],"metadata":{"component":{"type":"container","name":"s","components":[` + listing("second", tc[1]) + `]}}}`
+		target, _, err := Parse(strings.NewReader(doc))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(target.Packages) != 1 || target.Packages[0].PURL != numeric || target.Packages[0].Ecosystem != "Ubuntu:22.04:LTS" {
+			t.Errorf("top %s, subject %s: got %+v, want one apt keyed Ubuntu:22.04:LTS with purl %s", tc[0], tc[1], target.Packages, numeric)
+		}
+	}
+}
