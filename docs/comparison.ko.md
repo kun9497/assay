@@ -24,7 +24,7 @@
 | Alpaquita · Hummingbird · CleanStart | ✓ (D95, D98, D101) | 일부만 | ✗ | grype는 Hummingbird 프로바이더 보유; Alpaquita·CleanStart는 assay 단독 |
 | openSUSE Leap · SLE | ✓ | ✗ v6에 데이터 없음 | SLE ✓, Leap은 실측 공백 | SLE BCI에서 trivy는 실재하되 다른 어휘를 씁니다: finding을 SUSE-SU 패치 advisory로 키 잡고 CVE는 References URL 안에만 실어, D105 첫 측정이 "trivy가 아무것도 못 찾았다"로 오독됐다가 차등이 그 CVE를 추출하도록 배우고서야 바로잡혔습니다(추출 후 assay와 agree 182/188). Leap 15.6 이미지에서는 trivy가 진짜로 빈 취약점 목록을 반환하며(릴리스를 EOSL로 표시) assay는 12건을 보고 — 이 타깃은 정보 모드 유지 |
 | Bottlerocket · CoreOS | ✗ | ✗ | ✓ | trivy 단독 |
-| 언어 생태계 | 8종 | 8종 | 더 넓음 | 공통 8종(Go·npm·PyPI·crates.io·Maven·RubyGems·NuGet·Packagist); 셋 다 pnpm과 yarn berry 락파일을 읽습니다(assay는 D103부터); trivy는 여기에 더해 Conan·Dart·Swift·Elixir까지 다룹니다. assay는 이 8종을 대상으로 지정된 디렉터리·락파일·jar·Go 바이너리에서만 읽으며 — **컨테이너 이미지 내부에서는 읽지 않습니다**(D70, 미룸). grype는 이미지 안에 설치된 언어 패키지를 카탈로그화하고(측정: 아래 SLES·RHEL 행), trivy 문서는 이미지 대상에 대해 이를 다룬다고 명시합니다 — 다만 차등이 호출하는 방식으로 돌리면 trivy는 두 이미지 모두 OS 결과만 돌려주어 어느 쪽도 뒷받침하지 않습니다 |
+| 언어 생태계 | 8종 | 8종 | 더 넓음 | 공통 8종(Go·npm·PyPI·crates.io·Maven·RubyGems·NuGet·Packagist); 셋 다 pnpm과 yarn berry 락파일을 읽습니다(assay는 D103부터); trivy는 여기에 더해 Conan·Dart·Swift·Elixir까지 다룹니다. assay는 이 8종을 대상으로 지정된 디렉터리·락파일·jar·Go 바이너리에서 읽고, 컨테이너 이미지 안에서는 전역 `node_modules` 루트 아래의 npm과 표준 bin 디렉터리 바로 아래의 Go 바이너리만 읽습니다(D160, v0.16.0부터) — **이미지 안의 그 밖의 것은 읽지 않습니다**(D70, 미룸). grype는 이미지 안에 설치된 언어 패키지를 카탈로그화하고(측정: 아래 SLES·RHEL 행), trivy 문서는 이미지 대상에 대해 이를 다룬다고 명시합니다 — 다만 차등이 호출하는 방식으로 돌리면 trivy는 두 이미지 모두 OS 결과만 돌려주어 어느 쪽도 뒷받침하지 않습니다 |
 | 보강 피드 게이트 | NVD · EPSS · KEV · EOL | NVD · EPSS · KEV · EOL | 내장 없음 | trivy는 심각도 중심 — EPSS/KEV/EOL을 게이트로 내장하지 않음 |
 | KISA / KNVD | ✓ 1급 소스 | ✗ | ✗ | assay가 기존 도구 재사용 대신 존재하는 이유 |
 | 취약점 외 스캔 | ✗ (의도) | ✗ (의도) | 설정오류 · 시크릿 · 라이선스 | trivy는 멀티 스캐너 — 격차가 아니라 범위의 차이 |

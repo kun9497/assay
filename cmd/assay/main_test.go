@@ -1015,16 +1015,20 @@ func TestUsage_DocumentsRegistryAuthEnvironment(t *testing.T) {
 // same binary's scan stderr listed the paths it had read: the help names
 // what is read and what is not, as the scan does.
 func TestUsage_NamesWhatAScanReads(t *testing.T) {
+	// The help is wrapped by hand; the claims are held on the unwrapped
+	// text so a rewrap cannot hide a stale sentence or break a held one.
+	flat := strings.Join(strings.Fields(usage), " ")
 	for _, want := range []string{"CycloneDX", "SPDX 2.2/2.3", "docker-archive:", "oci-dir:",
 		"Go binary", "jar", "pnpm", "requirements.txt", "Cargo.lock", "application packages", "(D70)",
-		"node_modules roots", "Go binaries directly in the standard bin directories", "(D160)", "Python"} {
-		if !strings.Contains(usage, want) {
-			t.Errorf("usage does not name %q", want)
+		"npm packages under the global node_modules roots", "Go binaries directly in the standard bin directories", "(D160)",
+		"other Go binaries - are not read, and the scan's stderr names what was (D70)"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("usage does not say %q", want)
 		}
 	}
 	for _, stale := range []string{"go.mod alone", "(Go, npm, PyPI, Alpine)", "SBOM-driven",
-		"application packages inside\n                  it are not read"} {
-		if strings.Contains(usage, stale) {
+		"application packages inside it are not read"} {
+		if strings.Contains(flat, stale) {
 			t.Errorf("usage still says %q", stale)
 		}
 	}
