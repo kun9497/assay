@@ -1467,7 +1467,7 @@ func reportPlatform(ref string, c source.PlatformChoice, stderr io.Writer) *repo
 // stops at the next tar entry of whichever pass it is in, and its error comes
 // back unchanged for Run to name.
 func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgmeta.Target, cyclonedx.Stats, report.InventoryScopeRecord, error) {
-	wantPaths := append([]string{osReleasePath, debianVersionPath, dpkgDBPath}, apkDBPaths...)
+	wantPaths := append([]string{osReleasePath, dpkgDBPath}, apkDBPaths...)
 	files, err := img.Files(ctx, append(wantPaths, rpmDBPaths()...))
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
@@ -1519,8 +1519,24 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", osReleasePath, err)
 		}
 		if d.ID == "debian" {
-			if dv, ok := files[debianVersionPath]; ok && dv.Data != nil {
-				d.PointRelease = pkgmeta.DebianPointRelease(string(dv.Data), d.VersionID)
+			// Debian's point release (D121) is asked for in a second pass
+			// over the layers, here and nowhere else. Asked for in the
+			// first pass beside os-release, the path had been read,
+			// link-followed and charged to the read budget on EVERY image:
+			// an Alpine image with a 4,097-byte file of that name failed the
+			// per-file limit before its packages were read, and one with a
+			// symlink there opened every layer once more (main QA of
+			// 672fe7a, 2026-11-13; #310 had only withdrawn the unread
+			// note). The pass costs a Debian image one more read of its
+			// layers (D123); what it cannot resolve is reported unread as
+			// any wanted path is, since the purls then spell the major alone
+			// and a point-release VEX statement does not reach them.
+			dv, err := img.Files(ctx, []string{debianVersionPath})
+			if err != nil {
+				return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
+			}
+			if f, ok := dv[debianVersionPath]; ok && f.Data != nil {
+				d.PointRelease = pkgmeta.DebianPointRelease(string(f.Data), d.VersionID)
 			}
 		}
 		target.Distro = &d
@@ -1553,20 +1569,6 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 				ecosystem = eco
 			}
 		}
-	}
-
-	// debian_version was asked for in the one Files pass above, beside
-	// os-release, so a Debian image pays no second walk of its layers for
-	// its point release. Any other image never consults it, and a failure to
-	// resolve it there is not the target's incompleteness: an Alpine image
-	// whose etc/debian_version was a symbolic link cycle had exited 2 under
-	// --fail-on-incomplete=target, with the file listed unread, for a path
-	// the scan would not have read (Linux QA of v0.18.1, 2026-11-13). A
-	// Debian image's unreadable debian_version stays reported: its purls
-	// then spell the major alone and a point-release VEX statement does not
-	// reach them (D121), which the reader should know.
-	if target.Distro == nil || target.Distro.ID != "debian" {
-		img.Disregard(debianVersionPath)
 	}
 
 	// Dispatched on which database the image actually carries, not on what

@@ -8875,7 +8875,9 @@ written from the image's syft SBOM spells `debian-12.11`, so every such statemen
 dropped; the independent review the same day found the root cause instead: syft reads
 `/etc/debian_version` (`supplementDebianVersion`) and the image path did not. Since v0.18.1 the
 image path reads it too (`Distro.PointRelease`, D121 parity), the purl spells `debian-12.11`,
-the strict rule stands, and a statement for 12.10 does not exonerate a 12.11 image. Conflicting
+the strict rule stands, and a statement for 12.10 does not exonerate a 12.11 image. Since the main QA
+of 672fe7a (2026-11-13) the file is asked for in a second pass over the layers, on a Debian image
+only: asked for in the first pass it had been read and charged on every image. Conflicting
 point releases leave only their shared advisory key
 available for matching -- the Mixed scope two merged listings reach, and, since the 2026-11-13
 Linux QA of v0.18.1, the same for one listing whose local OS component and purl declare two

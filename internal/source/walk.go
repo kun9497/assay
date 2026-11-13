@@ -92,24 +92,6 @@ func (img *Image) Unresolved() []Unresolved {
 // --fail-on-incomplete sees it without a second mechanism.
 func (img *Image) NoteUnresolved(p, reason string) { img.noteUnresolved(p, reason) }
 
-// Disregard withdraws a path from Unresolved. A caller asks for it in the
-// same Files pass as the paths it needs -- one walk of every layer instead
-// of two -- and learns from what that pass returned that this image never
-// consults it. What the scan does not read cannot leave the scan
-// incomplete, so the path is not reported unread (Linux QA of v0.18.1,
-// 2026-11-13: an Alpine image whose etc/debian_version was a symbolic
-// link cycle exited 2 under --fail-on-incomplete=target for a file only a
-// Debian image reads).
-func (img *Image) Disregard(p string) {
-	kept := img.unresolved[:0]
-	for _, u := range img.unresolved {
-		if u.Path != p {
-			kept = append(kept, u)
-		}
-	}
-	img.unresolved = kept
-}
-
 func (img *Image) noteUnresolved(p, reason string) {
 	for _, u := range img.unresolved {
 		if u.Path == p {
