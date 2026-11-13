@@ -8880,7 +8880,16 @@ point releases leave only their shared advisory key
 available for matching -- the Mixed scope two merged listings reach, and, since the 2026-11-13
 Linux QA of v0.18.1, the same for one listing whose local OS component and purl declare two
 (12.10 beside `distro=debian-12.11`): v0.18.0 and v0.18.1 had let the OS component's point
-release pass as the install's and a 12.10 statement suppress the finding. Ubuntu codenames must agree with the evaluated Ubuntu release. A
+release pass as the install's and a 12.10 statement suppress the finding. The main QA of 672fe7a the
+same day found the contradiction lost again when a second listing of the install was merged onto
+the first: the scope had kept the local OS on a contradiction and the join keeps the kept
+listing's purl, so apt listed as 12.15 at the top level and 12.14 under the subject was
+suppressed by a 12.15 statement while the other way round it was kept. A listing whose purl
+contradicts its local OS is Mixed from the start, as two contradicting listings merge to, in
+every position. A Debian or Ubuntu codename in a purl's `distro=` (`bookworm`; the purl spec's own deb
+example is the codename `jessie`) names the major -- in the statement, in the install's purl and in
+the key an OS-less document is given: it confirms a local point release of that major and proves none of
+its own (main QA of 672fe7a). Ubuntu codenames must agree with the evaluated Ubuntu release. A
 language package matches an OS-qualified product through its explicit PURL qualifier and
 the local OS evidence when available. Conflicting sibling OS families prevent this exemption.
 Compatible descriptions of one installation, such as Oracle Linux 9 and 9.8, retain the

@@ -48,6 +48,23 @@ func TestDistroQualifierScope(t *testing.T) {
 		{"npm explicit OS", "npm", "", "npm", "alpine-3.19.9", "alpine-3.19", "alpine-3.19", false, true},
 		{"npm other OS", "npm", "", "npm", "alpine-3.20", "alpine-3.19", "alpine-3.19", false, false},
 		{"rolling repo alone cannot prove release", "apk", "wolfi", "Wolfi", "", "", "wolfi-2026", false, false},
+		// Main QA of 672fe7a (2026-11-13): a Debian codename in the purl names
+		// the major. It confirms the local OS's point release without
+		// contradicting it, proves no point release of its own, and another
+		// codename contradicts the local OS.
+		{"Debian codename under the local point release, statement that point release", "deb", "debian", "Debian:12", "debian-12.15", "bookworm", "debian-12.15", false, true},
+		{"family-prefixed Debian codename under the local point release", "deb", "debian", "Debian:12", "debian-12.15", "debian-bookworm", "debian-12.15", false, true},
+		{"Debian codename under the local point release, statement the major", "deb", "debian", "Debian:12", "debian-12.15", "bookworm", "debian-12", false, true},
+		{"Debian codename under the major alone, statement a point release", "deb", "debian", "Debian:12", "debian-12", "bookworm", "debian-12.15", false, false},
+		{"Debian codename alone, statement a point release", "deb", "debian", "Debian:12", "", "bookworm", "debian-12.15", false, false},
+		{"Debian codename under another local point release", "deb", "debian", "Debian:12", "debian-12.14", "bookworm", "debian-12.15", false, false},
+		{"another Debian codename under the local point release", "deb", "debian", "Debian:12", "debian-12.15", "bullseye", "debian-12.15", false, false},
+		{"Ubuntu codename purl under its local release, statement that release", "deb", "ubuntu", "Ubuntu:22.04:LTS", "ubuntu-22.04", "jammy", "ubuntu-22.04", false, true},
+		// The statement spelled as the codename (the SBOM purl copied verbatim)
+		// is the major's statement.
+		{"statement spelled as the Debian codename applies as the major", "deb", "debian", "Debian:12", "debian-12.15", "bookworm", "bookworm", false, true},
+		{"statement spelled as another Debian codename does not", "deb", "debian", "Debian:12", "debian-12.15", "bookworm", "bullseye", false, false},
+		{"upper-case numbered release compares as the release", "deb", "debian", "Debian:12", "debian-12.15", "Debian-12", "debian-12.15", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := pkgmeta.PURL{Type: tc.typ, Namespace: tc.namespace, Qualifiers: map[string]string{"distro": tc.installed}}
