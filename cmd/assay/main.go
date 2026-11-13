@@ -71,9 +71,13 @@ Commands:
                   the jars in it, without running any package manager; a
                   go.mod names what the module requires, not what a build
                   would link (scan the binary for that). An image is
-                  checked for its OS packages; application packages inside
-                  it are not read, and the scan says so (D70). What a bare
-                  path names is decided by its content; prefix it with
+                  checked for its OS packages (and Bitnami markers), plus
+                  the npm packages under the global node_modules roots and
+                  the Go binaries directly in the standard bin directories
+                  (D160); application packages anywhere else - Python,
+                  Java, other node_modules, other Go binaries - are not
+                  read, and the scan's stderr names what was (D70). What a
+                  bare path names is decided by its content; prefix it with
                   sbom:, file:, or dir: to say which it is when that would
                   be ambiguous.
   db update       Download the published vulnerability database

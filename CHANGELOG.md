@@ -33,6 +33,11 @@ All notable changes to this project are documented here. The format follows
   a failed download with nothing installed -- `sh` reads nothing and exits clean, and the pipe's
   status is `sh`'s -- so a CI step saw success. `internal/ciguard` now holds the shape. (Linux QA
   of v0.18.1, 2026-11-13)
+- `assay` help and `docs/integrations.md` say what an image scan reads of application packages
+  -- the npm packages under the global `node_modules` roots and the Go binaries directly in the
+  standard bin directories (D160) -- and that the rest are not read, as the scan's own stderr
+  note has said since v0.16.0. The help had still said application packages inside an image are
+  not read at all. (Linux QA of v0.18.1, 2026-11-13)
 
 ## [0.18.1] - 2026-11-12
 

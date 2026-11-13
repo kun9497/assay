@@ -69,12 +69,14 @@ scan's inventory actually uses and stays blind to ratings on purpose (D59); pass
 `--db-max-rating-age` separately to cover NVD/EPSS/KEV, since ratings are additive and get
 their own gate rather than widening the first one.
 
-This gate covers the image's operating-system packages. npm, Python, Java and Go
-dependencies installed inside the image are not inventoried by an image scan (D70,
-[deferred](deferred-decisions.md)), so a pass here says nothing about them — for those, gate
-the application's own lockfile or source directory (`assay scan dir:.`), its built binary or
-jar, or an SBOM of the image. Every image scan says this itself (D141): a `note:` line on
-stderr, and an `assay/inventory-scope` note in SARIF, so the code-scanning tab never shows an
+This gate covers the image's operating-system packages, plus the npm packages under the
+global `node_modules` roots and the Go binaries directly in the standard bin directories
+(D160). Application packages anywhere else — Python, Java, `node_modules` and Go binaries
+elsewhere — are not inventoried by an image scan (D70, [deferred](deferred-decisions.md)), so a
+pass here says nothing about them — for those, gate the application's own lockfile or source
+directory (`assay scan dir:.`), its built binary or jar, or an SBOM of the image. Every image
+scan says this itself (D141): a `note:` line on stderr naming the paths it read and what it did
+not, and an `assay/inventory-scope` note in SARIF, so the code-scanning tab never shows an
 empty image scan without it.
 
 The `security-events: write` permission is what lets the workflow upload to code scanning.
