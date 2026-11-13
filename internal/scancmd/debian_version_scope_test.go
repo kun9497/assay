@@ -5,14 +5,15 @@ import (
 	"testing"
 )
 
-// Linux QA of v0.18.1 (2026-11-13), through Run: etc/debian_version is read
-// for Debian's point release (D121) in the same layer pass as os-release,
-// on every image. An Alpine image whose etc/debian_version is a symbolic
-// link cycle is not incomplete for it -- the scan never consults the file
-// there -- so nothing is listed unread and the strict gate exits 0, as it
-// does with the file absent or an ordinary file. A Debian image's cycle at
-// that path stays reported, and a cycle at a path every image reads
-// (os-release) stays reported on Alpine too.
+// Linux QA of v0.18.1 (2026-11-13), through Run: etc/debian_version is
+// asked for, for Debian's point release (D121), on a Debian image only, in
+// the exact-path pass that follows os-release (PR #317; it had been in the
+// first pass beside os-release on every image). An Alpine image whose
+// etc/debian_version is a symbolic link cycle is not incomplete for it --
+// the path is never requested there -- so nothing is listed unread and the
+// strict gate exits 0, as with the file absent or an ordinary file. A
+// Debian image's cycle at that path stays reported, and a cycle at a path
+// every image reads (os-release) stays reported on Alpine too.
 func TestRun_DebianVersionUnreadableIsReportedOnDebianOnly(t *testing.T) {
 	cycle := []p4Entry{
 		{name: debianVersionPath, link: "/etc/debian_version.loop"},

@@ -1518,27 +1518,6 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		if err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", osReleasePath, err)
 		}
-		if d.ID == "debian" {
-			// Debian's point release (D121) is asked for in a second pass
-			// over the layers, here and nowhere else. Asked for in the
-			// first pass beside os-release, the path had been read,
-			// link-followed and charged to the read budget on EVERY image:
-			// an Alpine image with a 4,097-byte file of that name failed the
-			// per-file limit before its packages were read, and one with a
-			// symlink there opened every layer once more (main QA of
-			// 672fe7a, 2026-11-13; #310 had only withdrawn the unread
-			// note). The pass costs a Debian image one more read of its
-			// layers (D123); what it cannot resolve is reported unread as
-			// any wanted path is, since the purls then spell the major alone
-			// and a point-release VEX statement does not reach them.
-			dv, err := img.Files(ctx, []string{debianVersionPath})
-			if err != nil {
-				return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
-			}
-			if f, ok := dv[debianVersionPath]; ok && f.Data != nil {
-				d.PointRelease = pkgmeta.DebianPointRelease(string(f.Data), d.VersionID)
-			}
-		}
 		target.Distro = &d
 		if eco, err := d.Ecosystem(); err == nil {
 			ecosystem = eco
@@ -1739,6 +1718,31 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 			pkgs[i].Locations[j].LayerDigest = diffID
 		}
 	}
+	// One exact-path pass for what two halves ask for by name: Bitnami's
+	// legacy marker on every image (D99, below), and Debian's point release
+	// on a Debian image (D121). Asked for in the FIRST pass beside
+	// os-release, etc/debian_version had been read, link-followed and
+	// charged to the read budget on every image, Debian or not -- a file of
+	// that name over the per-file limit (512 MiB; the test holds it at
+	// 4 KiB) failed an Alpine scan before its packages were read, and a
+	// symlink there opened every layer once more (main QA of 672fe7a,
+	// 2026-11-13; #310 had only withdrawn the unread note). Here it rides
+	// the pass the Bitnami half makes anyway, so a Debian image pays no
+	// extra read of its layers; what the pass cannot resolve is reported
+	// unread as any wanted path is, since the purls then spell the major
+	// alone and a point-release VEX statement does not reach them.
+	exact := []string{bitnamiLegacyPath}
+	debian := target.Distro != nil && target.Distro.ID == "debian"
+	if debian {
+		exact = append(exact, debianVersionPath)
+	}
+	exactFiles, err := img.Files(ctx, exact)
+	if err != nil {
+		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
+	}
+	if f, ok := exactFiles[debianVersionPath]; debian && ok && f.Data != nil {
+		target.Distro.PointRelease = pkgmeta.DebianPointRelease(string(f.Data), target.Distro.VersionID)
+	}
 	assignOSPURLs(target.Distro, pkgs)
 	target.Packages = pkgs
 
@@ -1750,7 +1754,7 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 	// finding no Bitnami markers is not an error: the overwhelming majority
 	// of images this build scans are not Bitnami images at all, and
 	// /opt/bitnami simply does not exist in them.
-	bitnamiPkgs, bitnamiSkipped, bitnamiScope, err := catalogBitnami(ctx, img)
+	bitnamiPkgs, bitnamiSkipped, bitnamiScope, err := catalogBitnami(ctx, img, exactFiles)
 	if err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 	}
@@ -1833,7 +1837,11 @@ func assignOSPURLs(d *pkgmeta.Distro, pkgs []pkgmeta.Package) {
 // not-read when its only markers are symlinks this build does not follow —
 // Bitnami content was there and none of it reached the inventory, which
 // "none" would deny and "read" would overstate.
-func catalogBitnami(ctx context.Context, img *source.Image) ([]pkgmeta.Package, int, string, error) {
+//
+// exactFiles is the caller's exact-path pass, which asked for
+// bitnamiLegacyPath beside what the OS half wanted by name: one walk of the
+// layers for both rather than one each.
+func catalogBitnami(ctx context.Context, img *source.Image, exactFiles map[string]source.FileFromLayer) ([]pkgmeta.Package, int, string, error) {
 	markerFiles, markerLinks, err := img.FilesMatching(ctx, bitnamiDir, bitnamiSPDXPrefix, bitnamiSPDXSuffix)
 	if err != nil {
 		return nil, 0, "", err
@@ -1854,13 +1862,10 @@ func catalogBitnami(ctx context.Context, img *source.Image) ([]pkgmeta.Package, 
 	}
 
 	// The legacy fallback is a single exact path, unlike the markers above,
-	// so it is asked for by name (source.Image.Files) rather than
-	// discovered.
+	// so it was asked for by name (source.Image.Files) rather than
+	// discovered -- by the caller, in its exact-path pass.
 	var legacyPkgs []pkgmeta.Package
-	legacyFiles, err := img.Files(ctx, []string{bitnamiLegacyPath})
-	if err != nil {
-		return nil, 0, "", err
-	}
+	legacyFiles := exactFiles
 	scope := report.ScopeNone
 	switch {
 	case len(markerFiles) > 0:

@@ -8,12 +8,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
-- Image scans: `etc/debian_version` (Debian's point release, D121) is asked for in a second pass
-  over the layers on a Debian image only. Asked for in the first pass beside os-release, it had
-  been read, link-followed and charged to the read budget on every image -- an Alpine image with a
-  4,097-byte file of that name failed the per-file limit before its packages were read, and one
-  with a symlink there opened every layer once more; #310 had only withdrawn the unread note. A
-  Debian image's scan reads its layers once more for it. (main QA of 672fe7a, 2026-11-13)
+- Image scans: `etc/debian_version` (Debian's point release, D121) is asked for on a Debian
+  image only, in the exact-path pass every image already makes for Bitnami's legacy marker.
+  Asked for in the first pass beside os-release, it had been read, link-followed and charged to
+  the read budget on every image -- a file of that name over the per-file limit (512 MiB) failed an
+  Alpine scan before its packages were read, and a symlink there opened every layer once more;
+  #310 had only withdrawn the unread note. No image reads its layers more often than before.
+  (main QA of 672fe7a, 2026-11-13)
 - CycloneDX: a bare top-level listing of one release beside the subject's install of ANOTHER
   release is judged on what it states. v0.18.1 had pooled it beside that install, found no
   install of its own release to name and fallen back to the other release's, so one name and

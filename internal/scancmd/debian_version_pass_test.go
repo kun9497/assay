@@ -35,6 +35,7 @@ func TestCatalogFromImage_DebianVersionIsConsultedOnDebianOnly(t *testing.T) {
 		{"debian, an over-limit debian_version is read and refused", map[string]string{osReleasePath: osReleaseDebian12Bookworm, dpkgDBPath: dpkgOpensslAndGlibc, debianVersionPath: big}, true, 0, "", ""},
 		{"debian, an ordinary debian_version spells the point release", map[string]string{osReleasePath: osReleaseDebian12Bookworm, dpkgDBPath: dpkgOpensslAndGlibc, debianVersionPath: "12.11\n"}, false, 3, "12.11", "debian-12.11"},
 		{"debian, no debian_version spells the major", map[string]string{osReleasePath: osReleaseDebian12Bookworm, dpkgDBPath: dpkgOpensslAndGlibc}, false, 3, "", "debian-12"},
+		{"distroless (status.d), an ordinary debian_version spells the point release", map[string]string{osReleasePath: osReleaseDebian12Bookworm, dpkgStatusDir + "/libc6": dpkgOpensslAndGlibc, debianVersionPath: "12.11\n"}, false, 3, "12.11", "debian-12.11"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			img := &source.Image{Layers: []source.Layer{imageLayer(t, "sha256:fixture", tc.files)}}
@@ -64,8 +65,10 @@ func TestCatalogFromImage_DebianVersionIsConsultedOnDebianOnly(t *testing.T) {
 // The cost side of the same rule, counted in layer opens (every Files pass
 // opens every layer once, D123): on an Alpine image a debian_version --
 // absent, an ordinary file or a symlink -- opens no layer more than an
-// unrelated symlink does. On a Debian image the point release costs one
-// more pass, documented here as the number it is.
+// unrelated symlink does. On a Debian image the point release rides the
+// exact-path pass the Bitnami half makes on every image, so a Debian image
+// opens its layers exactly as often as an Ubuntu one with the same
+// database shape, with or without the file.
 func TestCatalogFromImage_DebianVersionCostsANonDebianImageNoLayerOpen(t *testing.T) {
 	opens := func(t *testing.T, base []p4Entry, extra ...p4Entry) int {
 		t.Helper()
@@ -93,9 +96,9 @@ func TestCatalogFromImage_DebianVersionCostsANonDebianImageNoLayerOpen(t *testin
 		}
 	}
 	debian := []p4Entry{{name: osReleasePath, body: osReleaseDebian12Bookworm}, {name: dpkgDBPath, body: dpkgOpensslAndGlibc}}
-	if without, with := opens(t, debian), opens(t, debian, p4Entry{name: debianVersionPath, body: "12.11\n"}); with != without {
-		// Whether or not the file exists the pass is made: the cost is the
-		// image's being Debian, not the file's being there.
-		t.Errorf("debian: %d opens with debian_version, %d without; want the same count (one pass either way)", with, without)
+	ubuntu := []p4Entry{{name: osReleasePath, body: osReleaseUbuntu2204}, {name: dpkgDBPath, body: dpkgUbuntuLibssl3}}
+	without, with, other := opens(t, debian), opens(t, debian, p4Entry{name: debianVersionPath, body: "12.11\n"}), opens(t, ubuntu)
+	if with != without || with != other {
+		t.Errorf("layer opens: debian with debian_version %d, without %d, ubuntu %d; want all equal (the point release rides a pass every image makes)", with, without, other)
 	}
 }
