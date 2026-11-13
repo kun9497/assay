@@ -13,6 +13,10 @@
   11과 Debian 12에 나열된 이름·버전 하나가 Debian 11 설치만 있을 때 2개 중 1개 평가·"7 and 7" 모순·
   `--fail-on-incomplete=target` 종료 2로 읽혔습니다(v0.18.0은 2개 중 2개·종료 0). 나열이 실제로 모순되는 설치만
   사유에 들며, 진짜 모순("2 and 7")은 전과 같이 보고됩니다. (D165 개정; v0.18.1 Linux QA, 2026-11-13)
+- 이미지 스캔: v0.18.1부터 Debian 포인트 릴리스(D121)를 위해 읽는 `etc/debian_version`은 Debian 이미지에서만
+  참조합니다. 그 경로를 풀 수 없는(심볼릭 링크 순환) Alpine 같은 비 Debian 이미지가 스캔이 읽지도 않는 파일을
+  unread로 적고 `--fail-on-incomplete=target`에서 종료 2가 됐는데, 더는 그러지 않습니다. Debian 이미지의 읽을 수
+  없는 `debian_version`은 purl이 메이저만 적게 되므로 계속 보고됩니다. (v0.18.1 Linux QA, 2026-11-13)
 
 ## [0.18.1] - 2026-11-12
 
