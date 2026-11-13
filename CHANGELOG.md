@@ -24,8 +24,8 @@ All notable changes to this project are documented here. The format follows
   (Linux QA of v0.18.1, 2026-11-13)
 - VEX: an SBOM whose operating-system component and package purl declare two Debian point
   releases (12.10 beside `distro=debian-12.11`) contradicts itself about the install, so
-  neither point-release statement applies and only the shared major's does (D121). Every public
-  release up to v0.18.1 had let a statement for the OS component's point release suppress the
+  neither point-release statement applies and only the shared major's does (D121). v0.18.0 and
+  v0.18.1, the releases carrying the scope type, had let a statement for the OS component's point release suppress the
   finding and exit 0. An SBOM whose two declarations agree is unchanged. (Linux QA of v0.18.1,
   2026-11-13)
 

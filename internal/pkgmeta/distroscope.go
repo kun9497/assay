@@ -57,8 +57,8 @@ func (s DistroScope) Matches(want, installed, ecosystem string) bool {
 		// debian-12.10 beside a purl saying debian-12.11) is the SBOM
 		// contradicting itself about this one install: only their shared
 		// key remains for a statement to match (D121), as it does for the
-		// Mixed scope two such listings merge to. Both public releases up
-		// to v0.18.1 had let a statement for the local OS's point release
+		// Mixed scope two such listings merge to. v0.18.0 and v0.18.1, the
+		// releases carrying this type, had let a statement for the local OS's point release
 		// exonerate the install (findings 0, exit 0) because this branch
 		// was reached before the installed purl was compared with it
 		// (Linux QA of v0.18.1, 2026-11-13).
