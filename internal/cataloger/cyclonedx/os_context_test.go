@@ -71,3 +71,51 @@ func TestParse_D166_UnkeyedTopTwinOfAKeyedSubjectListingIsOnePackage(t *testing.
 		t.Errorf("packages = %+v, components = %d, want one busybox keyed Alpine:v3.19", target.Packages, stats.Components)
 	}
 }
+
+// Main QA of 67e2cf6 (2026-11-13): syft's operating-system component
+// carries os-release's VERSION_CODENAME as syft:distro:versionCodename, and
+// the Target's distro reads it -- from the top-level OS, from the subject's
+// own, from the later of two declarations of one release -- while an OS
+// declared only in some other branch names no target at all (D166), so its
+// codename reaches no statement.
+func TestParse_D166_TargetDistroCarriesTheCodename(t *testing.T) {
+	const (
+		start      = `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,`
+		jammy      = `{"type":"operating-system","name":"ubuntu","version":"22.04","properties":[{"name":"syft:distro:id","value":"ubuntu"},{"name":"syft:distro:versionID","value":"22.04"},{"name":"syft:distro:versionCodename","value":"jammy"}]}`
+		bare       = `{"type":"operating-system","name":"ubuntu","version":"22.04","properties":[{"name":"syft:distro:id","value":"ubuntu"},{"name":"syft:distro:versionID","value":"22.04"}]}`
+		noble      = `{"type":"operating-system","name":"ubuntu","version":"22.04","properties":[{"name":"syft:distro:id","value":"ubuntu"},{"name":"syft:distro:versionID","value":"22.04"},{"name":"syft:distro:versionCodename","value":"noble"}]}`
+		jammyUpper = `{"type":"operating-system","name":"ubuntu","version":"22.04","properties":[{"name":"syft:distro:id","value":"ubuntu"},{"name":"syft:distro:versionID","value":"22.04"},{"name":"syft:distro:versionCodename","value":"JAMMY"}]}`
+		apt        = `{"type":"library","name":"apt","version":"2.4.14","purl":"pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-22.04"}`
+		noOS       = ""
+		wantOS     = "ubuntu 22.04"
+	)
+	for _, tc := range []struct{ name, body, want, codename string }{
+		{"top-level OS", start + `"components":[` + jammy + `,` + apt + `]}`, wantOS, "jammy"},
+		{"nested under the subject", start + `"components":[` + apt + `],"metadata":{"component":{"type":"container","name":"d","components":[` + jammy + `]}}}`, wantOS, "jammy"},
+		{"the subject is the OS", start + `"components":[` + apt + `],"metadata":{"component":` + jammy + `}}`, wantOS, "jammy"},
+		{"codename on the second of two declarations", start + `"components":[` + bare + `,` + jammy + `,` + apt + `]}`, wantOS, "jammy"},
+		{"codename on the first of two declarations", start + `"components":[` + jammy + `,` + bare + `,` + apt + `]}`, wantOS, "jammy"},
+		// Two declarations of 22.04 that disagree on the codename carry
+		// none, in either order (PR #323 review).
+		{"jammy then noble", start + `"components":[` + jammy + `,` + noble + `,` + apt + `]}`, wantOS, ""},
+		{"noble then jammy", start + `"components":[` + noble + `,` + jammy + `,` + apt + `]}`, wantOS, ""},
+		{"jammy, bare, JAMMY", start + `"components":[` + jammy + `,` + bare + `,` + jammyUpper + `,` + apt + `]}`, wantOS, "jammy"},
+		{"no codename property", start + `"components":[` + bare + `,` + apt + `]}`, wantOS, ""},
+		{"OS only in an unrelated branch", start + `"components":[{"type":"application","name":"a","components":[` + jammy + `]},` + apt + `]}`, noOS, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			target, _, err := Parse(strings.NewReader(tc.body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, codename := "", ""
+			if target.Distro != nil {
+				got = target.Distro.ID + " " + target.Distro.VersionID
+				codename = target.Distro.VersionCodename
+			}
+			if got != tc.want || codename != tc.codename {
+				t.Errorf("Target.Distro = %q codename %q, want %q codename %q", got, codename, tc.want, tc.codename)
+			}
+		})
+	}
+}

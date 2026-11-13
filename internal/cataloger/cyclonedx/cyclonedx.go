@@ -1135,7 +1135,13 @@ func releaseScope(d *pkgmeta.Distro) pkgmeta.DistroScope {
 	if d.VersionID == "" {
 		return pkgmeta.DistroScope{Qualifier: d.ID}
 	}
-	return pkgmeta.DistroScope{Qualifier: d.ID + "-" + d.VersionID}
+	// Spelled as ForInstallation and Matches spell the purl's and the
+	// statement's side (CanonicalDistroQualifier): an OS component of
+	// Debian 4.0r9 beside a purl saying debian-4.0r9 had compared the raw
+	// spelling with the canonical debian-4.0.9, read the document as
+	// contradicting itself (Mixed) and refused the point statement for the
+	// release it names (PR #322 review).
+	return pkgmeta.DistroScope{Qualifier: pkgmeta.CanonicalDistroQualifier(d.ID + "-" + d.VersionID)}
 }
 
 // contextFor is the context of a list of sibling components: the one
@@ -1156,6 +1162,21 @@ func contextFor(siblings []component, inherited osContext) osContext {
 	// (QA 2026-11-11). An OS whose ID this build does not know ("linux")
 	// declares nothing.
 	var family *pkgmeta.Distro
+	// codename is what the declarations of the one release found agree its
+	// codename is; two that state different ones contradict each other and
+	// the release carries none (PR #323 review: the first declaration's had
+	// won, so [jammy, noble] exempted under a jammy statement and [noble,
+	// jammy] did not -- exit 0 or 1 by component order).
+	codename, codenameConflict := "", false
+	noteCodename := func(d *pkgmeta.Distro) {
+		switch {
+		case d.VersionCodename == "":
+		case codename == "":
+			codename = d.VersionCodename
+		case !strings.EqualFold(codename, d.VersionCodename):
+			codenameConflict = true
+		}
+	}
 	for _, c := range siblings {
 		d := distroOf(c)
 		if d == nil {
@@ -1189,6 +1210,7 @@ func contextFor(siblings []component, inherited osContext) osContext {
 		}
 		if found == nil {
 			found = d
+			noteCodename(d)
 			continue
 		}
 		if !sameDistro(found, d) {
@@ -1196,6 +1218,9 @@ func contextFor(siblings []component, inherited osContext) osContext {
 			// language package's VEX must retain the conflicting OS evidence.
 			return osContext{mixedRelease: true}
 		}
+		// Two declarations of one release are one (D166); a codename only
+		// one of them carries is the release's, whichever came first.
+		noteCodename(d)
 		if !mixedRelease && (found.ID != d.ID || found.VersionID != d.VersionID) {
 			next := releaseScope(d)
 			merged := releaseScope(found).Merge(next)
@@ -1219,6 +1244,10 @@ func contextFor(siblings []component, inherited osContext) osContext {
 		}
 		return inherited
 	}
+	if codenameConflict {
+		codename = ""
+	}
+	found.VersionCodename = codename
 	ctx := osContext{distro: found, mixedRelease: mixedRelease}
 	if eco, err := found.Ecosystem(); err == nil {
 		ctx.ecosystem = eco
@@ -1310,6 +1339,15 @@ func distroOf(c component) *pkgmeta.Distro {
 			d.VersionID = p.Value
 		case "syft:distro:prettyName":
 			d.PrettyName = p.Value
+		case "syft:distro:versionCodename":
+			// os-release's VERSION_CODENAME, as syft copies it. On Ubuntu
+			// it is the codename evidence a VEX statement spelled
+			// distro=jammy needs (vex.Target.UbuntuCodename), which the
+			// image path reads from os-release itself: main QA of 67e2cf6
+			// (2026-11-13) had the same JAMMY statement suppress two
+			// advisories on the Ubuntu image and none on syft's SBOM of it,
+			// whose OS component said versionCodename=jammy all along.
+			d.VersionCodename = p.Value
 		}
 	}
 	// Fall back to the component's own fields: the properties are a syft

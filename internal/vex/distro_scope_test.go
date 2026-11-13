@@ -48,6 +48,14 @@ func TestDistroQualifierScope(t *testing.T) {
 		{"mixed scope, debian-6.0 names the whole key", "deb", "debian", "Debian:6.0", "", "debian-6.0.10", "debian-6.0", true, true},
 		{"mixed scope, a point of 6.0 does not", "deb", "debian", "Debian:6.0", "", "debian-6.0.10", "debian-6.0.10", true, false},
 		{"mixed scope, bookworm names the whole key", "deb", "debian", "Debian:12", "", "debian-12.10", "bookworm", true, true},
+		// Main QA of 67e2cf6 (2026-11-13): the archive spells etch's point
+		// releases 4.0rN. The spelling names a point of Debian:4.0 -- the
+		// whole-release statement applies to it, its own point statement
+		// applies, another revision's does not.
+		{"etch revision under its release, whole-release statement", "deb", "debian", "Debian:4.0", "debian-4.0", "debian-4.0r9", "debian-4.0", false, true},
+		{"etch revision, statement that revision", "deb", "debian", "Debian:4.0", "", "debian-4.0r9", "debian-4.0r9", false, true},
+		{"etch revision, statement another revision", "deb", "debian", "Debian:4.0", "", "debian-4.0r9", "debian-4.0r8", false, false},
+		{"etch release alone, statement a revision", "deb", "debian", "Debian:4.0", "", "debian-4.0", "debian-4.0r9", false, false},
 		{"patch equality", "apk", "alpine", "Alpine:v3.19", "alpine-3.19.9", "", "alpine-3.19.9", false, true},
 		{"different patch", "apk", "alpine", "Alpine:v3.19", "alpine-3.19.9", "alpine-3.19.9", "alpine-3.19.1", false, false},
 		{"edge under stable", "apk", "alpine", "Alpine:v3.19", "alpine-3.19", "alpine-edge", "alpine-edge", false, false},

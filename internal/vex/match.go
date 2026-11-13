@@ -428,9 +428,10 @@ func qualifierMatches(pkg pkgmeta.PURL, k, v, codename string, installed *pkgmet
 		// the release normalisation below, where they suppressed on a
 		// document that carried no codename at all.
 		if cn := pkgmeta.UbuntuCodename(v); cn != "" {
-			// A codename must actually be supplied by this scan, either in
-			// os-release or the package's purl. A same-spelled purl alone
-			// cannot exempt a package evaluated on another release.
+			// A codename must actually be supplied by this scan: in
+			// os-release, in an SBOM's operating-system component, or in
+			// the package's purl. A same-spelled purl alone cannot exempt a
+			// package evaluated on another release.
 			// os-release spells VERSION_CODENAME in lower case on every
 			// Ubuntu release; the fold is a defence, not a case met.
 			if cn != strings.ToLower(codename) && cn != pkgmeta.UbuntuCodename(got) {
@@ -653,6 +654,9 @@ func resolve(live []liveStatement, f matcher.Finding, target Target, matched []b
 	s := subject{
 		raw: pkgPURL, parsed: pkgParsed, ok: pkgPURL != "" && pkgErr == nil,
 		pkg: f.Package, codename: target.UbuntuCodename,
+	}
+	if target.UbuntuCodenameKey != "" && f.Package.Ecosystem != "" && f.Package.Ecosystem != target.UbuntuCodenameKey {
+		s.codename = ""
 	}
 
 	var (
