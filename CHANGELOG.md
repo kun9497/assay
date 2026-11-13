@@ -8,22 +8,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
-- VEX: a Debian or Ubuntu codename in a package purl's `distro=` qualifier (`bookworm`,
-  `debian-bookworm`, `jammy`) is read as the release it names. It confirms an OS component's
-  point release of that major without contradicting it -- an OS of Debian 12.15 beside
-  `distro=bookworm` takes a 12.15 statement again, as v0.18.1 did and 672fe7a had refused -- and
-  proves no point release of its own: an OS of 12 or of 12.14, or another codename, is not
-  exonerated by a 12.15 statement. A statement spelled with the codename is the major's, and a
-  document with no operating-system component whose purls carry a codename is keyed to that
-  release rather than left unevaluated. (D121; main QA of 672fe7a, 2026-11-13)
-- VEX: one install listed twice in a CycloneDX document -- at the top level and under the
-  subject -- with purls naming two Debian point releases is held to the shared major in both
-  positions. The scope of a listing whose purl contradicts its local OS is Mixed from the start,
-  as two contradicting listings merge to, so the join cannot keep the first purl's point release
-  alone: apt listed as 12.15 at the top level and 12.14 under the subject (OS 12.15) had been
-  suppressed by a 12.15 statement, and kept the other way round; on a fixture database holding
-  one unrated advisory the same two shapes written as 12.10/12.11 exited 0 and 1 under
-  `--fail-on-unknown`. (D121; main QA of 672fe7a, 2026-11-13)
+- The Linux/macOS install one-liner in the READMEs and the CI examples downloads `install.sh` to
+  a file `mktemp` made and removes it afterwards. The 2026-11-13 revision had written
+  `./assay-install.sh` in the working directory and overwritten a file of that name; a failed
+  download still fails the line, and its exit status is the install's. `internal/ciguard` holds
+  the shape and refuses a fixed name. (main QA of 672fe7a, 2026-11-13)
 - CycloneDX: a bare top-level listing of one release beside the subject's install of ANOTHER
   release is judged on what it states. v0.18.1 had pooled it beside that install, found no
   install of its own release to name and fallen back to the other release's, so one name and
@@ -54,6 +43,22 @@ All notable changes to this project are documented here. The format follows
   standard bin directories (D160) -- and that the rest are not read, as the scan's own stderr
   note has said since v0.16.0. The help had still said application packages inside an image are
   not read at all. (Linux QA of v0.18.1, 2026-11-13)
+- VEX: a Debian or Ubuntu codename in a package purl's `distro=` qualifier (`bookworm`,
+  `debian-bookworm`, `jammy`) is read as the release it names. It confirms an OS component's
+  point release of that major without contradicting it -- an OS of Debian 12.15 beside
+  `distro=bookworm` takes a 12.15 statement again, as v0.18.1 did and 672fe7a had refused -- and
+  proves no point release of its own: an OS of 12 or of 12.14, or another codename, is not
+  exonerated by a 12.15 statement. A statement spelled with the codename is the major's, and a
+  document with no operating-system component whose purls carry a codename is keyed to that
+  release rather than left unevaluated. (D121; main QA of 672fe7a, 2026-11-13)
+- VEX: one install listed twice in a CycloneDX document -- at the top level and under the
+  subject -- with purls naming two Debian point releases is held to the shared major in both
+  positions. The scope of a listing whose purl contradicts its local OS is Mixed from the start,
+  as two contradicting listings merge to, so the join cannot keep the first purl's point release
+  alone: apt listed as 12.15 at the top level and 12.14 under the subject (OS 12.15) had been
+  suppressed by a 12.15 statement, and kept the other way round; on a fixture database holding
+  one unrated advisory the same two shapes written as 12.10/12.11 exited 0 and 1 under
+  `--fail-on-unknown`. (D121; main QA of 672fe7a, 2026-11-13)
 
 ## [0.18.1] - 2026-11-12
 

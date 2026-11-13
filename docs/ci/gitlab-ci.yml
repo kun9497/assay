@@ -16,10 +16,13 @@ assay_scan:
     # the installer refuses to install rather than skip the check.
     - apk add --no-cache curl openssl
     # The commit the latest release was built from, as in the README (the
-    # release job keeps it current) -- never a branch, which moves. Download,
-    # then run: the job stops at a failed download, where `curl | sh` had not.
-    - curl -sSfL -o assay-install.sh https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh
-    - sh ./assay-install.sh -b /usr/local/bin
+    # release job keeps it current) -- never a branch, which moves. Download to
+    # a temporary file, then run: the job stops at a failed download, where
+    # `curl | sh` had not, and the project's own files are not touched.
+    - t=$(mktemp)
+    - trap 'rm -f "$t"' EXIT
+    - curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh
+    - sh "$t" -b /usr/local/bin
     - assay --version
   script:
     # Pulls the published database from ghcr.io/kun9497/assay-db — a public
