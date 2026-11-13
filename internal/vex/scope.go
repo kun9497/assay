@@ -28,11 +28,21 @@ type Target struct {
 	// the index it was listed in (D119's ImageRecord). Either identifies the
 	// image; a digest the reference was typed with is always one of them.
 	Digests []string
-	// UbuntuCodename is os-release VERSION_CODENAME on an Ubuntu target, ""
-	// otherwise. Canonical's OpenVEX writes distro=<codename> (distro=jammy)
-	// where syft writes distro=ubuntu-22.04, so an Ubuntu package answers to
-	// both spellings.
+	// UbuntuCodename is os-release VERSION_CODENAME on an Ubuntu target --
+	// read from the image, or from an SBOM's operating-system component
+	// (syft:distro:versionCodename) -- "" otherwise. Canonical's OpenVEX
+	// writes distro=<codename> (distro=jammy) where syft writes
+	// distro=ubuntu-22.04, so an Ubuntu package answers to both spellings.
 	UbuntuCodename string
+	// UbuntuCodenameKey is the ecosystem key of the release UbuntuCodename
+	// was read from, "" when it names none. The codename is evidence for
+	// the packages keyed to that release (or unkeyed) only: an SBOM keys
+	// each branch by its own OS, so a package under a 22.04 branch of a
+	// document whose own OS is another release must not answer to that
+	// release's codename (PR #323 review: a statement spelling a codename
+	// the table does not know exempted a package keyed Ubuntu:22.04:LTS,
+	// while the numeric spelling of the same release was refused).
+	UbuntuCodenameKey string
 }
 
 // imageRef is one image product of a statement, reduced to what can be
