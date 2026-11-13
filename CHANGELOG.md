@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- The Linux/macOS install one-liner in the READMEs and the CI examples downloads `install.sh` to
+  a file `mktemp` made and removes it afterwards. The 2026-11-13 revision had written
+  `./assay-install.sh` in the working directory and overwritten a file of that name; a failed
+  download still fails the line, and its exit status is the install's. `internal/ciguard` holds
+  the shape and refuses a fixed name. (main QA of 672fe7a, 2026-11-13)
 - CycloneDX: a bare top-level listing of one release beside the subject's install of ANOTHER
   release is judged on what it states. v0.18.1 had pooled it beside that install, found no
   install of its own release to name and fallen back to the other release's, so one name and
