@@ -8,11 +8,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
-- The Linux/macOS install one-liner in the READMEs and the CI examples downloads `install.sh` to
-  a file `mktemp` made and removes it afterwards. The 2026-11-13 revision had written
-  `./assay-install.sh` in the working directory and overwritten a file of that name; a failed
-  download still fails the line, and its exit status is the install's. `internal/ciguard` holds
-  the shape and refuses a fixed name. (main QA of 672fe7a, 2026-11-13)
+- Image scans: `etc/debian_version` (Debian's point release, D121) is asked for on a Debian
+  image only, in the exact-path pass every image already makes for Bitnami's legacy marker.
+  Asked for in the first pass beside os-release, it had been read, link-followed and charged to
+  the read budget on every image -- a file of that name over the per-file limit (512 MiB) failed an
+  Alpine scan before its packages were read, and a symlink there opened every layer once more;
+  #310 had only withdrawn the unread note. No image reads its layers more often than before.
+  (main QA of 672fe7a, 2026-11-13)
 - CycloneDX: a bare top-level listing of one release beside the subject's install of ANOTHER
   release is judged on what it states. v0.18.1 had pooled it beside that install, found no
   install of its own release to name and fallen back to the other release's, so one name and
@@ -43,6 +45,11 @@ All notable changes to this project are documented here. The format follows
   standard bin directories (D160) -- and that the rest are not read, as the scan's own stderr
   note has said since v0.16.0. The help had still said application packages inside an image are
   not read at all. (Linux QA of v0.18.1, 2026-11-13)
+- The Linux/macOS install one-liner in the READMEs and the CI examples downloads `install.sh` to
+  a file `mktemp` made and removes it afterwards. The 2026-11-13 revision had written
+  `./assay-install.sh` in the working directory and overwritten a file of that name; a failed
+  download still fails the line, and its exit status is the install's. `internal/ciguard` holds
+  the shape and refuses a fixed name. (main QA of 672fe7a, 2026-11-13)
 - VEX: a Debian or Ubuntu codename in a package purl's `distro=` qualifier (`bookworm`,
   `debian-bookworm`, `jammy`) is read as the release it names. It confirms an OS component's
   point release of that major without contradicting it -- an OS of Debian 12.15 beside
