@@ -9,14 +9,34 @@ type DistroScope struct {
 	Mixed     bool
 }
 
-// ForInstallation retains the local OS when an SBOM purl contradicts it.
-// Keep an installed subrelease under a broader local declaration, so later
-// duplicate records can detect conflicting point releases in either order.
+// ForInstallation is the scope of one listing: the local OS declared beside
+// it, refined by the release its own purl states. A purl stating a release
+// the local OS includes (rhel-9 beside distro=rhel-9.4) narrows the scope to
+// it; one stating less than the local OS (debian-12 beside an OS of 12.10)
+// leaves the local OS standing; one stating a release neither includes
+// (12.14 beside an OS of 12.15) is the document contradicting itself about
+// this install, and the scope is Mixed: only the shared key remains for a
+// statement to match (D121), exactly as when two listings disagree (Merge).
+//
+// Until the main QA of 672fe7a (2026-11-13) a contradiction returned the
+// local OS and left the purl for Matches to compare later -- and a second
+// listing of the install merged onto the first lost that side: apt listed
+// as 12.15 at the top level and 12.14 under the subject kept the 12.15 purl
+// under a 12.15 scope, so a 12.15 statement suppressed CVE-2011-3374, while
+// the same two purls the other way round kept it. Mixed from the start, the
+// scope carries the contradiction through every join, whichever listing is
+// kept.
 func (s DistroScope) ForInstallation(installed string) DistroScope {
-	if !s.Mixed && installed != "" && (s.Qualifier == "" || releaseIncludes(s.Qualifier, installed)) {
+	switch {
+	case s.Mixed || installed == "":
+		return s
+	case s.Qualifier == "" || releaseIncludes(s.Qualifier, installed):
 		return DistroScope{Qualifier: installed}
+	case releaseIncludes(installed, s.Qualifier):
+		return s
+	default:
+		return DistroScope{Mixed: true}
 	}
-	return s
 }
 
 func (s DistroScope) Merge(other DistroScope) DistroScope {
@@ -61,7 +81,11 @@ func (s DistroScope) Matches(want, installed, ecosystem string) bool {
 		// releases carrying this type, had let a statement for the local OS's point release
 		// exonerate the install (findings 0, exit 0) because this branch
 		// was reached before the installed purl was compared with it
-		// (Linux QA of v0.18.1, 2026-11-13).
+		// (Linux QA of v0.18.1, 2026-11-13). Since the main QA of 672fe7a the
+		// same day, ForInstallation makes that contradiction Mixed at catalog
+		// time, so a package the CycloneDX cataloger produced never reaches
+		// this guard; it holds for a scope built elsewhere, as defence in
+		// depth -- the rule lives in ForInstallation.
 		if installed != "" && !releaseIncludes(s.Qualifier, installed) && !releaseIncludes(installed, s.Qualifier) {
 			return false
 		}
