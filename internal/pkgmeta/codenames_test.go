@@ -15,6 +15,10 @@ func TestCanonicalDistroQualifier(t *testing.T) {
 		"ubuntu-jammy":    "ubuntu-22.04",
 		"noble":           "ubuntu-24.04",
 		"debian-12.15":    "debian-12.15",
+		"debian-4.0r9":    "debian-4.0.9", // the archive's revision spelling, as the point it is
+		"Debian-3.1r8":    "debian-3.1.8",
+		"debian-4.0rc1":   "debian-4.0rc1", // not a Debian spelling: compared as written
+		"ubuntu-4.0r9":    "ubuntu-4.0r9",
 		"Debian-12":       "debian-12",
 		"Debian-12.15":    "debian-12.15",
 		"Ubuntu-22.04":    "ubuntu-22.04",

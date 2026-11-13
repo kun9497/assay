@@ -1119,7 +1119,13 @@ func releaseScope(d *pkgmeta.Distro) pkgmeta.DistroScope {
 	if d.VersionID == "" {
 		return pkgmeta.DistroScope{Qualifier: d.ID}
 	}
-	return pkgmeta.DistroScope{Qualifier: d.ID + "-" + d.VersionID}
+	// Spelled as ForInstallation and Matches spell the purl's and the
+	// statement's side (CanonicalDistroQualifier): an OS component of
+	// Debian 4.0r9 beside a purl saying debian-4.0r9 had compared the raw
+	// spelling with the canonical debian-4.0.9, read the document as
+	// contradicting itself (Mixed) and refused the point statement for the
+	// release it names (PR #322 review).
+	return pkgmeta.DistroScope{Qualifier: pkgmeta.CanonicalDistroQualifier(d.ID + "-" + d.VersionID)}
 }
 
 // contextFor is the context of a list of sibling components: the one

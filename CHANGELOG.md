@@ -98,7 +98,19 @@ All notable changes to this project are documented here. The format follows
   `versionCodename=jammy` all along. A codename that contradicts the OS version, an OS with no
   codename, and an OS declared only in another branch of the document (D166) still exempt
   nothing. (main QA of 67e2cf6, 2026-11-13)
-
+- Debian's archive spelling of a point release before squeeze -- `4.0r9`, `3.1r8`, `3.0r6`, as
+  the etch Release file says -- names its release (`Debian:4.0`, `3.1`, `3.0`) in a `VERSION_ID`,
+  an SBOM's operating-system version or a purl's `distro=` qualifier, where 67e2cf6 had refused it
+  as no release at all: an SBOM naming etch as the archive does was scanned with `EOL unknown`
+  and exit 0 under `--fail-on-eol`, where ef0bc1a had reported the 2010-02-15 end of life and
+  exit 1. The revision is a point of the release (`debian-4.0` includes `debian-4.0r9`; a
+  statement for `debian-4.0r9` is a point statement); a bare `3` and sid stay refused. (main QA
+  of 67e2cf6, 2026-11-13)
+- `internal/ciguard`'s guard on the CI examples reads the install job only and refuses a trap on
+  EXIT (or `0`), not every trap: 67e2cf6 refused `trap 'echo stopping' TERM` in an independent
+  GitLab job of the example as the installer's leftover. The four-line install form (`t=$(mktemp)`
+  and `trap 'rm -f "$t"' EXIT` in the calling shell) is still refused inside the install job;
+  the examples themselves are unchanged. (main QA of 67e2cf6, 2026-11-13)
 
 ## [0.18.1] - 2026-11-12
 

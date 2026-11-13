@@ -138,7 +138,18 @@ func (d Distro) Ecosystem() (string, error) {
 			return "", fmt.Errorf("%w: distro %q has no VERSION_ID (testing or sid), "+
 				"and OSV publishes no ecosystem for it", ErrNoEcosystem, d.ID)
 		}
-		major, rest, _ := strings.Cut(d.VersionID, ".")
+		// Debian spelled a point release of these with an "r" before
+		// squeeze moved to a third number -- the archive's Release files
+		// say 3.0r6, 3.1r8, 4.0r9, 5.0r10 -- and an SBOM naming etch as the
+		// archive does was refused here (main QA of 67e2cf6, 2026-11-13:
+		// --fail-on-eol fell silent on it, exit 0 where ef0bc1a had exit
+		// 1). The revision is a point of the release, as 6.0.10 is of 6.0,
+		// and is read as one.
+		versionID := d.VersionID
+		if point := debianRevisionPoint(versionID); point != "" {
+			versionID = point
+		}
+		major, rest, _ := strings.Cut(versionID, ".")
 		if !allDigits(major) {
 			return "", fmt.Errorf("%w: distro %q version %q is not a numbered release",
 				ErrNoEcosystem, d.ID, d.VersionID)
@@ -758,6 +769,23 @@ func (d Distro) Ecosystem() (string, error) {
 			ErrNoEcosystem, d.ID, d.VersionID)
 	}
 	return "Alpine:v" + major + "." + minor, nil
+}
+
+// debianRevisionPoint is the "rN" point-release spelling Debian used before
+// squeeze (4.0r9, the archive's own) as the three-number spelling it moved
+// to (4.0.9), or "" for any other string. Only a two-number release
+// followed by "r" and digits qualifies: "4.0r", "4.0rc1" and "4r9" are not
+// Debian spellings and stay as written, to be refused by the digit checks.
+func debianRevisionPoint(v string) string {
+	release, rev, ok := strings.Cut(v, "r")
+	if !ok || !allDigits(rev) {
+		return ""
+	}
+	major, minor, ok := strings.Cut(release, ".")
+	if !ok || !allDigits(major) || !allDigits(minor) {
+		return ""
+	}
+	return release + "." + rev
 }
 
 func allDigits(s string) bool {
