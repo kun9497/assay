@@ -31,7 +31,8 @@ signature with `openssl` (or `cosign`) before the checksum, then picks the right
 your OS/arch. The line names the commit the latest release was built from — never a branch
 or a tag, which can move — and the release job updates it. The script is downloaded to a
 temporary file (`mktemp`) and run only if the download succeeded; the file is removed afterwards
-whether the install succeeded or not, and the line's exit status is the install's (piping `curl`
+whether the install succeeded or failed (an interrupted run can leave it in `$TMPDIR`, readable
+only by you), and the line's exit status is the install's (piping `curl`
 into `sh` had returned 0 on a failed download, and a fixed file name in the working directory
 had overwritten a file of that name). Nothing in the current directory is touched. Without `-b`
 it installs to `./bin` (no sudo needed — add it to your PATH yourself); to install another

@@ -44,8 +44,11 @@ var pipedIntoSh = regexp.MustCompile(`install\.(sh|ps1)[^\n]*\|\s*(sudo(\s+-\S+)
 // overwrote a file of that name (main QA of 672fe7a, 2026-11-13).
 var (
 	pinnedScript  = `https://raw\.githubusercontent\.com/kun9497/assay/[0-9a-f]{40}/install\.sh`
-	oneLinerShape = regexp.MustCompile(`sh -c 't=\$\(mktemp\) && curl -sSfL -o "\$t" ` + pinnedScript + ` && (?:sudo )?sh "\$t" -b /usr/local/bin; s=\$\?; rm -f "\$t"; exit \$s'`)
-	ciShape       = regexp.MustCompile(`t=\$\(mktemp\)\n[ \t]*(?:- )?trap 'rm -f "\$t"' EXIT\n[ \t]*(?:- )?curl -sSfL -o "\$t" ` + pinnedScript + `\n[ \t]*(?:- )?sh "\$t" -b /usr/local/bin`)
+	// Anchored to the line, so nothing may follow the shape: a trailing
+	// `|| true` or `; exit 0` would hand the caller a success again (PR
+	// #315 review).
+	oneLinerShape = regexp.MustCompile(`(?m)^[ \t]*sh -c 't=\$\(mktemp\) && curl -sSfL -o "\$t" ` + pinnedScript + ` && (?:sudo )?sh "\$t" -b /usr/local/bin; s=\$\?; rm -f "\$t"; exit \$s'$`)
+	ciShape       = regexp.MustCompile(`(?m)^[ \t]*(?:- )?t=\$\(mktemp\)\n[ \t]*(?:- )?trap 'rm -f "\$t"' EXIT\n[ \t]*(?:- )?curl -sSfL -o "\$t" ` + pinnedScript + `\n[ \t]*(?:- )?sh "\$t" -b /usr/local/bin$`)
 	fixedName     = regexp.MustCompile(`-o +\.?/?assay-install\.sh`)
 )
 
