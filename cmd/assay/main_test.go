@@ -1008,16 +1008,27 @@ func TestUsage_DocumentsRegistryAuthEnvironment(t *testing.T) {
 // The 2026-10-22 audit found it still saying "go.mod alone" and "Go, npm,
 // PyPI, Alpine" months after SPDX (D84), the lockfile readers (D61-D63,
 // D103) and jars had shipped; and an image scan's missing application
-// packages (D70, D141) belong in the help, not only on stderr.
+// packages (D70, D141) belong in the help, not only on stderr. The Linux
+// QA of v0.18.1 (2026-11-13) found it still saying application packages
+// inside an image "are not read" a release after D160's probes read the
+// global node_modules roots and the standard bin directories, while the
+// same binary's scan stderr listed the paths it had read: the help names
+// what is read and what is not, as the scan does.
 func TestUsage_NamesWhatAScanReads(t *testing.T) {
+	// The help is wrapped by hand; the claims are held on the unwrapped
+	// text so a rewrap cannot hide a stale sentence or break a held one.
+	flat := strings.Join(strings.Fields(usage), " ")
 	for _, want := range []string{"CycloneDX", "SPDX 2.2/2.3", "docker-archive:", "oci-dir:",
-		"Go binary", "jar", "pnpm", "requirements.txt", "Cargo.lock", "application packages", "(D70)"} {
-		if !strings.Contains(usage, want) {
-			t.Errorf("usage does not name %q", want)
+		"Go binary", "jar", "pnpm", "requirements.txt", "Cargo.lock", "application packages", "(D70)",
+		"npm packages under the global node_modules roots", "Go binaries directly in the standard bin directories", "(D160)",
+		"other Go binaries - are not read, and the scan's stderr names what was (D70)"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("usage does not say %q", want)
 		}
 	}
-	for _, stale := range []string{"go.mod alone", "(Go, npm, PyPI, Alpine)", "SBOM-driven"} {
-		if strings.Contains(usage, stale) {
+	for _, stale := range []string{"go.mod alone", "(Go, npm, PyPI, Alpine)", "SBOM-driven",
+		"application packages inside it are not read"} {
+		if strings.Contains(flat, stale) {
 			t.Errorf("usage still says %q", stale)
 		}
 	}
