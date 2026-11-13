@@ -8902,6 +8902,15 @@ releases now stays unkeyed in every order (the same rule, where it belongs), whe
 whichever release came first. The unlent listing's key and reason twin are taken per listing from
 the installs of its own release (the "2 and 2" reason the independent review found).
 
+**2026-11-13 revision (Linux QA of v0.18.1).** The pooling above places a bare top-level listing
+beside whichever subject install took its twin's slot, which may be an install of another
+release. When no install of the listing's own release exists -- one name and version listed bare
+under Debian 11 and Debian 12, installed on Debian 11 alone -- v0.18.1 had fallen back to that
+other release's install for the reason and reported the Debian 12 listing contradicted "7 and 7",
+not judged, exit 2 under `--fail-on-incomplete=target`, where v0.18.0 judged it (2 of 2). Only an
+install the listing contradicts names its reason; a listing no install of its release could join
+is a package of its own, judged on what it states, as the rule above already said.
+
 ---
 
 ### D167 — The differential floors each probed ecosystem's application packages (`minApplicationPackages`)

@@ -315,11 +315,20 @@ func weighBareListings(d *dedupe, target *pkgmeta.Target, stats *Stats, original
 		if p.Ecosystem == "" && keyOf[i] != ambiguousKey {
 			p.Ecosystem = keyOf[i]
 		}
-		twin := target.Packages[e.twin]
+		// Only an install this listing contradicts names its reason. The
+		// promotion above pools a bare top-level listing beside whichever
+		// install took its twin's slot, which may be an install of ANOTHER
+		// release -- one name and version listed bare under Debian 12 beside
+		// a Debian 11 install, with no Debian 12 install at all -- and
+		// v0.18.1's fallback to that slot had reported the listing
+		// contradicted by it ("7 and 7" for two statements of 7) and left it
+		// unjudged, where v0.18.0 judged it (Linux QA of v0.18.1,
+		// 2026-11-13). A listing no install of its release contradicts is
+		// what it was before the subject was read: a package of its own,
+		// judged on what it states.
 		if j, ok := twinOf[i]; ok {
-			twin = target.Packages[j]
+			markSourceContradiction(&p, p, target.Packages[j])
 		}
-		markSourceContradiction(&p, p, twin)
 		target.Packages = append(target.Packages, p)
 		stats.Components++
 		stats.Cataloged++

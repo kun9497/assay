@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- CycloneDX: a bare top-level listing of one release beside the subject's install of ANOTHER
+  release is judged on what it states. v0.18.1 had pooled it beside that install, found no
+  install of its own release to name and fallen back to the other release's, so one name and
+  version listed under Debian 11 and Debian 12 with a Debian 11 install alone read 1 of 2
+  evaluated, a "7 and 7" contradiction and exit 2 under `--fail-on-incomplete=target`, where
+  v0.18.0 read 2 of 2 and exit 0. Only an install the listing contradicts names its reason; a
+  real contradiction ("2 and 7") is reported as before. (D166 revised; Linux QA of v0.18.1,
+  2026-11-13)
+
 ## [0.18.1] - 2026-11-12
 
 ### Changed
