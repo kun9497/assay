@@ -16,6 +16,12 @@ All notable changes to this project are documented here. The format follows
   v0.18.0 read 2 of 2 and exit 0. Only an install the listing contradicts names its reason; a
   real contradiction ("2 and 7") is reported as before. (D165 revised; Linux QA of v0.18.1,
   2026-11-13)
+- Image scans: `etc/debian_version`, read since v0.18.1 for Debian's point release (D121), is
+  consulted on a Debian image only. A non-Debian image in which that path could not be resolved
+  (a symbolic link cycle, on an Alpine image) had listed it unread and exited 2 under
+  `--fail-on-incomplete=target` for a file the scan never reads; it no longer does. A Debian
+  image's unreadable `debian_version` stays reported, since its purls then spell the major alone.
+  (Linux QA of v0.18.1, 2026-11-13)
 
 ## [0.18.1] - 2026-11-12
 

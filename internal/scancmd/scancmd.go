@@ -1555,6 +1555,20 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		}
 	}
 
+	// debian_version was asked for in the one Files pass above, beside
+	// os-release, so a Debian image pays no second walk of its layers for
+	// its point release. Any other image never consults it, and a failure to
+	// resolve it there is not the target's incompleteness: an Alpine image
+	// whose etc/debian_version was a symbolic link cycle had exited 2 under
+	// --fail-on-incomplete=target, with the file listed unread, for a path
+	// the scan would not have read (Linux QA of v0.18.1, 2026-11-13). A
+	// Debian image's unreadable debian_version stays reported: its purls
+	// then spell the major alone and a point-release VEX statement does not
+	// reach them (D121), which the reader should know.
+	if target.Distro == nil || target.Distro.ID != "debian" {
+		img.Disregard(debianVersionPath)
+	}
+
 	// Dispatched on which database the image actually carries, not on what
 	// os-release claimed. An image may have neither, and one that has a
 	// database whose distro has no ecosystem is still worth cataloging unkeyed
