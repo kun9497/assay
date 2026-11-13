@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- VEX: a Debian or Ubuntu codename in a package purl's `distro=` qualifier (`bookworm`,
+  `debian-bookworm`, `jammy`) is read as the release it names. It confirms an OS component's
+  point release of that major without contradicting it -- an OS of Debian 12.15 beside
+  `distro=bookworm` takes a 12.15 statement again, as v0.18.1 did and 672fe7a had refused -- and
+  proves no point release of its own: an OS of 12 or of 12.14, or another codename, is not
+  exonerated by a 12.15 statement. A statement spelled with the codename is the major's, and a
+  document with no operating-system component whose purls carry a codename is keyed to that
+  release rather than left unevaluated. (D121; main QA of 672fe7a, 2026-11-13)
 - VEX: one install listed twice in a CycloneDX document -- at the top level and under the
   subject -- with purls naming two Debian point releases is held to the shared major in both
   positions. The scope of a listing whose purl contradicts its local OS is Mixed from the start,

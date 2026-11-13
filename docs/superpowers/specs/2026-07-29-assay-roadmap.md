@@ -8886,7 +8886,10 @@ the first: the scope had kept the local OS on a contradiction and the join keeps
 listing's purl, so apt listed as 12.15 at the top level and 12.14 under the subject was
 suppressed by a 12.15 statement while the other way round it was kept. A listing whose purl
 contradicts its local OS is Mixed from the start, as two contradicting listings merge to, in
-every position. Ubuntu codenames must agree with the evaluated Ubuntu release. A
+every position. A Debian or Ubuntu codename in a purl's `distro=` (`bookworm`; the purl spec's own deb
+example is the codename `jessie`) names the major -- in the statement, in the install's purl and in
+the key an OS-less document is given: it confirms a local point release of that major and proves none of
+its own (main QA of 672fe7a). Ubuntu codenames must agree with the evaluated Ubuntu release. A
 language package matches an OS-qualified product through its explicit PURL qualifier and
 the local OS evidence when available. Conflicting sibling OS families prevent this exemption.
 Compatible descriptions of one installation, such as Oracle Linux 9 and 9.8, retain the
