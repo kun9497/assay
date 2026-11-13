@@ -132,14 +132,6 @@ func releaseIsFullyKeyed(d Distro, key string) bool {
 	if strings.HasSuffix(key, ":"+d.VersionID) {
 		return true
 	}
-	// A qualifier spelled exactly as the key's own release is the whole
-	// key, dot or no dot: debian-6.0 names Debian:6.0 entire, as debian-12
-	// names Debian:12 (PR #321 review: the trim below had read "6.0" as a
-	// point of "6", and a squeeze statement was refused under a Mixed
-	// scope where a bookworm one applied).
-	if strings.HasSuffix(key, ":"+d.VersionID) {
-		return true
-	}
 	if i := strings.LastIndexByte(d.VersionID, '.'); i >= 0 {
 		d.VersionID = d.VersionID[:i]
 		parentKey, _ := d.Ecosystem()
