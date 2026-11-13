@@ -9,6 +9,8 @@ func TestCanonicalDistroQualifier(t *testing.T) {
 		"debian-bookworm": "debian-12",
 		"bullseye":        "debian-11",
 		"trixie":          "debian-13",
+		"etch":            "debian-4.0",
+		"squeeze":         "debian-6.0",
 		"jammy":           "ubuntu-22.04",
 		"ubuntu-jammy":    "ubuntu-22.04",
 		"noble":           "ubuntu-24.04",
@@ -35,7 +37,9 @@ func TestCanonicalDistroQualifier(t *testing.T) {
 // the table holds exactly the codenames it is meant to: a dropped or extra
 // row fails here, not in whichever scan first meets it.
 func TestDebianReleasesAreKeyedReleases(t *testing.T) {
-	want := map[string]string{"etch": "4", "lenny": "5", "squeeze": "6", "wheezy": "7", "jessie": "8", "stretch": "9",
+	// The number is the store's key for the release (Distro.Ecosystem):
+	// OSV's two-part spelling before wheezy, the bare major from it on.
+	want := map[string]string{"woody": "3.0", "sarge": "3.1", "etch": "4.0", "lenny": "5.0", "squeeze": "6.0", "wheezy": "7", "jessie": "8", "stretch": "9",
 		"buster": "10", "bullseye": "11", "bookworm": "12", "trixie": "13", "forky": "14", "duke": "15"}
 	got := DebianReleases()
 	if len(got) != len(want) {

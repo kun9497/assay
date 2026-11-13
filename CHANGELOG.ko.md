@@ -8,6 +8,10 @@
 ## [Unreleased]
 
 ### Fixed
+- 7 이전 Debian 릴리스를 OSV와 저장소가 적는 대로 — `Debian:3.0`, `3.1`, `4.0`, `5.0`, `6.0` — 키합니다. purl의
+  코드네임(`distro=etch`)이나 그 모양의 `VERSION_ID`에서 그렇습니다. etch·lenny·squeeze를 적은 SBOM은 아무것도 없는
+  `Debian:4`, `5`, `6`을 조회해 advisory가 있는 DB에서도 미평가(종료 2)였습니다. wheezy 이후는 전과 같이 메이저만, 맨
+  `3`은 woody·sarge 중 하나라 거부합니다. (main ef0bc1a QA, 2026-11-13)
 - 이미지 스캔: `etc/debian_version`(Debian 포인트 릴리스, D121)을 Debian 이미지에서만, 모든 이미지가 Bitnami 레거시
   마커를 위해 이미 지나는 정확 경로 패스에서 요청합니다. os-release와 같은 첫 패스에서 요청할 때는 모든 이미지에서 읽고
   링크를 따라가고 읽기 예산에 셌습니다 — 그 이름의 파일이 파일 한도(512 MiB)를 넘는 Alpine 이미지는 패키지를 읽기 전에

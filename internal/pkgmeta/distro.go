@@ -119,9 +119,15 @@ func (d Distro) Ecosystem() (string, error) {
 		// OSV keys modern Debian releases on the bare major — Debian:11 through
 		// Debian:14 hold 200,082 of the archive's 211,021 affected entries,
 		// and /etc/os-release's VERSION_ID is that same bare major ("12").
-		// The ancient releases OSV spells Debian:3.0 / 5.0 / 6.0 are not
-		// reachable this way and are not worth a special case: no supported
-		// image ships them.
+		// The releases before 7 it spells with their two-part number --
+		// Debian:3.0 (woody), 3.1 (sarge), 4.0 (etch), 5.0 (lenny), 6.0
+		// (squeeze) -- and the store carries those keys, so a release named
+		// that way (a purl's distro=etch, or VERSION_ID "4.0") is keyed to
+		// them rather than to a bare "Debian:4" nothing holds (main QA of
+		// ef0bc1a, 2026-11-13: etch, lenny and squeeze SBOMs were not
+		// evaluated, exit 2, over a database that held their advisories). A
+		// bare "4", "5" or "6" has one release each and is keyed to it; a
+		// bare "3" is woody or sarge and is refused as ambiguous.
 		//
 		// testing and sid carry NO VERSION_ID at all, and OSV publishes no
 		// ecosystem for them, so they fall through to the error below. That is
@@ -132,10 +138,21 @@ func (d Distro) Ecosystem() (string, error) {
 			return "", fmt.Errorf("%w: distro %q has no VERSION_ID (testing or sid), "+
 				"and OSV publishes no ecosystem for it", ErrNoEcosystem, d.ID)
 		}
-		major, _, _ := strings.Cut(d.VersionID, ".")
+		major, rest, _ := strings.Cut(d.VersionID, ".")
 		if !allDigits(major) {
 			return "", fmt.Errorf("%w: distro %q version %q is not a numbered release",
 				ErrNoEcosystem, d.ID, d.VersionID)
+		}
+		if n, _ := strconv.Atoi(major); n <= 6 {
+			minor, _, _ := strings.Cut(rest, ".")
+			if minor == "" && n >= 4 {
+				minor = "0"
+			}
+			if minor == "" || !allDigits(minor) {
+				return "", fmt.Errorf("%w: distro %q version %q names no two-part release OSV keys (Debian:3.0, 3.1, 4.0, 5.0, 6.0)",
+					ErrNoEcosystem, d.ID, d.VersionID)
+			}
+			return "Debian:" + major + "." + minor, nil
 		}
 		return "Debian:" + major, nil
 	case "ubuntu":
