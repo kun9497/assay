@@ -8,6 +8,10 @@
 ## [Unreleased]
 
 ### Fixed
+- VEX: 문장의 `distro=`에 적힌 Ubuntu 코드네임은 철자가 어떻든 같은 증거 규칙을 받습니다 — `jammy`, `JAMMY`,
+  `ubuntu-jammy` 모두 스캔에 코드네임 증거(os-release 또는 설치 purl)가 있어야 합니다. ef0bc1a는 소문자 맨 철자는
+  거부하고 나머지 둘은 릴리스 정규화로 넘겨 코드네임이 없는 문서에서 advisory 2건을 억제하고 종료 1을 0으로 바꿨습니다;
+  숫자 `ubuntu-22.04`는 전과 같이 단독으로 적용되고 `noble`은 여전히 거부됩니다. (main ef0bc1a QA, 2026-11-13)
 - 이미지 스캔: `etc/debian_version`(Debian 포인트 릴리스, D121)을 Debian 이미지에서만, 모든 이미지가 Bitnami 레거시
   마커를 위해 이미 지나는 정확 경로 패스에서 요청합니다. os-release와 같은 첫 패스에서 요청할 때는 모든 이미지에서 읽고
   링크를 따라가고 읽기 예산에 셌습니다 — 그 이름의 파일이 파일 한도(512 MiB)를 넘는 Alpine 이미지는 패키지를 읽기 전에

@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- VEX: an Ubuntu codename in a statement's `distro=` is held to the same evidence rule however
+  it is spelled -- `jammy`, `JAMMY` and `ubuntu-jammy` alike need the codename in the scan
+  (os-release or the install purl). ef0bc1a had refused the bare lower-case spelling and let the
+  other two pass to the release normalisation, suppressing two advisories and turning exit 1 into
+  0 on a document that carried no codename; the numeric `ubuntu-22.04` still applies on its own
+  and `noble` is still refused. (main QA of ef0bc1a, 2026-11-13)
 - Image scans: `etc/debian_version` (Debian's point release, D121) is asked for on a Debian
   image only, in the exact-path pass every image already makes for Bitnami's legacy marker.
   Asked for in the first pass beside os-release, it had been read, link-followed and charged to
