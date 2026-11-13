@@ -14,7 +14,7 @@ All notable changes to this project are documented here. The format follows
   version listed under Debian 11 and Debian 12 with a Debian 11 install alone read 1 of 2
   evaluated, a "7 and 7" contradiction and exit 2 under `--fail-on-incomplete=target`, where
   v0.18.0 read 2 of 2 and exit 0. Only an install the listing contradicts names its reason; a
-  real contradiction ("2 and 7") is reported as before. (D166 revised; Linux QA of v0.18.1,
+  real contradiction ("2 and 7") is reported as before. (D165 revised; Linux QA of v0.18.1,
   2026-11-13)
 
 ## [0.18.1] - 2026-11-12
@@ -42,7 +42,7 @@ All notable changes to this project are documented here. The format follows
   not-evaluated listing and exit 2 under `--fail-on-incomplete=target` in the other; two Debian 12
   bare listings beside a Debian 12 install had been judged on a contradicted source in one order
   only; an unkeyed bare listing beside installs of two releases now stays unkeyed in every order.
-  (D166 revised; independent review of v0.18.0, 2026-11-12)
+  (D165 revised; independent review of v0.18.0, 2026-11-12)
 - A Debian image's OS packages spell the point release in their purl, `distro=debian-12.11`,
   read from `/etc/debian_version` as syft reads it (`supplementDebianVersion`), where they had
   spelled os-release's bare major, `debian-12` -- the D121 promise (syft's spelling, so a VEX

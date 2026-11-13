@@ -8856,7 +8856,9 @@ the first had given its source version to the install stating none and the next 
 contradicting what had just been lent, so the mirror placement -- installs at the top, bare
 listings under the subject -- was judged by document order with exit 0, and with one twin the
 contradiction was pinned on the second listing while the install stood; the top-level installs
-are weighed too. A pooled listing lent to no install is a package of its own, marked, as before. A
+are weighed too. A pooled listing lent to no install is a package of its own, marked when an install it could be
+-- one of its own release, or unkeyed -- contradicts it, and otherwise judged on what it states
+(2026-11-13 revision below). A
 bare listing no install could join stays a package of its own, as before. (2) The merged purl spells the INSTALL's qualifiers where the two
 listings disagree -- a bare twin's `distro=alpine-3.20` had overwritten the install's 3.19, and a
 VEX statement written for 3.20 exonerated the 3.19 install (2 findings hidden, exit 0) -- and a
@@ -8909,7 +8911,7 @@ under Debian 11 and Debian 12, installed on Debian 11 alone -- v0.18.1 had falle
 other release's install for the reason and reported the Debian 12 listing contradicted "7 and 7",
 not judged, exit 2 under `--fail-on-incomplete=target`, where v0.18.0 judged it (2 of 2). Only an
 install the listing contradicts names its reason; a listing no install of its release could join
-is a package of its own, judged on what it states, as the rule above already said.
+is a package of its own, judged on what it states (the rule sentence above now says so).
 
 ---
 
