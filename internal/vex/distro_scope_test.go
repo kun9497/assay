@@ -40,6 +40,14 @@ func TestDistroQualifierScope(t *testing.T) {
 		{"installed major, statement another major", "deb", "debian", "Debian:12", "", "debian-12", "debian-11.11", false, false},
 		{"RHEL installed major alone, statement point release", "rpm", "redhat", "Red Hat:9", "", "rhel-9", "rhel-9.4", false, false},
 		{"ambiguous nested points", "rpm", "redhat", "Red Hat:9", "", "rhel-9.4", "rhel-9.4", true, false},
+		// PR #321 review: a Debian release keyed with its two-part number
+		// (Debian:6.0) is named whole by debian-6.0 and by squeeze, so under
+		// a Mixed scope those statements apply as a bookworm one does under
+		// Debian:12, while a point of it (6.0.10) does not.
+		{"mixed scope, squeeze names the whole key", "deb", "debian", "Debian:6.0", "", "debian-6.0.10", "squeeze", true, true},
+		{"mixed scope, debian-6.0 names the whole key", "deb", "debian", "Debian:6.0", "", "debian-6.0.10", "debian-6.0", true, true},
+		{"mixed scope, a point of 6.0 does not", "deb", "debian", "Debian:6.0", "", "debian-6.0.10", "debian-6.0.10", true, false},
+		{"mixed scope, bookworm names the whole key", "deb", "debian", "Debian:12", "", "debian-12.10", "bookworm", true, true},
 		{"patch equality", "apk", "alpine", "Alpine:v3.19", "alpine-3.19.9", "", "alpine-3.19.9", false, true},
 		{"different patch", "apk", "alpine", "Alpine:v3.19", "alpine-3.19.9", "alpine-3.19.9", "alpine-3.19.1", false, false},
 		{"edge under stable", "apk", "alpine", "Alpine:v3.19", "alpine-3.19", "alpine-edge", "alpine-edge", false, false},

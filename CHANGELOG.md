@@ -11,7 +11,7 @@ All notable changes to this project are documented here. The format follows
 - Debian releases before 7 are keyed the way OSV and the store spell them -- `Debian:3.0`, `3.1`,
   `4.0`, `5.0`, `6.0` -- from a purl's codename (`distro=etch`) or a `VERSION_ID` of that shape.
   An SBOM naming etch, lenny or squeeze had asked for `Debian:4`, `5`, `6`, which nothing holds,
-  and was not evaluated (exit 2) over a database carrying their advisories. wheezy on stay on the
+  and was not evaluated (exit 2) over a database carrying their advisories. wheezy onward stays on the
   bare major; a bare `3` is refused as ambiguous (woody or sarge). (main QA of ef0bc1a, 2026-11-13)
 - Image scans: `etc/debian_version` (Debian's point release, D121) is asked for on a Debian
   image only, in the exact-path pass every image already makes for Bitnami's legacy marker.

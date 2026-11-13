@@ -55,6 +55,15 @@ func eolCycle(ecosystem string) (cycle string, ok bool) {
 	// endoflife.date's own release.name never carries ("v3.19" vs "3.19") —
 	// every other family's suffix already matches endoflife.date verbatim.
 	release = strings.TrimPrefix(release, "v")
+	// Debian's releases before 7 are keyed with OSV's two-part number
+	// (Debian:4.0, 5.0, 6.0; pkgmeta.Distro.Ecosystem), while endoflife.date
+	// names those cycles "4", "5", "6" -- and "3.0"/"3.1" as they are. The
+	// ".0" comes off here, at the read side (PR #321 review: with the key
+	// reshaped, --fail-on-eol had stopped firing for etch, lenny and
+	// squeeze, printing only "EOL unknown").
+	if strings.HasPrefix(ecosystem, "Debian:") && strings.HasSuffix(release, ".0") && release != "3.0" {
+		release = strings.TrimSuffix(release, ".0")
+	}
 	if strings.HasPrefix(ecosystem, "SLES:") {
 		if i := strings.Index(release, ".SP"); i >= 0 {
 			release = release[:i] + "." + release[i+3:]
