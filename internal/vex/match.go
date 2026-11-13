@@ -431,6 +431,8 @@ func qualifierMatches(pkg pkgmeta.PURL, k, v, codename string, installed *pkgmet
 			// A codename must actually be supplied by this scan, either in
 			// os-release or the package's purl. A same-spelled purl alone
 			// cannot exempt a package evaluated on another release.
+			// os-release spells VERSION_CODENAME in lower case on every
+			// Ubuntu release; the fold is a defence, not a case met.
 			if cn != strings.ToLower(codename) && cn != pkgmeta.UbuntuCodename(got) {
 				return false
 			}
