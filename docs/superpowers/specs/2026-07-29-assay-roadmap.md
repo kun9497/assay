@@ -8877,7 +8877,10 @@ dropped; the independent review the same day found the root cause instead: syft 
 image path reads it too (`Distro.PointRelease`, D121 parity), the purl spells `debian-12.11`,
 the strict rule stands, and a statement for 12.10 does not exonerate a 12.11 image. Conflicting
 point releases leave only their shared advisory key
-available for matching. Ubuntu codenames must agree with the evaluated Ubuntu release. A
+available for matching -- the Mixed scope two merged listings reach, and, since the 2026-11-13
+Linux QA of v0.18.1, the same for one listing whose local OS component and purl declare two
+(12.10 beside `distro=debian-12.11`): v0.18.0 and v0.18.1 had let the OS component's point
+release pass as the install's and a 12.10 statement suppress the finding. Ubuntu codenames must agree with the evaluated Ubuntu release. A
 language package matches an OS-qualified product through its explicit PURL qualifier and
 the local OS evidence when available. Conflicting sibling OS families prevent this exemption.
 Compatible descriptions of one installation, such as Oracle Linux 9 and 9.8, retain the
