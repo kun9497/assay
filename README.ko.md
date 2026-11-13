@@ -23,18 +23,17 @@
 
 ```bash
 # 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — PATH 위로 바로 설치; Windows는 아래
-curl -sSfL -o assay-install.sh https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh && sudo sh ./assay-install.sh -b /usr/local/bin && rm -f assay-install.sh
+sh -c 't=$(mktemp) && curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
 ```
 
 스크립트는 프로젝트 서명 키를 내장하고 릴리스 체크섬 파일의 서명을 `openssl`(또는 `cosign`)로
 먼저 검증한 뒤 체크섬을 확인하고 OS/arch에 맞는 에셋을 고릅니다. 위 줄은 최신 릴리스가 빌드된
 커밋을 가리킵니다 — 옮겨질 수 있는 브랜치나 태그가 아니라 — 그리고 릴리스 잡이 이 줄을 갱신합니다.
-스크립트는 먼저 파일로 받고 다운로드가 성공했을 때만 실행합니다: `curl`을 `sh`로 파이프하면 다운로드가 실패해도
-`sh`가 빈 입력을 읽고 깨끗이 끝나 아무것도 설치되지 않은 채 0을 반환했습니다. `-b` 없이 실행하면 `./bin`에
-설치됩니다(sudo 불필요 — PATH 등록은 직접). 다른 릴리스는 스크립트를 같은 방법으로 받은 뒤
-`sudo sh ./assay-install.sh -b /usr/local/bin vX.Y.Z`로 설치하며, 같은 키로 검증합니다. 파일은 현재 디렉터리에
-쓰고 거기서 실행하므로 본인만 쓸 수 있는 디렉터리에서 실행하십시오; 설치가 실패하면 재실행을 위해 파일이 남습니다
-(`rm -f`는 성공 뒤에만 실행되므로 줄의 종료 상태는 설치의 것입니다). 체크섬 파일에 서명이 없는 릴리스는 체크섬만으로 설치하지 않고
+스크립트는 임시 파일(`mktemp`)로 받아 다운로드가 성공했을 때만 실행하고, 설치가 성공하든 실패하든 그 파일을 지우며(중단된 실행은 `$TMPDIR`에 본인만 읽을 수 있는 파일을 남길 수 있습니다),
+줄의 종료 상태는 설치의 것입니다(`curl`을 `sh`로 파이프하면 다운로드가 실패해도 0을 반환했고, 작업 디렉터리의 고정
+파일명은 같은 이름의 파일을 덮어썼습니다). 현재 디렉터리의 파일은 건드리지 않습니다. `-b` 없이 실행하면 `./bin`에
+설치됩니다(sudo 불필요 — PATH 등록은 직접). 다른 릴리스는 같은 줄 안에서 `-b /usr/local/bin` 뒤에 태그를 붙여
+(`… -b /usr/local/bin vX.Y.Z; s=$?; …`) 설치하며, 같은 키로 검증합니다. 체크섬 파일에 서명이 없는 릴리스는 체크섬만으로 설치하지 않고
 거부합니다: v0.10.0 이 첫 서명 릴리스이므로 그보다 오래된 것은 `go install` 이나 릴리스 페이지로
 설치하세요.
 

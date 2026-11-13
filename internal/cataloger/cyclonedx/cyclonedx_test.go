@@ -17,7 +17,13 @@ func TestLocalReleaseScopeUsesThePackageBranch(t *testing.T) {
 		scope            pkgmeta.DistroScope
 	}{
 		{"ambiguous siblings", os94 + "," + os96 + "," + rpm, pkgmeta.DistroScope{Mixed: true}},
-		{"local fine release", os94 + "," + rpm, pkgmeta.DistroScope{Qualifier: "rhel-9.4"}},
+		// Main QA of 672fe7a (2026-11-13): a purl naming another point release
+		// than the OS beside it is the document contradicting itself about
+		// this install, and the scope is Mixed from the start -- it had kept
+		// the local 9.4, which a duplicate listing merged onto it then
+		// carried alone (DistroScope.ForInstallation).
+		{"local fine release contradicted by the purl", os94 + "," + rpm, pkgmeta.DistroScope{Mixed: true}},
+		{"no purl release keeps the local OS", os94 + `,{"type":"library","purl":"pkg:rpm/redhat/openssl@1"}`, pkgmeta.DistroScope{Qualifier: "rhel-9.4"}},
 		{"nested override", os94 + `,{"type":"container","components":[` + os96 + "," + rpm + `]}`, pkgmeta.DistroScope{Qualifier: "rhel-9.6"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -103,12 +109,21 @@ func TestDifferentOSFamiliesPreserveMixedScopeAndNativePURLFallback(t *testing.T
 	}
 }
 
+// A versionless OS component names a family; a language package's purl
+// refines it to a release of that family. A purl naming ANOTHER family
+// beside it is the document contradicting itself (sibling OS families,
+// D121), and the scope is Mixed, so no distro-scoped statement reaches the
+// package -- the same outcome the family name alone had given through
+// the matcher, now stated at the scope (main QA of 672fe7a, 2026-11-13).
 func TestVersionlessOSConstrainsLanguageRelease(t *testing.T) {
-	for _, tc := range []struct{ family, installed, want string }{
-		{"debian", "photon-4.0", "debian"},
-		{"photon", "photon-4.0", "photon-4.0"},
-		{"opensuse-leap", "opensuse-leap-15.6", "opensuse-leap-15.6"},
-		{"wolfi", "photon-4.0", "wolfi"},
+	for _, tc := range []struct {
+		family, installed string
+		want              pkgmeta.DistroScope
+	}{
+		{"debian", "photon-4.0", pkgmeta.DistroScope{Mixed: true}},
+		{"photon", "photon-4.0", pkgmeta.DistroScope{Qualifier: "photon-4.0"}},
+		{"opensuse-leap", "opensuse-leap-15.6", pkgmeta.DistroScope{Qualifier: "opensuse-leap-15.6"}},
+		{"wolfi", "photon-4.0", pkgmeta.DistroScope{Mixed: true}},
 	} {
 		doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"type":"operating-system","name":"` +
 			tc.family + `"},{"type":"library","purl":"pkg:npm/lodash@4.17.20?distro=` + tc.installed + `"}]}`
@@ -116,8 +131,8 @@ func TestVersionlessOSConstrainsLanguageRelease(t *testing.T) {
 		if err != nil || len(target.Packages) != 1 {
 			t.Fatalf("parse %s: target=%+v err=%v", doc, target, err)
 		}
-		if p := target.Packages[0]; p.DistroContext.Qualifier != tc.want || p.Ecosystem != "npm" {
-			t.Errorf("versionless %s: %+v, want %s", tc.family, p, tc.want)
+		if p := target.Packages[0]; p.DistroContext != tc.want || p.Ecosystem != "npm" {
+			t.Errorf("versionless %s: %+v, want %+v", tc.family, p, tc.want)
 		}
 	}
 }
