@@ -51,8 +51,45 @@ var (
 	// #315 review).
 	oneLinerShape = regexp.MustCompile(`(?m)^[ \t]*(?:- )?sh -c 't=\$\(mktemp\) && curl -sSfL -o "\$t" ` + pinnedScript + ` && (?:sudo )?sh "\$t" -b /usr/local/bin; s=\$\?; rm -f "\$t"; exit \$s'$`)
 	fixedName     = regexp.MustCompile(`-o +\.?/?assay-install\.sh`)
-	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:- )?(?:t=\$\(mktemp\)|trap 'rm -f "\$t"' EXIT)[ \t]*$`)
+	// Any variable holding a mktemp path, or any trap on EXIT, written as a
+	// line of its own (optionally a YAML list item, `export`ed, quoted,
+	// commented) -- the shapes a reader rewriting the four-line form would
+	// produce.
+	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?\w+="?\$\(mktemp\b|^[ \t]*(?:-[ \t]+)?trap[ \t]+['"]`)
 )
+
+// TestInstallOneLiners_LeakGuardCatchesTheFourLineForm holds the guard that
+// refuses a variable or trap left in the calling shell against the four-line
+// form ef0bc1a's docs/ci/gitlab-ci.yml carried, in the spellings a reader
+// would write: without this fixture the guard was held by nothing (PR #319
+// review -- no document carries the shape, so a regex that matched nothing
+// stayed green).
+func TestInstallOneLiners_LeakGuardCatchesTheFourLineForm(t *testing.T) {
+	for _, line := range []string{
+		"    - t=$(mktemp)",
+		"    - trap 'rm -f \"$t\"' EXIT",
+		"          t=$(mktemp)",
+		"          trap 'rm -f \"$t\"' EXIT",
+		"    -   t=\"$(mktemp)\"",
+		"    - export t=$(mktemp)",
+		"    - f=$(mktemp -d)",
+		"    - t=$(mktemp) # the installer's file",
+		"    - trap \"rm -f $t\" EXIT",
+	} {
+		if !leakedIntoJob.MatchString(line + "\n") {
+			t.Errorf("leakedIntoJob does not catch %q", line)
+		}
+	}
+	for _, line := range []string{
+		"    - sh -c 't=$(mktemp) && curl -sSfL -o \"$t\" https://raw.githubusercontent.com/kun9497/assay/0123456789abcdef0123456789abcdef01234567/install.sh && sh \"$t\" -b /usr/local/bin; s=$?; rm -f \"$t\"; exit $s'",
+		"    - apk add --no-cache curl openssl",
+		"    # the temporary file, the download, the run and the clean-up",
+	} {
+		if leakedIntoJob.MatchString(line + "\n") {
+			t.Errorf("leakedIntoJob wrongly catches %q", line)
+		}
+	}
+}
 
 // TestInstallOneLiners_RunTheScriptOnlyAfterItDownloaded holds every install
 // one-liner to the download-then-run shape: never piped into sh, run through

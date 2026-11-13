@@ -20,9 +20,10 @@ assay_scan:
     # `sh -c` line: the temporary file, the download, the run and the
     # clean-up live and die inside it, and the line's status is the
     # install's. GitLab runs before_script and script in ONE shell, so a
-    # variable or an EXIT trap set here would reach the job's own steps --
-    # a trap removing "$t" deleted a report.txt a later step had put in t
-    # (main QA of ef0bc1a, 2026-11-13).
+    # variable or an EXIT trap set here would reach the job's own steps:
+    # in the QA job that found this, a later step put report.txt in t and
+    # the installer's trap deleted it at exit (main QA of ef0bc1a,
+    # 2026-11-13).
     - sh -c 't=$(mktemp) && curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh && sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
     - assay --version
   script:
