@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Image scans: a package read from a per-file database -- a distroless image's
+  `var/lib/dpkg/status.d/<name>`, an Arch image's `var/lib/pacman/local/<pkg>/desc` -- carries in
+  `locations[].layerDigest` the layer its own file came from. The first file's layer had been
+  applied to every package: four of the five packages of `gcr.io/distroless/static-debian12`
+  (ca-certificates, media-types, netbase, tzdata) were reported under base-files' layer. The
+  single-file databases (apk, dpkg status, rpm) are unchanged. No schema change. (main QA of
+  ef0bc1a, 2026-11-13)
 - Image scans: `etc/debian_version` (Debian's point release, D121) is asked for on a Debian
   image only, in the exact-path pass every image already makes for Bitnami's legacy marker.
   Asked for in the first pass beside os-release, it had been read, link-followed and charged to
