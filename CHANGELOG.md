@@ -11,7 +11,9 @@ All notable changes to this project are documented here. The format follows
 - CycloneDX package assignment and Ubuntu VEX now read the same OS evidence. Repeated
   compatible versions such as 22.04 and 22.04.5 agree. When an OS contradicts itself or multiple OS releases apply
   and the package has no independent release, the scan reports why it was not evaluated
-  and exits 2 under `--fail-on-incomplete=target`. Merged Debian package listings with
+  and exits 2 under `--fail-on-incomplete=target`. A package explicitly attributed to a
+  declared release outside database coverage, such as Debian sid, remains a separate
+  unevaluated installation alongside its Debian 12 counterpart. Merged Debian package listings with
   different vendor namespaces cannot use a package VEX exemption for either vendor.
 - Debian releases before 7 are keyed the way OSV and the store spell them -- `Debian:3.0`, `3.1`,
   `4.0`, `5.0`, `6.0` -- from a purl's codename (`distro=etch`) or a `VERSION_ID` of that shape.

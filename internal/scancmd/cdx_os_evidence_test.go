@@ -54,6 +54,7 @@ func TestRun_CDXMultipleOSDeclarationsNeedAnIndependentRelease(t *testing.T) {
 	db := vexDB(t, "Ubuntu:24.04:LTS", vexAdv{"QA-24", "CVE-2031-9110", "apt", "2.8.5"})
 	const os22 = `{"type":"operating-system","name":"ubuntu","version":"22.04"}`
 	const os24 = `{"type":"operating-system","name":"ubuntu","version":"24.04"}`
+	const sid = `{"type":"operating-system","name":"debian","version":"sid"}`
 	const apt = `{"type":"library","purl":"pkg:deb/ubuntu/apt@2.8.4"}`
 	const qualified = `{"type":"library","purl":"pkg:deb/ubuntu/apt@2.8.4?distro=ubuntu-24.04"}`
 	const language = `{"type":"library","purl":"pkg:npm/is-number@7.0.0"}`
@@ -64,7 +65,10 @@ func TestRun_CDXMultipleOSDeclarationsNeedAnIndependentRelease(t *testing.T) {
 		}{
 			{apt + "," + qualified, 2, 1, 1},
 			{qualified + "," + language, 0, 0, 1},
-			{`{"type":"application","name":"nested","components":[` + os24 + "," + apt + `]}`, 0, 0, 1},
+			{sid + `,{"type":"library","purl":"pkg:deb/debian/dpkg@1?distro=debian-sid"},` + qualified, 0, 0, 1},
+			{sid + `,{"type":"library","purl":"pkg:deb/debian/dpkg@1?distro=garbage"},` + qualified, 2, 1, 1},
+			{sid + `,{"type":"library","purl":"pkg:deb/debian/dpkg@1?distro=debian-other"},` + qualified, 2, 1, 1},
+			{`{"type":"library","name":"is-number","purl":"pkg:npm/is-number@7.0.0","components":[` + os24 + "," + apt + `]}`, 0, 0, 1},
 		} {
 			p := filepath.Join(t.TempDir(), "scopes.cdx.json")
 			doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[` + order + "," + tc.packages + `]}`
@@ -80,6 +84,31 @@ func TestRun_CDXMultipleOSDeclarationsNeedAnIndependentRelease(t *testing.T) {
 			if rc != tc.exit || rep.Summary.TargetIncomplete != tc.missing || len(rep.Findings) != tc.findings {
 				t.Fatalf("packages %s: exit %d, summary %+v, skips %+v", tc.packages, rc, rep.Summary, rep.Skipped)
 			}
+		}
+	}
+}
+
+// Debian sid and Debian 12 are separate installs even when the package
+// version and architecture are the same. A missing sid key is a coverage gap.
+func TestRun_CDXUncoveredReleaseIsNotAKeyedTwin(t *testing.T) {
+	db := vexDB(t, "Debian:12", vexAdv{"QA-12", "CVE-2031-9110", "apt", "3.0.4"})
+	const releases = `{"type":"operating-system","name":"debian","version":"sid"},{"type":"operating-system","name":"debian","version":"12"}`
+	const sid = `{"type":"library","purl":"pkg:deb/debian/apt@3.0.3?distro=debian-sid"}`
+	const twelve = `{"type":"library","purl":"pkg:deb/debian/apt@3.0.3?distro=debian-12"}`
+	for _, pair := range [][2]string{{sid, twelve}, {twelve, sid}} {
+		p := filepath.Join(t.TempDir(), "releases.cdx.json")
+		doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[` + releases + "," + pair[0] + `],"metadata":{"component":` + pair[1] + `}}`
+		if err := os.WriteFile(p, []byte(doc), 0600); err != nil {
+			t.Fatal(err)
+		}
+		var out, stderr bytes.Buffer
+		rc := Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnIncompleteTarget: true}, &out, &stderr)
+		var rep report.Document
+		if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+			t.Fatal(err)
+		}
+		if rc != 0 || rep.Summary.Components != 2 || rep.Summary.Evaluated != 1 || rep.Summary.TargetIncomplete != 0 || len(rep.Skipped) != 1 || len(rep.Findings) != 1 {
+			t.Fatalf("exit %d, summary %+v, skips %+v", rc, rep.Summary, rep.Skipped)
 		}
 	}
 }

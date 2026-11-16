@@ -27,6 +27,12 @@ type Package struct {
 	// OSConflict records why ambiguous or contradictory local OS evidence supplied
 	// no advisory key. Refreshing the database cannot resolve it.
 	OSConflict string `json:"-"`
+	// AmbiguousOS means this listing is beside several valid OS releases.
+	// Unlike a self-contradiction, a unique qualified twin can resolve it.
+	AmbiguousOS bool `json:"-"`
+	// UncoveredRelease identifies a known installation for which no advisory
+	// key exists. It cannot be a second listing of another, covered release.
+	UncoveredRelease string `json:"-"`
 	// MixedDebVendors marks a merged CycloneDX package whose listings name
 	// different Debian PURL namespaces. No single vendor PURL identifies it.
 	MixedDebVendors bool `json:"-"`

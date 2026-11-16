@@ -431,16 +431,12 @@ func sourceLess(a, b pkgmeta.Package) bool {
 // bareIdentity is identity without the architecture: what a bare listing
 // and an arch-stating one of one package share.
 func bareIdentity(p pkgmeta.Package) string {
-	id := p.Type + "\x00" + p.Name + "\x00" + p.Version
-	if p.OSConflict != "" {
-		return id + "\x00" + p.OSConflict
-	}
-	return id
+	return p.Type + "\x00" + p.Name + "\x00" + p.Version + "\x00" + p.OSConflict + "\x00" + p.UncoveredRelease
 }
 
 func sameListing(a, b pkgmeta.Package) bool {
 	return a.Type == b.Type && a.Name == b.Name && a.Version == b.Version &&
-		a.OSConflict == b.OSConflict
+		a.OSConflict == b.OSConflict && a.UncoveredRelease == b.UncoveredRelease
 }
 
 // dedupe is the state the subject walk's merges share (catalogSubject).
@@ -840,6 +836,7 @@ func keyedReleases(pkgs []pkgmeta.Package) map[string]releases {
 // already states is never overwritten.
 func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 	mergeDebVendorEvidence(kept, dropped)
+	kept.AmbiguousOS = kept.AmbiguousOS || dropped.AmbiguousOS
 	kept.DistroContext = kept.DistroContext.Merge(dropped.DistroContext)
 	// The keyed listing's key wins over an unkeyed twin's (indexOfPackage).
 	if kept.Ecosystem == "" && dropped.Ecosystem != "" {
@@ -1136,11 +1133,17 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		// dedupe identity, nothing else here.
 		Arch: arch,
 	}
-	if eco == "" && ctx.mixedRelease && ctx.distro == nil {
-		if ctx.conflict != "" {
+	if eco == "" {
+		qualifier := pkgmeta.CanonicalDistroQualifier(p.Qualifiers["distro"])
+		switch {
+		case ctx.distro != nil && ctx.ecosystem == "" && ctx.distro.VersionID != "":
+			pkg.UncoveredRelease = releaseScope(ctx.distro).Qualifier
+		case ctx.uncoveredReleases[qualifier]:
+			pkg.UncoveredRelease = qualifier
+		case ctx.conflict != "":
 			pkg.OSConflict = fmt.Sprintf("the SBOM's operating-system declaration contradicts itself (%s), so %s %s is keyed to no release", ctx.conflict, name, version)
-		} else {
-			pkg.OSConflict = fmt.Sprintf("the SBOM declares multiple OS families or releases in the context of %s %s, and its purl identifies no release", name, version)
+		case ctx.mixedRelease && ctx.distro == nil:
+			pkg.AmbiguousOS = true
 		}
 	}
 	switch p.Type {
@@ -1215,6 +1218,9 @@ type osContext struct {
 	distro       *pkgmeta.Distro
 	ecosystem    string
 	mixedRelease bool
+	// An explicit qualifier can identify one locally declared release even
+	// when no database key exists for it (e.g. Debian sid beside Debian 12).
+	uncoveredReleases map[string]bool
 	// family is a known distro declared with no version at all (contextFor):
 	// it names the target for the report, keys nothing, and refuses an
 	// inherited context of another family.
@@ -1269,6 +1275,7 @@ func contextFor(siblings []component, inherited osContext) osContext {
 	// (QA 2026-11-11). An OS whose ID this build does not know ("linux")
 	// declares nothing.
 	var family *pkgmeta.Distro
+	var uncoveredReleases map[string]bool
 	var conflict string
 	mixedVendors := false
 	// codename is what the declarations of the one release found agree its
@@ -1294,11 +1301,21 @@ func contextFor(siblings []component, inherited osContext) osContext {
 			}
 			continue
 		}
-		if r.distro.ID == "" || mixedVendors {
+		if r.distro.ID == "" {
 			continue
 		}
 		d := &r.distro
-		if _, err := d.Ecosystem(); err != nil && d.VersionID == "" {
+		_, err := d.Ecosystem()
+		if err != nil && d.VersionID != "" {
+			if uncoveredReleases == nil {
+				uncoveredReleases = make(map[string]bool)
+			}
+			uncoveredReleases[releaseScope(d).Qualifier] = true
+		}
+		if mixedVendors {
+			continue
+		}
+		if err != nil && d.VersionID == "" {
 			// No release stated and none needed for a key -- Wolfi, Arch
 			// and the other release-less ecosystems key from the ID alone
 			// and are a context as a versioned OS is (release check
@@ -1349,10 +1366,10 @@ func contextFor(siblings []component, inherited osContext) osContext {
 		}
 	}
 	if conflict != "" {
-		return osContext{mixedRelease: true, conflict: conflict}
+		return osContext{mixedRelease: true, conflict: conflict, uncoveredReleases: uncoveredReleases}
 	}
 	if mixedVendors || (found != nil && family != nil && !strings.EqualFold(found.ID, family.ID)) {
-		return osContext{mixedRelease: true}
+		return osContext{mixedRelease: true, uncoveredReleases: uncoveredReleases}
 	}
 	if found == nil {
 		if family != nil {
