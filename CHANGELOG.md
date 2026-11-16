@@ -129,7 +129,6 @@ All notable changes to this project are documented here. The format follows
   of the same release, and a branch's own `jammy` applies with no OS at the top. (main QA of
   f554fb2, 2026-11-13)
 
-
 ## [0.18.1] - 2026-11-12
 
 ### Changed
