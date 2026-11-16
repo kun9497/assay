@@ -1,7 +1,6 @@
 package ciguard
 
 import (
-	"maps"
 	"regexp"
 	"strings"
 	"testing"
@@ -272,15 +271,9 @@ func (state *shellState) lineLeaks(line string) bool {
 
 func (state *shellState) shellLeaks(s string) bool {
 	for _, cmd := range shellCommands(s) {
-		// Pipeline stages and asynchronous lists run in child shells.
-		// Only their parent can set what a later eval reads.
-		parent := state.vars
-		if cmd.child {
-			state.vars = maps.Clone(parent)
-		}
-		leaks := state.commandLeaks(cmd.text)
-		state.vars = parent
-		if leaks {
+		// Pipeline stages and asynchronous lists run in child shells;
+		// neither their variables nor their traps reach the parent.
+		if !cmd.child && state.commandLeaks(cmd.text) {
 			return true
 		}
 	}
@@ -382,6 +375,16 @@ func shellCommands(s string) []simpleCommand {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
+		case quote != '\'' && ((c == '$' && i+1 < len(s) && s[i+1] == '(') || c == '`'):
+			// A pipe in a command substitution belongs to the substitution.
+			// The surrounding assignment is still in the calling shell.
+			end := substitutionEnd(s, i)
+			if depth == 0 {
+				cur.WriteString(s[i:end])
+			}
+			i = end - 1
+			atStart = false
+			continue
 		case quote != 0:
 			if c == '\\' && quote == '"' && i+1 < len(s) {
 				if depth == 0 {
@@ -419,6 +422,8 @@ func shellCommands(s string) []simpleCommand {
 		case c == '&' && i > 0 && (s[i-1] == '>' || s[i-1] == '<'):
 			// 2>&1, <&3: the redirection's, not a background operator
 			// (second review: 2>&1 t=$(mktemp) had split into "1 t=...").
+		case c == '|' && i > 0 && s[i-1] == '>', c == '&' && i+1 < len(s) && s[i+1] == '>':
+			// The | of >| and the & of bash's &> are redirections.
 		case c == ';' || c == '&' || c == '|':
 			end := i + 1
 			if c != ';' && end < len(s) && s[end] == c {
@@ -755,6 +760,11 @@ eval "$cleanup_script"`, true},
 		{`cleanup='trap "echo cleanup" EXIT' | cat; eval "$cleanup"`, false},
 		{`true | cleanup='trap "echo cleanup" EXIT'; eval "$cleanup"`, false},
 		{`true && cleanup='trap "echo cleanup" EXIT' & wait; eval "$cleanup"`, false},
+		{`cleanup='trap "echo cleanup" EXIT'; eval "$cleanup" | cat; echo done`, false},
+		{`cleanup='trap "echo cleanup" EXIT'; eval "$cleanup" & wait; echo done`, false},
+		{`cleanup='trap "echo cleanup" EXIT'; eval "$cleanup" | cat; eval "$cleanup"`, true},
+		{`t=$(mktemp | cat)`, true},
+		{`echo $(printf '%s' "a | b"); trap 'echo cleanup' EXIT >|log`, true},
 		{`msg=hello; script='eval printf "%s" "$msg"'; eval "$script" "$msg"`, false},
 		{`cleanup='eval "$cleanup"'; eval "$cleanup"`, true},
 	} {
