@@ -25,6 +25,8 @@ func TestRun_EOLGateReachesSlinkAndPotatoRevisions(t *testing.T) {
 		{DistroID: "debian", Release: "2.1", EOLFrom: "2000-10-30", EOLLabel: "Debian LTS"},
 		{DistroID: "debian", Release: "2.2", EOLFrom: "2003-06-30", EOLLabel: "Debian LTS"},
 		{DistroID: "debian", Release: "5", EOLFrom: "2012-02-06", EOLLabel: "Debian LTS"},
+		// A cycle row 5.0r10 could reach only if the rN reading widened.
+		{DistroID: "debian", Release: "5.0", EOLFrom: "2012-02-06", EOLLabel: "Debian LTS"},
 	})
 	pinClock(t, time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC))
 	for _, tc := range []struct {
