@@ -109,7 +109,7 @@ func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 		// to each package's key (vex.resolve). A copy: the context's distro
 		// keys packages.
 		d := *target.Distro
-		d.VersionCodename = documentCodename(doc)
+		d.VersionCodename = documentCodename(doc, ubuntuRelease(d.VersionID))
 		target.Distro = &d
 	}
 
@@ -1304,16 +1304,27 @@ func childContext(parent component, inherited osContext) osContext {
 	return contextFor(parent.Components, inherited)
 }
 
-// documentCodename is the Ubuntu codename every operating-system component of
-// doc states, at any depth and in metadata.component, merged
+// documentCodename is the Ubuntu codename the operating-system components of
+// doc state for release -- at any depth and in metadata.component -- merged
 // (pkgmeta.MergeCodename): "" when none states one, ContradictedCodename
-// when two disagree.
-func documentCodename(doc bom) string {
+// when two disagree. A declaration counts when it is of that release, its
+// codename held to its own version first (pkgmeta.UbuntuCodenameOf: 22.04
+// saying noble contradicts itself), or when it states no version at all.
+// One of another release is left out: its packages carry their own key,
+// which the matcher holds a codename to, and counting it had let a 24.04
+// saying jammy lend jammy to 22.04 packages and a consistent 24.04 noble
+// cancel the target's own jammy (review of the redesign of PR #328).
+func documentCodename(doc bom, release string) string {
 	codename := ""
 	var walk func(cs []component)
 	visit := func(c component) {
 		if d := distroOf(c); d != nil && strings.EqualFold(d.ID, "ubuntu") {
-			codename = pkgmeta.MergeCodename(codename, d.VersionCodename)
+			switch r := ubuntuRelease(d.VersionID); {
+			case r == "":
+				codename = pkgmeta.MergeCodename(codename, d.VersionCodename)
+			case r == release:
+				codename = pkgmeta.MergeCodename(codename, pkgmeta.UbuntuCodenameOf(*d))
+			}
 		}
 		walk(c.Components)
 	}
@@ -1327,6 +1338,16 @@ func documentCodename(doc bom) string {
 		visit(*doc.Metadata.Component)
 	}
 	return codename
+}
+
+// ubuntuRelease is a VERSION_ID's YY.MM release ("22.04.5" is 22.04), or ""
+// when it names none.
+func ubuntuRelease(versionID string) string {
+	parts := strings.SplitN(versionID, ".", 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[0] + "." + parts[1]
 }
 
 // documentDistro is the Target's distro, the one the scan reports and its

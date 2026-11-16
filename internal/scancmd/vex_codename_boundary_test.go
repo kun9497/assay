@@ -156,9 +156,11 @@ func TestRun_VEXUbuntuCodenameAcrossListingsAndRetiredReleases(t *testing.T) {
 		// release it does not name.
 		{"22.10 OS saying lunar, statement lunar", "Ubuntu:22.10", osOf("22.10", "lunar") + "," + apt("22.10"), "", "lunar", false},
 		{"22.10 OS saying kinetic, statement kinetic", "Ubuntu:22.10", osOf("22.10", "kinetic") + "," + apt("22.10"), "", "kinetic", true},
-		// Two releases at the top: the apt there answers to neither OS's
-		// codename, though the subject is a jammy OS.
-		{"top 22.04 and 24.04, subject jammy", "Ubuntu:22.04:LTS", osOf("22.04", "jammy") + "," + osOf("24.04", "noble") + "," + apt("22.04"), `,"metadata":{"component":` + osOf("22.04", "jammy") + `}`, "JAMMY", false},
+		// Two releases at the top: the apt is 22.04 by its own purl, and
+		// every 22.04 declaration in the document says jammy (the 24.04
+		// noble is another release's, left to its own packages' key), so
+		// jammy is its evidence -- as on origin/main.
+		{"top 22.04 and 24.04, subject jammy", "Ubuntu:22.04:LTS", osOf("22.04", "jammy") + "," + osOf("24.04", "noble") + "," + apt("22.04"), `,"metadata":{"component":` + osOf("22.04", "jammy") + `}`, "JAMMY", true},
 		// One apt, two listings: the subject's own OS states jammy while the
 		// top's states none -- the merged install carries jammy; and a top
 		// jammy beside a subject OS contradicting itself carries nothing.
@@ -260,6 +262,14 @@ func TestRun_VEXUbuntuCodenameFromVersionlessAndEnclosingOS(t *testing.T) {
 		{"top jammy, childless version-less noble subject", osOf("22.04", "jammy") + "," + apt, `,"metadata":{"component":` + osOf("", "noble") + `}`, "JAMMY", false},
 		{"version-less noble subject holding a jammy branch", "", `,"metadata":{"component":` + osOf("", "noble", branch(osOf("", "jammy"), apt)) + `}`, "JAMMY", false},
 		{"top jammy, a debian branch holding the ubuntu apt", osOf("22.04", "jammy") + "," + branch(`{"type":"operating-system","name":"debian"}`, apt), "", "JAMMY", true},
+		// Review of the redesign: a declaration of another release neither
+		// lends its codename nor cancels the target's.
+		{"top 22.04 no codename, a 24.04 saying jammy elsewhere", osOf("22.04", "") + "," + apt + "," + branch(osOf("24.04", "jammy")), "", "JAMMY", false},
+		{"top 22.04 no codename, a 24.04-jammy subject", osOf("22.04", "") + "," + apt, `,"metadata":{"component":` + osOf("24.04", "jammy") + `}`, "ubuntu-jammy", false},
+		{"top 22.04 no codename, a 20.04 saying jammy elsewhere", osOf("22.04", "") + "," + apt + "," + branch(osOf("20.04", "jammy")), "", "jammy", false},
+		{"top jammy, a consistent 24.04 noble branch", osOf("22.04", "jammy") + "," + apt + "," + branch(osOf("24.04", "noble")), "", "JAMMY", true},
+		{"top jammy, a consistent 20.04 focal branch", osOf("22.04", "jammy") + "," + apt + "," + branch(osOf("20.04", "focal")), "", "JAMMY", true},
+		{"top jammy, a 24.04 noble subject", osOf("22.04", "jammy") + "," + apt, `,"metadata":{"component":` + osOf("24.04", "noble") + `}`, "JAMMY", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := filepath.Join(t.TempDir(), "sbom.cdx.json")
