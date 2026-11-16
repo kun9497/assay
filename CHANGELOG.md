@@ -146,6 +146,12 @@ All notable changes to this project are documented here. The format follows
   on both sides: `trap --`, a trap after another command or in a compound body, and a partly
   quoted name let through; a trap inside `sh -c '...'` or a subshell refused. A TERM or INT trap
   still passes. The examples themselves are unchanged. (main QA of f554fb2, 2026-11-13)
+- `internal/ciguard`'s guard on the CI examples reads a mktemp assignment only where it assigns
+  in the job shell -- a NAME=value word before the command, after quote removal -- and a comment
+  never continues onto the next line. 4d823d1 refused an isolated `sh -c 'set -eu; t=$(mktemp);
+  trap "rm -f $t" EXIT; ...'` step and a `printf` mentioning `t=$(mktemp)`, and let through a real
+  `trap ... EXIT` on the line after a YAML comment ending in a backslash, which joined the two.
+  The examples themselves are unchanged. (main QA of 4d823d1, 2026-11-16)
 - VEX: an Ubuntu operating-system declaration in an SBOM gives codename evidence only when it is
   consistent with itself and attributable to the target's release, by one rule over the whole
   document. One component with two different `syft:distro:versionID` or `syft:distro:id`
