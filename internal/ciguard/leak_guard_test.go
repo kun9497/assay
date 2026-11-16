@@ -31,7 +31,10 @@ import (
 // the line, a heredoc's body (read as commands, so a trap in one is
 // refused); a trap or mktemp after a quote-spanning multi-line string. A
 // refusal there is loud -- the documents' test goes red -- and a miss is a
-// spelling nobody writes in an install step. A trap on TERM or INT alone is a
+// spelling nobody writes in an install step. Refused though sh would not
+// leave them in the job shell, on the same loud side: an assignment after
+// `command` or `time`, and one before a regular command (t=$(mktemp) make),
+// which only that command's environment sees. A trap on TERM or INT alone is a
 // job's own business, not the installer's leftover (main QA of 67e2cf6,
 // 2026-11-13: `trap 'echo stopping' TERM` in an independent job was refused).
 type leakGuard struct{}
@@ -116,6 +119,11 @@ func continues(line string) bool {
 		case quote == '\'':
 			if c == '\'' {
 				quote = 0
+			} else if c == '\\' && i == len(s)-1 {
+				// sh keeps it, but the quote goes on to the next line, so
+				// the two are read as one (second review: a trap whose
+				// single-quoted handler spans lines had stopped being read).
+				return true
 			}
 		case c == '\\':
 			if i == len(s)-1 {
@@ -136,11 +144,13 @@ func continues(line string) bool {
 }
 
 // commentStarts reports whether the # at s[i] opens a comment: it begins a
-// token, so it follows the line's start, a blank, or an operator (; & | ( )).
+// token, so it follows the line's start, a blank, or an operator (; & | (),
+// not a ) -- that closes a $( ) inside the word as often as a subshell, and
+// $(date)#tag is one word (second review).
 // a#b and $# are not comments. (Review of the guard branch: continues had
 // taken only a blank, so `make;# note \` still swallowed the next line.)
 func commentStarts(s string, i int) bool {
-	return i == 0 || strings.IndexByte(" \t;&|()", s[i-1]) >= 0
+	return i == 0 || strings.IndexByte(" \t;&|(", s[i-1]) >= 0
 }
 
 func lineLeaks(line string) bool {
@@ -289,6 +299,9 @@ func shellCommands(s string) []string {
 		case c == '#' && commentStarts(s, i):
 			flush()
 			return cmds
+		case c == '&' && i > 0 && (s[i-1] == '>' || s[i-1] == '<'):
+			// 2>&1, <&3: the redirection's, not a background operator
+			// (second review: 2>&1 t=$(mktemp) had split into "1 t=...").
 		case c == ';' || c == '&' || c == '|':
 			flush()
 			continue
@@ -321,9 +334,12 @@ func assigns(raw string) bool { return assignmentWord.MatchString(raw) }
 // keep the substitution ("$(mktemp)"), single quotes make it text
 // ('$(mktemp)' assigns the string).
 func assignsMktemp(raw string) bool {
-	if !assigns(raw) {
-		return false
-	}
+	return assigns(raw) && mktempValue.MatchString(shView(raw))
+}
+
+// shView is a word as written with its quoting read as sh reads it for a
+// substitution: double quotes dropped, single-quoted text blanked.
+func shView(raw string) string {
 	var b strings.Builder
 	for i := 0; i < len(raw); i++ {
 		switch c := raw[i]; {
@@ -339,7 +355,7 @@ func assignsMktemp(raw string) bool {
 			b.WriteByte(c)
 		}
 	}
-	return mktempValue.MatchString(b.String())
+	return b.String()
 }
 
 // commandLeaks reports whether one simple command leaves a mktemp variable
@@ -359,7 +375,9 @@ func commandLeaks(cmd string) bool {
 			// PATH t=$(mktemp), local -r t=$(mktemp) (review of the guard
 			// branch: the loop had stopped at PATH and -r).
 			for _, r := range raws[1:] {
-				if assignsMktemp(r) {
+				// Its operand is an assignment after expansion, so a quoted
+				// one assigns too: export "t=$(mktemp)" (second review).
+				if mktempValue.MatchString(shView(r)) {
 					return true
 				}
 			}
@@ -479,12 +497,24 @@ func substitutionEnd(cmd string, i int) int {
 		}
 		return len(cmd)
 	}
-	depth := 0
+	depth, quote := 0, byte(0)
 	for j := i + 1; j < len(cmd); j++ {
-		switch cmd[j] {
-		case '(':
+		switch c := cmd[j]; {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			} else if c == '\\' && quote == '"' {
+				j++
+			}
+		case c == '\'' || c == '"':
+			// $(echo ")") closes at the second ), not inside the quote
+			// (second review).
+			quote = c
+		case c == '\\':
+			j++
+		case c == '(':
 			depth++
-		case ')':
+		case c == ')':
 			depth--
 			if depth == 0 {
 				return j + 1
@@ -568,6 +598,15 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		"    - make&&# note \\\n    - trap 'echo catch-me' EXIT",
 		`    - t="$(mktemp)"`,
 		`    - t=''"$(mktemp)"`,
+		// Second review: a trap whose single-quoted handler spans lines, a
+		// redirection's &, a #-word after $( ), a quoted export operand, a
+		// quote inside $( ).
+		"    - |\n      trap 'rm -f \"$t\"; \\\n        echo done' EXIT",
+		`    - 2>&1 t=$(mktemp)`,
+		`    - x=1 2>&1 t=$(mktemp)`,
+		`    - echo $(date)#tag; trap 'x' EXIT`,
+		`    - export "t=$(mktemp)"`,
+		`    - x=$(echo ")") trap 'x' EXIT`,
 		// A README fence line is sh, not YAML: its quotes are sh's
 		// (fourth review: unquoting it as YAML had shifted every pairing).
 		`"$CI_PROJECT_DIR/setup" && trap 'rm -f "$t"' "EXIT"`,
