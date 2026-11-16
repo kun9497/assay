@@ -95,6 +95,23 @@ func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 	// branch's packages. See osContext.
 	top := contextFor(doc.Components, osContext{})
 	target.Distro = documentDistro(doc, top)
+	if target.Distro != nil && strings.EqualFold(target.Distro.ID, "ubuntu") {
+		// The codename the document gives as evidence is what every Ubuntu
+		// operating-system declaration in it says -- versioned or not, at
+		// any depth, the subject's included -- and none when two disagree.
+		// Main QA of f554fb2 (2026-11-13) and four review rounds had found
+		// a branch, a parent, a sibling or a version-less declaration saying
+		// noble while the document's jammy exempted a package, each fix to
+		// one nesting shape leaving another; one merge over the whole
+		// document cannot depend on where a declaration sits or in which
+		// order. The codename is still held to the release the target's
+		// version names (pkgmeta.UbuntuCodenameOf, in scancmd.vexTarget) and
+		// to each package's key (vex.resolve). A copy: the context's distro
+		// keys packages.
+		d := *target.Distro
+		d.VersionCodename = documentCodename(doc)
+		target.Distro = &d
+	}
 
 	catalog(doc.Components, top, &target, &stats)
 	if doc.Metadata.Component != nil {
@@ -792,7 +809,6 @@ func keyedReleases(pkgs []pkgmeta.Package) map[string]releases {
 // already states is never overwritten.
 func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 	kept.DistroContext = kept.DistroContext.Merge(dropped.DistroContext)
-	kept.OSCodename = pkgmeta.MergeCodename(kept.OSCodename, dropped.OSCodename)
 	// The keyed listing's key wins over an unkeyed twin's (indexOfPackage).
 	if kept.Ecosystem == "" && dropped.Ecosystem != "" {
 		kept.Ecosystem = dropped.Ecosystem
@@ -1026,25 +1042,12 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		loc.LayerDigest = layer
 	}
 
-	// The codename evidence is the package's own OS context's, held to the
-	// release it names (UbuntuCodenameOf); a context of two releases states
-	// a contradiction.
-	osCodename := ""
-	switch {
-	case ctx.mixedRelease:
-		osCodename = pkgmeta.ContradictedCodename
-	case ctx.distro != nil:
-		osCodename = pkgmeta.UbuntuCodenameOf(*ctx.distro)
-	case ctx.family != nil:
-		osCodename = pkgmeta.UbuntuCodenameOf(*ctx.family)
-	}
 	pkg := pkgmeta.Package{
 		Name:          name,
 		Version:       version,
 		Type:          p.Type,
 		Ecosystem:     eco,
 		PURL:          c.PURL,
-		OSCodename:    osCodename,
 		DistroContext: scope.ForInstallation(p.Qualifiers["distro"]),
 		Locations:     []pkgmeta.Location{loc},
 		Source:        source,
@@ -1181,9 +1184,15 @@ func contextFor(siblings []component, inherited osContext) osContext {
 	// the release carries none (PR #323 review: the first declaration's had
 	// won, so [jammy, noble] exempted under a jammy statement and [noble,
 	// jammy] did not -- exit 0 or 1 by component order).
-	codename := ""
+	codename, codenameConflict := "", false
 	noteCodename := func(d *pkgmeta.Distro) {
-		codename = pkgmeta.MergeCodename(codename, d.VersionCodename)
+		switch {
+		case d.VersionCodename == "":
+		case codename == "":
+			codename = d.VersionCodename
+		case !strings.EqualFold(codename, d.VersionCodename):
+			codenameConflict = true
+		}
 	}
 	for _, c := range siblings {
 		d := distroOf(c)
@@ -1213,11 +1222,6 @@ func contextFor(siblings []component, inherited osContext) osContext {
 					return osContext{mixedRelease: true}
 				}
 				family = d
-				// A version-less OS still states its codename (PR #328
-				// review: an Ubuntu sibling saying only noble had been
-				// dropped here, and the jammy beside it, or the document's,
-				// exempted the package).
-				noteCodename(d)
 			}
 			continue
 		}
@@ -1249,39 +1253,16 @@ func contextFor(siblings []component, inherited osContext) osContext {
 	if found == nil {
 		if family != nil {
 			if inherited.distro != nil && !strings.EqualFold(inherited.distro.ID, family.ID) {
-				// The merged codename, not the last sibling's own (second
-				// review of PR #328: [noble, jammy] and [jammy, noble]
-				// version-less had given exit 0 and 1).
-				f := *family
-				f.VersionCodename = codename
-				return osContext{family: &f}
-			}
-			// The family's codename refines what the packages beside it
-			// inherit, on a copy: the inherited distro is the parent's.
-			if inherited.distro != nil && codename != "" {
-				d := *inherited.distro
-				d.VersionCodename = pkgmeta.MergeCodename(d.VersionCodename, codename)
-				inherited.distro = &d
+				return osContext{family: family}
 			}
 			if inherited.distro == nil {
-				// An inherited family of the same ID states the enclosing
-				// level's codename (third review of PR #328).
-				f := *family
-				f.VersionCodename = codename
-				if inherited.family != nil && strings.EqualFold(inherited.family.ID, f.ID) {
-					f.VersionCodename = pkgmeta.MergeCodename(inherited.family.VersionCodename, codename)
-				}
-				inherited.family = &f
+				inherited.family = family
 			}
 		}
 		return inherited
 	}
-	// An enclosing OS of the same release states the same install's
-	// codename too: a parent saying noble on 22.04 contradicts itself, and
-	// a nearer OS saying nothing must not let the document's jammy through
-	// (PR #328 review).
-	if inherited.distro != nil && sameDistro(inherited.distro, found) {
-		codename = pkgmeta.MergeCodename(codename, inherited.distro.VersionCodename)
+	if codenameConflict {
+		codename = ""
 	}
 	found.VersionCodename = codename
 	ctx := osContext{distro: found, mixedRelease: mixedRelease}
@@ -1305,12 +1286,6 @@ func childContext(parent component, inherited osContext) osContext {
 	// the purl qualifier fallback switched off (PR #270 review).
 	if d := distroOf(parent); d != nil {
 		if eco, err := d.Ecosystem(); err == nil {
-			// The enclosing level's codename evidence of the same release is
-			// this OS's too (second review of PR #328: a 22.04 jammy parent
-			// beside a 22.04 noble had replaced the contradiction outright).
-			if inherited.distro != nil && sameDistro(inherited.distro, d) {
-				d.VersionCodename = pkgmeta.MergeCodename(d.VersionCodename, inherited.distro.VersionCodename)
-			}
 			inherited = osContext{distro: d, ecosystem: eco}
 		} else if d.VersionID == "" && pkgmeta.KnownDistroID(d.ID) && inherited.distro != nil && !strings.EqualFold(inherited.distro.ID, d.ID) {
 			// A known family with no release refuses an inherited context
@@ -1324,25 +1299,34 @@ func childContext(parent component, inherited osContext) osContext {
 			// A release no key is built from: the document's identity, as
 			// a sibling OS of that shape is (contextFor).
 			inherited = osContext{distro: d}
-		} else if d.VersionID == "" && d.VersionCodename != "" && inherited.distro != nil && strings.EqualFold(inherited.distro.ID, d.ID) {
-			// A version-less parent of the inherited family still states
-			// its codename, as a version-less sibling does (second review
-			// of PR #328: a subject OS saying only noble had let the
-			// document's jammy through). On a copy: the inherited distro
-			// is the enclosing level's.
-			cp := *inherited.distro
-			cp.VersionCodename = pkgmeta.MergeCodename(cp.VersionCodename, d.VersionCodename)
-			inherited.distro = &cp
-		} else if d.VersionID == "" && d.VersionCodename != "" && inherited.distro == nil && inherited.family != nil && strings.EqualFold(inherited.family.ID, d.ID) {
-			// The same under an inherited family (a version-less OS at the
-			// top): the subject's noble had been dropped and the top's jammy
-			// had exempted its packages (third review of PR #328).
-			cp := *inherited.family
-			cp.VersionCodename = pkgmeta.MergeCodename(cp.VersionCodename, d.VersionCodename)
-			inherited.family = &cp
 		}
 	}
 	return contextFor(parent.Components, inherited)
+}
+
+// documentCodename is the Ubuntu codename every operating-system component of
+// doc states, at any depth and in metadata.component, merged
+// (pkgmeta.MergeCodename): "" when none states one, ContradictedCodename
+// when two disagree.
+func documentCodename(doc bom) string {
+	codename := ""
+	var walk func(cs []component)
+	visit := func(c component) {
+		if d := distroOf(c); d != nil && strings.EqualFold(d.ID, "ubuntu") {
+			codename = pkgmeta.MergeCodename(codename, d.VersionCodename)
+		}
+		walk(c.Components)
+	}
+	walk = func(cs []component) {
+		for _, c := range cs {
+			visit(c)
+		}
+	}
+	walk(doc.Components)
+	if doc.Metadata.Component != nil {
+		visit(*doc.Metadata.Component)
+	}
+	return codename
 }
 
 // documentDistro is the Target's distro, the one the scan reports and its
@@ -1409,12 +1393,7 @@ func distroOf(c component) *pkgmeta.Distro {
 			// codenames on one component contradict each other (main QA of
 			// f554fb2: the last one had won, so jammy,noble and noble,jammy
 			// gave exit 1 and 0).
-			switch {
-			case d.VersionCodename == "":
-				d.VersionCodename = p.Value
-			case !strings.EqualFold(d.VersionCodename, p.Value):
-				d.VersionCodename = pkgmeta.ContradictedCodename
-			}
+			d.VersionCodename = pkgmeta.MergeCodename(d.VersionCodename, p.Value)
 		}
 	}
 	// Fall back to the component's own fields: the properties are a syft

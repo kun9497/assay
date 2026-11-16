@@ -73,7 +73,11 @@ func TestRun_VEXUbuntuCodenameBoundaries(t *testing.T) {
 		{"top jammy, child jammy", "JAMMY", true},
 		{"top jammy, child none", "JAMMY", true},
 		{"top jammy, child noble", "ubuntu-22.04", true},
-		{"no top, child jammy", "JAMMY", true},
+		// No Ubuntu OS names the target, so the document gives no codename
+		// evidence: the codename is the document's, merged over all its
+		// declarations, and this one is a branch's alone (the gap the QA
+		// noted as pre-existing stays: refused, the safe direction).
+		{"no top, child jammy", "JAMMY", false},
 		{"no top, child none", "JAMMY", false},
 	} {
 		t.Run(tc.shape+", statement "+tc.statement, func(t *testing.T) {
@@ -223,7 +227,8 @@ func TestRun_VEXUbuntuCodenameFromVersionlessAndEnclosingOS(t *testing.T) {
 		{"a codename-only jammy OS", osOf("", "jammy") + "," + apt, "", "JAMMY", true},
 		// The branch's own version-less jammy is its evidence when the
 		// document's own OS (the subject, 22.04 saying noble) gives none.
-		{"branch OS only jammy, subject noble on 22.04", branch(osOf("", "jammy"), apt), `,"metadata":{"component":` + osOf("22.04", "noble") + `}`, "JAMMY", true},
+		// The document names jammy and noble: no codename evidence.
+		{"branch OS only jammy, subject noble on 22.04", branch(osOf("", "jammy"), apt), `,"metadata":{"component":` + osOf("22.04", "noble") + `}`, "JAMMY", false},
 		{"a codename-only noble OS", osOf("", "noble") + "," + apt, "", "JAMMY", false},
 		// A retired codename alone names 22.10, not the apt's 22.04
 		// (the QA's unversioned-kinetic input).
@@ -245,7 +250,16 @@ func TestRun_VEXUbuntuCodenameFromVersionlessAndEnclosingOS(t *testing.T) {
 		{"version-less jammy at the top, branch version-less jammy", osOf("", "jammy") + "," + branch(osOf("", "jammy"), apt), "", "JAMMY", true},
 		// A branch's family codename must not reach the top-level packages
 		// cataloged after it (the inherited distro is copied, not edited).
-		{"branch version-less jammy, then a top-level apt", osOf("22.04", "") + "," + branch(osOf("", "jammy"), `{"type":"library","name":"x","version":"1","purl":"pkg:npm/x@1"}`) + "," + apt, "", "JAMMY", false},
+		// The document names only jammy, consistent with its 22.04: evidence
+		// for every 22.04 package, wherever the declaration sits.
+		{"branch version-less jammy, then a top-level apt", osOf("22.04", "") + "," + branch(osOf("", "jammy"), `{"type":"library","name":"x","version":"1","purl":"pkg:npm/x@1"}`) + "," + apt, "", "JAMMY", true},
+		// Fourth review of PR #328: two codenames anywhere in the document,
+		// whichever is nearer the package.
+		{"version-less noble at the top, branch 22.04 jammy", osOf("", "noble") + "," + branch(osOf("22.04", "jammy"), apt), "", "JAMMY", false},
+		{"version-less noble at the top, apt under a 22.04 jammy OS", osOf("", "noble") + "," + osOf("22.04", "jammy", apt), "", "JAMMY", false},
+		{"top jammy, childless version-less noble subject", osOf("22.04", "jammy") + "," + apt, `,"metadata":{"component":` + osOf("", "noble") + `}`, "JAMMY", false},
+		{"version-less noble subject holding a jammy branch", "", `,"metadata":{"component":` + osOf("", "noble", branch(osOf("", "jammy"), apt)) + `}`, "JAMMY", false},
+		{"top jammy, a debian branch holding the ubuntu apt", osOf("22.04", "jammy") + "," + branch(`{"type":"operating-system","name":"debian"}`, apt), "", "JAMMY", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := filepath.Join(t.TempDir(), "sbom.cdx.json")

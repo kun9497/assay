@@ -24,15 +24,6 @@ type Package struct {
 	// DistroContext retains the local OS evidence separately from the (often
 	// coarser) advisory key. Only CycloneDX has nested OS declarations.
 	DistroContext DistroScope `json:"-"`
-	// OSCodename is the Ubuntu codename evidence the package's own
-	// operating-system declaration states (UbuntuCodenameOf), merged across
-	// the listings of one install (MergeCodename) -- ContradictedCodename when
-	// they disagree. Set by the CycloneDX cataloger, whose documents key each
-	// branch by its own OS; a codename statement is matched against this
-	// before the target's (vex.resolve). Main QA of f554fb2 (2026-11-13): the
-	// document's top-level jammy had exempted an apt whose own branch declared
-	// 22.04 as noble.
-	OSCodename string `json:"-"`
 	// Arch is the architecture the package database records (apk A:, dpkg
 	// Architecture:, rpm ARCH, pacman %ARCH%). Read only to spell the purl's
 	// "arch" qualifier (D121); never part of a lookup key.

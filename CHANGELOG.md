@@ -119,15 +119,15 @@ All notable changes to this project are documented here. The format follows
   GitLab job of the example as the installer's leftover. The four-line install form (`t=$(mktemp)`
   and `trap 'rm -f "$t"' EXIT` in the calling shell) is still refused inside the install job;
   the examples themselves are unchanged. (main QA of 67e2cf6, 2026-11-13)
-- VEX: Ubuntu codename evidence holds to the release it names and to the package's own
-  operating-system declaration. A codename that names another release than the version beside it
-  (`kinetic`, 22.10, on a 22.04 OS -- the build had not known kinetic and took it at its word),
-  two different codenames on one OS component (CycloneDX lets a property repeat; the last had won),
-  and a branch whose own OS says `noble` or both codenames under a document OS saying `jammy` all
-  exempt nothing now, in any listing order; f554fb2 had let each of them turn exit 1 into 0 under
-  a codename statement. A package whose own OS states no codename still answers to the document's
-  of the same release, and a branch's own `jammy` applies with no OS at the top. (main QA of
-  f554fb2, 2026-11-13)
+- VEX: the Ubuntu codename an SBOM gives as evidence is what every Ubuntu operating-system
+  declaration in it says -- versioned or not, at any depth, the subject's included -- and none
+  when two disagree; and it holds only for the release it names. A 22.04 OS saying `kinetic`
+  (22.10, which the build had not known and took at its word), two different codenames on one OS
+  component (CycloneDX lets a property repeat; the last had won), and a document whose branches,
+  parents or siblings name `jammy` and `noble` all exempt nothing now, in any order or nesting;
+  f554fb2 had let each turn exit 1 into 0 under a codename statement. A codename-only OS names the
+  release its codename does. An SBOM with no Ubuntu OS naming the target gives no codename
+  evidence, as before. (main QA of f554fb2, 2026-11-13)
 
 ## [0.18.1] - 2026-11-12
 
