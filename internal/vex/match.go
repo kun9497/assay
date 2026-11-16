@@ -195,13 +195,13 @@ func (lp liveProduct) matches(s subject) (matched, versionless bool, viaSource s
 	case lp.image != nil:
 		// An image is not a package; it scoped the statement instead.
 	case lp.isPURL && lp.isSource:
-		if s.ok {
+		if s.ok && !s.pkg.MixedDebVendors {
 			if m, vl := sourcePatternMatches(lp.purl, s); m {
 				return true, vl, lp.purl.Name
 			}
 		}
 	case lp.isPURL:
-		if s.ok {
+		if s.ok && !s.pkg.MixedDebVendors {
 			if m, vl := purlPatternMatches(lp.purl, &s); m {
 				return true, vl, ""
 			}
@@ -263,12 +263,13 @@ func sourcePatternMatches(doc pkgmeta.PURL, s subject) (matched, versionless boo
 	if doc.Type != pkg.Type || !namespaceEqual(doc.Type, doc.Namespace, pkg.Namespace) {
 		return false, false
 	}
-	if s.pkg.Source == nil || s.pkg.Source.Name == "" || s.pkg.Source.Name != doc.Name {
+	src := s.pkg.VEXSource()
+	if src == nil || src.Name == "" || src.Name != doc.Name {
 		return false, false
 	}
 	versionless = doc.Version == ""
 	if !versionless {
-		want, got := doc.Version, s.pkg.Source.Version
+		want, got := doc.Version, src.Version
 		if got == "" {
 			got = s.pkg.Version
 		}

@@ -1,6 +1,7 @@
 package cyclonedx
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -121,5 +122,22 @@ func TestParse_D166_TargetDistroCarriesTheCodename(t *testing.T) {
 				t.Errorf("Target.Distro = %q codename %q, want %q codename %q", got, codename, tc.want, tc.codename)
 			}
 		})
+	}
+}
+
+// Check target identity and advisory key together. The codename consumer
+// accepts the same spelling variants as the package lookup.
+func TestParse_CompatibleOSIDs(t *testing.T) {
+	for _, tc := range []struct{ name, a, b, version, want string }{
+		{"ubuntu", "UBUNTU", "ubuntu", "22.04", "Ubuntu:22.04:LTS"},
+		{"mariner", "azurelinux", "mariner", "2.0", "Azure Linux:2"},
+	} {
+		for _, ids := range [][2]string{{tc.a, tc.b}, {tc.b, tc.a}} {
+			raw := fmt.Sprintf(`{"bomFormat":"CycloneDX","components":[{"type":"operating-system","name":%q,"version":%q,"properties":[{"name":"syft:distro:id","value":%q},{"name":"syft:distro:id","value":%q}]},{"type":"library","purl":"pkg:deb/test@1"}]}`, tc.name, tc.version, ids[0], ids[1])
+			target, _, err := Parse(strings.NewReader(raw))
+			if err != nil || target.Distro == nil || len(target.Packages) != 1 || target.Packages[0].Ecosystem != tc.want {
+				t.Fatalf("%v: inventory %+v, %v", ids, target, err)
+			}
+		}
 	}
 }

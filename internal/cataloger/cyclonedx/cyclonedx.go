@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
 	"sort"
 	"strings"
 
@@ -430,7 +431,16 @@ func sourceLess(a, b pkgmeta.Package) bool {
 // bareIdentity is identity without the architecture: what a bare listing
 // and an arch-stating one of one package share.
 func bareIdentity(p pkgmeta.Package) string {
-	return p.Type + "\x00" + p.Name + "\x00" + p.Version
+	id := p.Type + "\x00" + p.Name + "\x00" + p.Version
+	if p.OSConflict != "" {
+		return id + "\x00" + p.OSConflict
+	}
+	return id
+}
+
+func sameListing(a, b pkgmeta.Package) bool {
+	return a.Type == b.Type && a.Name == b.Name && a.Version == b.Version &&
+		a.OSConflict == b.OSConflict
 }
 
 // dedupe is the state the subject walk's merges share (catalogSubject).
@@ -508,7 +518,7 @@ func archTwins(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]relea
 	}
 	var out []int
 	for i, q := range pkgs {
-		if q.Arch != "" && q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "" || q.Ecosystem == p.Ecosystem) {
+		if q.Arch != "" && sameListing(q, p) && (q.Ecosystem == "" || p.Ecosystem == "" || q.Ecosystem == p.Ecosystem) {
 			out = append(out, i)
 		}
 	}
@@ -561,6 +571,9 @@ func mergePURL(kept, other, ecosystem string) string {
 	case oerr != nil:
 		return kept
 	}
+	if kp.Type == "deb" && kp.Namespace == "" && op.Namespace != "" {
+		kp, op = op, kp
+	}
 	if kp.Qualifiers == nil {
 		kp.Qualifiers = map[string]string{}
 	}
@@ -573,7 +586,7 @@ func mergePURL(kept, other, ecosystem string) string {
 		// pkg:deb/ubuntu/apt with no distro= took pkg:deb/debian/apt's
 		// distro=jammy here, and the codename exempted it in one listing
 		// order only).
-		if k == "distro" && !strings.EqualFold(kp.Namespace, op.Namespace) {
+		if (k == "distro" || (kp.Type == "deb" && k == "upstream")) && !strings.EqualFold(kp.Namespace, op.Namespace) {
 			continue
 		}
 		if _, stated := kp.Qualifiers[k]; !stated {
@@ -654,7 +667,7 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]
 	// arch-less record. Save the latter as a fallback regardless of order.
 	compatible := -1
 	for i, q := range pkgs {
-		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && q.Ecosystem == p.Ecosystem && sameArch(q, p) {
+		if sameListing(q, p) && q.Ecosystem == p.Ecosystem && sameArch(q, p) {
 			if q.Arch == p.Arch {
 				return i
 			}
@@ -682,7 +695,7 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]
 	}
 	match := -1
 	for i, q := range pkgs {
-		if q.Type == p.Type && q.Name == p.Name && q.Version == p.Version && (q.Ecosystem == "" || p.Ecosystem == "") && sameArch(q, p) {
+		if sameListing(q, p) && (q.Ecosystem == "" || p.Ecosystem == "") && sameArch(q, p) {
 			if ambiguous(q, keyed) {
 				// The kept listing states no architecture and the document
 				// keys its identity to two releases through two
@@ -769,7 +782,7 @@ const anyArch = "\x00*"
 // one, its path put on that finding and its own not-evaluated count lost);
 // a listing stating none is merged with either (sameArch).
 func identity(p pkgmeta.Package) string {
-	return p.Type + "\x00" + p.Name + "\x00" + p.Version + "\x00" + p.Arch
+	return bareIdentity(p) + "\x00" + p.Arch
 }
 
 // sameArch is identity's architecture rule as a comparison.
@@ -826,6 +839,7 @@ func keyedReleases(pkgs []pkgmeta.Package) map[string]releases {
 // the other must still be judged on its source. What the kept listing
 // already states is never overwritten.
 func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
+	mergeDebVendorEvidence(kept, dropped)
 	kept.DistroContext = kept.DistroContext.Merge(dropped.DistroContext)
 	// The keyed listing's key wins over an unkeyed twin's (indexOfPackage).
 	if kept.Ecosystem == "" && dropped.Ecosystem != "" {
@@ -870,6 +884,53 @@ func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 	if kept.ModuleStream == "" {
 		kept.ModuleStream = dropped.ModuleStream
 	}
+}
+
+// mergeDebVendorEvidence keeps the source a vendor-specific VEX statement
+// can use apart from the source used for advisory lookups. Once a vendor is
+// known, only its own records can supply source or source-version evidence.
+func mergeDebVendorEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
+	if kept.Type != "deb" {
+		return
+	}
+	if kept.MixedDebVendors || dropped.MixedDebVendors {
+		kept.MixedDebVendors = true
+		return
+	}
+	if kept.PURL == dropped.PURL && kept.VEXDebSource == nil && dropped.VEXDebSource == nil {
+		return
+	}
+	a, ea := pkgmeta.ParsePURL(kept.PURL)
+	b, eb := pkgmeta.ParsePURL(dropped.PURL)
+	if ea != nil || eb != nil {
+		return
+	}
+	var src *pkgmeta.SourcePackage
+	switch {
+	case strings.EqualFold(a.Namespace, b.Namespace):
+		if kept.VEXDebSource == nil && dropped.VEXDebSource == nil {
+			return
+		}
+		src = kept.VEXSource()
+		other := dropped.VEXSource()
+		if src == nil || src.Name == "" || (other != nil && other.Name == src.Name && src.Version == "" && other.Version != "") {
+			src = other
+		}
+	case a.Namespace == "":
+		src = dropped.VEXSource()
+	case b.Namespace == "":
+		src = kept.VEXSource()
+	default:
+		kept.MixedDebVendors = true
+		return
+	}
+	// An empty source records that the known vendor supplied no source.
+	// Copy it before keepEvidence adds the advisory lookup's source version.
+	var known pkgmeta.SourcePackage
+	if src != nil {
+		known = *src
+	}
+	kept.VEXDebSource = &known
 }
 
 // sameVersion reports whether two spellings of a source version are one
@@ -1075,6 +1136,14 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		// dedupe identity, nothing else here.
 		Arch: arch,
 	}
+	if eco == "" && ctx.conflict != "" {
+		// No release keys it: the OS declared for it contradicts itself and
+		// its purl names none. Reported with the contradiction, as the
+		// target's own (D21 =target), rather than as an ecosystem this
+		// build lacks (main QA of 353e24a: both property orders now refuse
+		// to guess, and the reason says why).
+		pkg.OSConflict = ctx.conflict
+	}
 	switch p.Type {
 	case "deb":
 		// syft writes dpkg's source version twice: in the purl's upstream
@@ -1151,6 +1220,10 @@ type osContext struct {
 	// it names the target for the report, keys nothing, and refuses an
 	// inherited context of another family.
 	family *pkgmeta.Distro
+	// conflict is readOS's why when the context is mixed because an OS
+	// declaration contradicts itself, for the reason its unkeyed packages
+	// are reported with.
+	conflict string
 }
 
 func (c osContext) scope() pkgmeta.DistroScope {
@@ -1197,6 +1270,8 @@ func contextFor(siblings []component, inherited osContext) osContext {
 	// (QA 2026-11-11). An OS whose ID this build does not know ("linux")
 	// declares nothing.
 	var family *pkgmeta.Distro
+	var conflict string
+	mixedVendors := false
 	// codename is what the declarations of the one release found agree its
 	// codename is; two that state different ones contradict each other and
 	// the release carries none (PR #323 review: the first declaration's had
@@ -1213,10 +1288,17 @@ func contextFor(siblings []component, inherited osContext) osContext {
 		}
 	}
 	for _, c := range siblings {
-		d := distroOf(c)
-		if d == nil {
+		r := readOS(c)
+		if r.conflict != "" {
+			if conflict == "" || r.conflict < conflict {
+				conflict = r.conflict
+			}
 			continue
 		}
+		if r.distro.ID == "" || mixedVendors {
+			continue
+		}
+		d := &r.distro
 		if _, err := d.Ecosystem(); err != nil && d.VersionID == "" {
 			// No release stated and none needed for a key -- Wolfi, Arch
 			// and the other release-less ecosystems key from the ID alone
@@ -1237,7 +1319,8 @@ func contextFor(siblings []component, inherited osContext) osContext {
 					// beside Debian 11 keyed busybox to Debian, 51
 					// findings; `debian` then `alpine` read it as the
 					// qualifier said, 2).
-					return osContext{mixedRelease: true}
+					mixedVendors = true
+					continue
 				}
 				family = d
 			}
@@ -1251,7 +1334,8 @@ func contextFor(siblings []component, inherited osContext) osContext {
 		if !sameDistro(found, d) {
 			// Native packages still fall back to their own PURL/key. A
 			// language package's VEX must retain the conflicting OS evidence.
-			return osContext{mixedRelease: true}
+			mixedVendors = true
+			continue
 		}
 		// Two declarations of one release are one (D166); a codename only
 		// one of them carries is the release's, whichever came first.
@@ -1265,7 +1349,10 @@ func contextFor(siblings []component, inherited osContext) osContext {
 			}
 		}
 	}
-	if found != nil && family != nil && !strings.EqualFold(found.ID, family.ID) {
+	if conflict != "" {
+		return osContext{mixedRelease: true, conflict: conflict}
+	}
+	if mixedVendors || (found != nil && family != nil && !strings.EqualFold(found.ID, family.ID)) {
 		return osContext{mixedRelease: true}
 	}
 	if found == nil {
@@ -1302,7 +1389,10 @@ func childContext(parent component, inherited osContext) osContext {
 	// children inherit: one with no version, or a name no key is built for
 	// ("linux"), would leave them a distro with no key -- unkeyed, and with
 	// the purl qualifier fallback switched off (PR #270 review).
-	if d := distroOf(parent); d != nil {
+	r := readOS(parent)
+	if r.conflict != "" {
+		inherited = osContext{mixedRelease: true, conflict: r.conflict}
+	} else if d := &r.distro; d.ID != "" {
 		if eco, err := d.Ecosystem(); err == nil {
 			inherited = osContext{distro: d, ecosystem: eco}
 		} else if d.VersionID == "" && pkgmeta.KnownDistroID(d.ID) && inherited.distro != nil && !strings.EqualFold(inherited.distro.ID, d.ID) {
@@ -1328,7 +1418,7 @@ func childContext(parent component, inherited osContext) osContext {
 // when two disagree or one declaration contradicts itself. One rule over the
 // whole document, not a reading of where each declaration sits:
 //
-//   - every declaration is read whole (osDeclaration): two different ids or
+//   - every declaration is read whole (osDeclaration): incompatible ids or
 //     VERSION_IDs, or a standard version that disagrees with syft's
 //     VERSION_ID (24.04 against 22.04; 22.04 and 22.04.5 agree), contradict
 //     it, and an Ubuntu one that does voids the document's evidence;
@@ -1408,56 +1498,17 @@ type osEvidence struct {
 	conflict          bool
 }
 
-// osDeclaration reads c as an operating-system declaration, false when it is
-// not one. Its vendor is read as distroOf reads it, the id falling back to
-// the name, so codename evidence and package keying agree on what an OS is
-// (third review: an empty syft:distro:id had hidden an Ubuntu 24.04 from the
-// one and not the other). Every value of a property is read, not the last.
 func osDeclaration(c component) (osEvidence, bool) {
-	if c.Type != "operating-system" {
+	r := readOS(c)
+	d := r.distro
+	if d.ID == "" && d.VersionID == "" && d.VersionCodename == "" && r.conflict == "" {
 		return osEvidence{}, false
 	}
-	var e osEvidence
-	ids, versions := map[string]bool{}, map[string]bool{}
-	for _, p := range c.Properties {
-		switch p.Name {
-		case "syft:distro:id":
-			if p.Value != "" {
-				ids[strings.ToLower(p.Value)] = true
-			}
-		case "syft:distro:versionID":
-			if p.Value != "" {
-				versions[p.Value] = true
-			}
-		case "syft:distro:versionCodename":
-			e.codename = pkgmeta.MergeCodename(e.codename, p.Value)
-		}
-	}
-	if len(ids) == 0 && c.Name != "" {
-		ids[strings.ToLower(c.Name)] = true
-	}
-	for v := range versions {
-		e.version = v
-	}
-	if e.version == "" {
-		e.version = c.Version
-	} else if c.Version != "" && !versionsAgree(e.version, c.Version) {
-		e.conflict = true
-	}
-	if len(ids) == 0 && e.version == "" && e.codename == "" {
-		// Says nothing at all.
-		return osEvidence{}, false
-	}
-	e.ubuntu = ids["ubuntu"]
-	e.conflict = e.conflict || len(ids) > 1 || len(versions) > 1
-	// A codename that names another release than the declaration's own
-	// version (24.04 jammy) contradicts it like two versions do (fifth
-	// review: it had only been left out, so the top's jammy still exempted).
-	if e.ubuntu && e.codename != "" && ubuntuRelease(e.version) != "" &&
-		pkgmeta.UbuntuCodenameOf(pkgmeta.Distro{ID: "ubuntu", VersionID: e.version, VersionCodename: e.codename}) == pkgmeta.ContradictedCodename {
-		e.conflict = true
-	}
-	return e, true
+	// A wrong codename invalidates a waiver even when the numeric release
+	// still gives the package an unambiguous advisory key.
+	conflict := r.conflict != "" || (r.ubuntu && ubuntuRelease(d.VersionID) != "" &&
+		pkgmeta.UbuntuCodenameOf(d) == pkgmeta.ContradictedCodename)
+	return osEvidence{r.ubuntu, d.VersionID, d.VersionCodename, conflict}, true
 }
 
 // versionsAgree reports whether two spellings of an OS version name one
@@ -1485,6 +1536,9 @@ func ubuntuRelease(versionID string) string {
 // whole target (PR #270 review: the report must not name a distro its
 // top-level packages were not judged against).
 func documentDistro(doc bom, top osContext) *pkgmeta.Distro {
+	if top.conflict != "" {
+		return nil
+	}
 	if top.distro != nil {
 		return top.distro
 	}
@@ -1495,8 +1549,10 @@ func documentDistro(doc bom, top osContext) *pkgmeta.Distro {
 	if s == nil {
 		return nil
 	}
-	if d := distroOf(*s); d != nil {
-		return d
+	if r := readOS(*s); r.conflict != "" {
+		return nil
+	} else if r.distro.ID != "" {
+		return &r.distro
 	}
 	return contextFor(s.Components, osContext{}).distro
 }
@@ -1513,46 +1569,115 @@ func sameDistro(a, b *pkgmeta.Distro) bool {
 	return strings.EqualFold(a.ID, b.ID) && a.VersionID == b.VersionID
 }
 
-// distroOf reads one operating-system component, or nil for any other
-// component or one that names no distro.
-func distroOf(c component) *pkgmeta.Distro {
+// osRead is one declaration shared by package keying, target reporting and
+// VEX. A conflict names no release. ubuntu records whether the conflict
+// involves Ubuntu, since it must then invalidate an Ubuntu codename waiver.
+type osRead struct {
+	distro   pkgmeta.Distro
+	conflict string
+	ubuntu   bool
+}
+
+// D94: Microsoft's distribution has two os-release IDs for the same
+// release family. Other IDs remain distinct even when their packages use
+// the same format.
+func sameDeclaredID(a, b string) bool {
+	return a == b || a == "mariner" && b == "azurelinux" || a == "azurelinux" && b == "mariner"
+}
+
+func readOS(c component) osRead {
 	if c.Type != "operating-system" {
-		return nil
+		return osRead{}
 	}
-	var d pkgmeta.Distro
+	var r osRead
+	var ids, versions, pretty []string
+	var emptyID bool
 	for _, p := range c.Properties {
 		switch p.Name {
 		case "syft:distro:id":
-			d.ID = p.Value
+			if p.Value == "" {
+				emptyID = true
+			} else {
+				ids = append(ids, strings.ToLower(p.Value))
+			}
 		case "syft:distro:versionID":
-			d.VersionID = p.Value
+			if p.Value != "" {
+				versions = append(versions, p.Value)
+			}
 		case "syft:distro:prettyName":
-			d.PrettyName = p.Value
+			if p.Value != "" {
+				pretty = append(pretty, p.Value)
+			}
 		case "syft:distro:versionCodename":
-			// os-release's VERSION_CODENAME, as syft copies it. On Ubuntu
-			// it is the codename evidence a VEX statement spelled
-			// distro=jammy needs (vex.Target.UbuntuCodename), which the
-			// image path reads from os-release itself: main QA of 67e2cf6
-			// (2026-11-13) had the same JAMMY statement suppress two
-			// advisories on the Ubuntu image and none on syft's SBOM of it,
-			// whose OS component said versionCodename=jammy all along.
-			// CycloneDX allows a property name to repeat; two different
-			// codenames on one component contradict each other (main QA of
-			// f554fb2: the last one had won, so jammy,noble and noble,jammy
-			// gave exit 1 and 0).
-			d.VersionCodename = pkgmeta.MergeCodename(d.VersionCodename, p.Value)
+			r.distro.VersionCodename = pkgmeta.MergeCodename(r.distro.VersionCodename, p.Value)
 		}
 	}
-	// Fall back to the component's own fields: the properties are a syft
-	// extension, but name/version are spec and carry the same thing.
-	if d.ID == "" {
-		d.ID = c.Name
+
+	name := strings.ToLower(c.Name)
+	r.distro.ID = name
+	r.ubuntu = name == "ubuntu"
+	if len(ids) > 0 {
+		sort.Strings(ids)
+		id := ids[0]
+		r.distro.ID = id
+		r.ubuntu = r.ubuntu || slices.Contains(ids, "ubuntu")
+		for _, other := range ids[1:] {
+			if !sameDeclaredID(id, other) {
+				r.conflict = fmt.Sprintf("syft:distro:id %q and %q", id, other)
+				break
+			}
+		}
+		if r.conflict == "" && name != "" && !sameDeclaredID(name, id) && (emptyID || (pkgmeta.KnownDistroID(name) && pkgmeta.KnownDistroID(id))) {
+			// An empty ID falls back to the standard name; a recognized
+			// standard ID also supplies identity independently of Syft.
+			r.conflict = fmt.Sprintf("component name %q and syft:distro:id %q", name, id)
+		}
 	}
-	if d.VersionID == "" {
-		d.VersionID = c.Version
+	if r.conflict == "" {
+		r.ubuntu = r.distro.ID == "ubuntu"
+		if r.ubuntu && name != "" && name != "ubuntu" && !strings.HasPrefix(name, "ubuntu ") {
+			r.distro.VersionCodename = ""
+		}
 	}
-	if d.ID == "" {
-		return nil
+
+	r.distro.VersionID = c.Version
+	if len(versions) > 0 {
+		// The longest value must refine every other value. Comparing
+		// only adjacent values as they arrive could accept 22.04.4 and
+		// 22.04.5 through a third value of 22.04.
+		sort.Strings(versions)
+		longest := versions[0]
+		for _, v := range versions[1:] {
+			if len(v) > len(longest) {
+				longest = v
+			}
+		}
+		r.distro.VersionID = longest
+		for _, v := range versions {
+			if !versionsAgree(v, longest) {
+				if r.conflict == "" {
+					r.conflict = fmt.Sprintf("syft:distro:versionID %q and %q", v, longest)
+				}
+				break
+			}
+		}
+		if r.conflict == "" && c.Version != "" && !versionsAgree(longest, c.Version) {
+			r.conflict = fmt.Sprintf("component version %q and syft:distro:versionID %q", c.Version, longest)
+		}
 	}
-	return &d
+	if len(pretty) > 0 {
+		sort.Strings(pretty)
+		r.distro.PrettyName = pretty[0]
+		// Ubuntu's pretty name distinguishes the LTS advisory key. Distinct
+		// display strings are compatible when they agree on this property.
+		if r.ubuntu && r.conflict == "" {
+			for _, other := range pretty[1:] {
+				if strings.Contains(other, "LTS") != strings.Contains(pretty[0], "LTS") {
+					r.conflict = fmt.Sprintf("Ubuntu pretty names %q and %q disagree on LTS", pretty[0], other)
+					break
+				}
+			}
+		}
+	}
+	return r
 }

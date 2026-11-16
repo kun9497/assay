@@ -654,6 +654,11 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	}
 
 	for _, p := range t.Packages {
+		if p.OSConflict != "" {
+			res.Skipped = append(res.Skipped, Skipped{Package: p, Cause: SkipTarget,
+				Reason: fmt.Sprintf("the SBOM's operating-system declaration contradicts itself (%s), so %s %s is keyed to no release", p.OSConflict, p.Name, p.Version)})
+			continue
+		}
 		cmp, ok := version.For(p.Ecosystem)
 		if !ok {
 			res.Skipped = append(res.Skipped, Skipped{
