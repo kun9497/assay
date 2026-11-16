@@ -18,6 +18,8 @@ func TestCanonicalDistroQualifier(t *testing.T) {
 		"debian-4.0r9":    "debian-4.0.9", // the archive's revision spelling, as the point it is
 		"Debian-3.1r8":    "debian-3.1.8",
 		"debian-4.0rc1":   "debian-4.0rc1", // not a Debian spelling: compared as written
+		"debian-6.0r10":   "debian-6.0r10", // squeeze is 6.0.10: no alias (main QA of f554fb2)
+		"debian-5.0r10":   "debian-5.0r10",
 		"ubuntu-4.0r9":    "ubuntu-4.0r9",
 		"Debian-12":       "debian-12",
 		"Debian-12.15":    "debian-12.15",

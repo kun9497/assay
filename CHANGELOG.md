@@ -106,7 +106,7 @@ All notable changes to this project are documented here. The format follows
   `versionCodename=jammy` all along. A codename that contradicts the OS version, an OS with no
   codename, and an OS declared only in another branch of the document (D166) still exempt
   nothing. (main QA of 67e2cf6, 2026-11-13)
-- Debian's archive spelling of a point release before squeeze -- `4.0r9`, `3.1r8`, `3.0r6`, as
+- Debian's archive spelling of a point release before lenny -- `4.0r9`, `3.1r8`, `3.0r6`, as
   the etch Release file says -- names its release (`Debian:4.0`, `3.1`, `3.0`) in a `VERSION_ID`,
   an SBOM's operating-system version or a purl's `distro=` qualifier, where 67e2cf6 had refused it
   as no release at all: an SBOM naming etch as the archive does was scanned with `EOL unknown`
@@ -119,6 +119,11 @@ All notable changes to this project are documented here. The format follows
   GitLab job of the example as the installer's leftover. The four-line install form (`t=$(mktemp)`
   and `trap 'rm -f "$t"' EXIT` in the calling shell) is still refused inside the install job;
   the examples themselves are unchanged. (main QA of 67e2cf6, 2026-11-13)
+- Debian's `rN` point-release spelling is read only for woody, sarge and etch (`3.0r6`, `3.1r8`,
+  `4.0r9`), the keyed releases that used it (slink and potato used it too, and have no key).
+  Lenny and squeeze spell their points with three numbers (`5.0.10`, `6.0.10`); f554fb2 had read `6.0r10` as `6.0.10`, so a VEX statement written with that
+  unofficial alias exempted a squeeze install (DLA-53-1 suppressed, exit 1 to 0) and `5.0r10` a
+  lenny one. Such a spelling now names no release. (main QA of f554fb2, 2026-11-13)
 - `internal/ciguard`'s guard on the CI examples reads each line of an install job as sh would --
   YAML quoting removed, commands split at `;` `&&` `||` `&` `|` outside quotes, subshells and
   comments skipped, words through sh's quote removal -- instead of matching a pattern. f554fb2's

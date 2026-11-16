@@ -79,7 +79,7 @@
   문서가 이미지에서는 advisory 2건을 억제하고 SBOM에서는 0건이었습니다(OS 컴포넌트에 `versionCodename=jammy`가
   있었는데도). OS 버전과 모순되는 코드네임, 코드네임 없는 OS, 문서의 다른 분기에만 선언된 OS(D166)는
   여전히 아무것도 면제하지 않습니다. (main 67e2cf6 QA, 2026-11-13)
-- squeeze 이전 포인트 릴리스의 Debian 아카이브 표기 -- etch의 Release 파일이 적는 `4.0r9`, `3.1r8`,
+- lenny 이전 포인트 릴리스의 Debian 아카이브 표기 -- etch의 Release 파일이 적는 `4.0r9`, `3.1r8`,
   `3.0r6` -- 가 `VERSION_ID`, SBOM의 operating-system 버전, purl의 `distro=` 어디서든 해당 릴리스
   (`Debian:4.0`, `3.1`, `3.0`)를 가리킵니다. 67e2cf6는 이를 릴리스가 아니라고 거부해, 아카이브 표기대로
   etch를 적은 SBOM이 `--fail-on-eol`에서 `EOL unknown`·종료 0이 됐습니다(ef0bc1a는 2010-02-15 EOL·종료 1).
@@ -89,6 +89,10 @@
   67e2cf6는 예제의 독립된 GitLab 잡에 넣은 `trap 'echo stopping' TERM`을 설치기의 잔재로 거부했습니다.
   네 줄 설치 형태(호출 셸의 `t=$(mktemp)`와 `trap 'rm -f "$t"' EXIT`)는 설치 잡 안에서 여전히 거부되며,
   예제 자체는 바뀌지 않았습니다. (main 67e2cf6 QA, 2026-11-13)
+- Debian의 `rN` 포인트 릴리스 표기는 그것을 쓴 키 있는 릴리스인 woody·sarge·etch(`3.0r6`, `3.1r8`, `4.0r9`)에만
+  읽습니다(slink·potato도 썼지만 키가 없습니다). lenny와 squeeze는 포인트를 세 숫자로 적습니다(`5.0.10`, `6.0.10`). f554fb2는 `6.0r10`을 `6.0.10`으로 읽어, 이 비공식 별칭으로
+  쓴 VEX 문장이 squeeze 설치를 면제했고(DLA-53-1 억제, 종료 1 → 0) `5.0r10`은 lenny 설치를 면제했습니다. 이제 그런
+  표기는 어느 릴리스도 가리키지 않습니다. (main f554fb2 QA, 2026-11-13)
 - `internal/ciguard`의 CI 예제 가드가 설치 잡의 각 줄을 패턴 대신 sh처럼 읽습니다 -- YAML 따옴표를 벗기고, 따옴표 밖의
   `;` `&&` `||` `&` `|`에서 명령을 나누고, 서브셸과 주석은 건너뛰고, 단어는 sh의 따옴표 제거를 거칩니다. f554fb2의 패턴은
   따옴표로 감싼 신호 이름(`trap 'echo cleanup' "EXIT"`와 `'EXIT'`는 GitLab 공유 셸에 같은 EXIT trap을 설정하며, 67e2cf6는
