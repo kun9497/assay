@@ -54,7 +54,15 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 		{"ids debian then ubuntu", top22 + "," + apt + "," + branch(osc("", []prop{{"syft:distro:id", "debian"}, id, v("22.04"), cn("jammy")})), false},
 		{"ids ubuntu then debian", top22 + "," + apt + "," + branch(osc("", []prop{id, {"syft:distro:id", "debian"}, v("22.04"), cn("jammy")})), false},
 		{"unreadable version 24", top22 + "," + apt + "," + branch(osc("", []prop{id, v("24"), cn("jammy")})), false},
-		{"unreadable version, version-less child", top22 + "," + apt + "," + osc("", []prop{id, v("24"), cn("noble")}, osc("", []prop{id, cn("jammy")})), false},
+		// Beside a 22.04 sibling the level is two releases, so only the
+		// unreadable parent's own sentinel keeps its child from the
+		// inherited 22.04.
+		{"unreadable version, version-less child", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("", []prop{id, v("24"), cn("noble")}, osc("", []prop{id, cn("jammy")}))), false},
+		// A versioned parent binds its child even where its own level is
+		// two releases; a version-less declaration beside two releases
+		// belongs to neither.
+		{"version-less jammy under 24.04 beside a 22.04 sibling", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}, osc("", []prop{id, cn("jammy")}))), false},
+		{"version-less jammy beside 22.04 and 24.04 siblings", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}), osc("", []prop{id, cn("jammy")})), false},
 		// Controls: the same value twice, an ordinary declaration, a
 		// standard version its VERSION_ID refines.
 		{"versionID 22.04 twice", top22 + "," + apt + "," + branch(osc("", []prop{id, v("22.04"), v("22.04"), cn("jammy")})), true},
