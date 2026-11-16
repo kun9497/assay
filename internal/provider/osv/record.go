@@ -313,12 +313,7 @@ func convert(data []byte, wantEcosystem string, st *stats, tracker *ubuntuTracke
 	// false positive. Dropped here rather than at query time so no lookup path
 	// can forget the check (D16).
 	if r.Withdrawn != nil {
-		// Counted only where the record would have filled a key: MAL-*
-		// (D15) and ALBA/ALEA (D72) are dropped below either way (second
-		// review: a withdrawn MAL-* had counted under npm).
-		if db := databaseOf(r.ID); !strings.HasPrefix(r.ID, "MAL-") && db != "ALBA" && db != "ALEA" {
-			st.countWithdrawn(r.Affected, wantEcosystem)
-		}
+		st.countWithdrawn(data, wantEcosystem)
 		return advisory.Advisory{}, false, nil
 	}
 
@@ -664,11 +659,10 @@ type stats struct {
 	EchoNotAffectedSentinel int
 
 	// Withdrawn is D16's drop, counted per store key a record would have
-	// filled: once per record under each affected ecosystem this archive is
-	// the family of (familyMatches), Packagist folded as it is stored, Ubuntu
-	// lineage keys -- never indexed -- left out. A record shipped in several
-	// archives is so counted once per key, not once per archive (review of
-	// the branch: npm+PyPI archives had each counted both). Without it a build
+	// filled (countWithdrawn): once per record under each key this archive
+	// is the family of. A record shipped in several archives is so counted
+	// once per key, not once per archive (review of the branch: npm+PyPI
+	// archives had each counted both). Without it a build
 	// whose key collapses says only that it collapsed: on 2026-11-15 Echo:Go
 	// went from 285 published advisories to 2 and the push guard refused,
 	// and telling an upstream withdrawal from a parse or fetch fault took a
@@ -676,20 +670,37 @@ type stats struct {
 	Withdrawn map[string]int
 }
 
-func (s *stats) countWithdrawn(affected []rawAffected, wantEcosystem string) {
+// countWithdrawn counts a withdrawn record under each key it would have
+// filled had it not been withdrawn: the record is converted again without
+// its withdrawn field, with no stats and no tracker, and the keys of what
+// comes back that this archive is the family of are counted, once each. So
+// every live filter -- MAL-* (D15), ALBA/ALEA (D72), nameless and lineage
+// entries, the Echo sentinel (D92), GIT-only ranges -- applies here too,
+// with no second copy of it to drift (third review: the sentinel and
+// GIT-only entries had been counted though the live path stores neither).
+func (s *stats) countWithdrawn(data []byte, wantEcosystem string) {
 	if s == nil {
+		return
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(data, &fields) != nil {
+		return
+	}
+	delete(fields, "withdrawn")
+	live, err := json.Marshal(fields)
+	if err != nil {
+		return
+	}
+	a, ok, err := convert(live, wantEcosystem, nil, nil)
+	if err != nil || !ok {
 		return
 	}
 	if s.Withdrawn == nil {
 		s.Withdrawn = map[string]int{}
 	}
 	seen := map[string]bool{}
-	for _, a := range affected {
-		e := a.Package.Ecosystem
-		if a.Package.Name == "" || ubuntuLineage(e) || !familyMatches(e, wantEcosystem) {
-			continue
-		}
-		if e = foldPackagistEcosystem(e); !seen[e] {
+	for _, af := range a.Affected {
+		if e := af.Ecosystem; familyMatches(e, wantEcosystem) && !seen[e] {
 			seen[e] = true
 			s.Withdrawn[e]++
 		}

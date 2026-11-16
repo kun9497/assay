@@ -57,52 +57,36 @@ func TestStats_WithdrawnSummaryNone(t *testing.T) {
 	if got := (stats{}).withdrawnSummary(); got != "none" {
 		t.Errorf("withdrawnSummary of nothing = %q, want none", got)
 	}
-	aff := func(ecos ...string) []rawAffected {
-		var out []rawAffected
-		for _, e := range ecos {
-			var a rawAffected
-			a.Package.Ecosystem, a.Package.Name = e, "pkg"
-			out = append(out, a)
-		}
-		return out
-	}
-	var st stats
-	// One record, three entries: two of npm count once; PyPI belongs to
-	// another archive; an Ubuntu lineage key is never indexed.
-	st.countWithdrawn(aff("npm", "npm", "PyPI", "Ubuntu:Pro:18.04:LTS"), "npm")
-	st.countWithdrawn(aff("npm", "npm", "PyPI", "Ubuntu:Pro:18.04:LTS"), "PyPI")
-	st.countWithdrawn(aff("Packagist:https://packages.drupal.org/8"), "Packagist")
-	// The Ubuntu archive: mainline counts, a lineage key never indexed does
-	// not, though familyMatches ties both to the family.
-	st.countWithdrawn(aff("Ubuntu:22.04:LTS", "Ubuntu:Pro:18.04:LTS"), "Ubuntu")
-	if got, want := st.withdrawnSummary(), "Packagist 1, PyPI 1, Ubuntu:22.04:LTS 1, npm 1"; got != want {
-		t.Errorf("withdrawnSummary = %q, want %q", got, want)
-	}
-	var empty stats
-	empty.countWithdrawn([]rawAffected{{}}, "")
-	if len(empty.Withdrawn) != 0 {
-		t.Errorf("a nameless entry counted: %v", empty.Withdrawn)
-	}
 }
 
-// Through convert: a withdrawn MAL-* or ALBA record is no lost advisory --
-// D15 and D72 drop them live too -- so it is not counted.
-func TestConvert_WithdrawnCountSkipsRecordsNeverStored(t *testing.T) {
+// Through convert: a withdrawn record counts under each key the live path
+// would have stored it under, and nowhere else -- one record in the npm and
+// PyPI archives once per key, Packagist folded, an Ubuntu lineage key, a
+// nameless entry, MAL-*, ALBA, an Echo sentinel-only entry and a GIT-only
+// range not at all.
+func TestConvert_WithdrawnCountsOnlyKeysTheRecordWouldHaveFilled(t *testing.T) {
+	const w = `"withdrawn":"2026-01-01T00:00:00Z",`
+	rng := `"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1.0.0"}]}]`
+	ent := func(eco, name string) string {
+		return `{"package":{"name":"` + name + `","ecosystem":"` + eco + `"},` + rng + `}`
+	}
 	var st stats
-	for _, rec := range []string{
-		`{"id":"MAL-2025-1","withdrawn":"2026-01-01T00:00:00Z","affected":[{"package":{"name":"evil","ecosystem":"npm"},"versions":["1.0.0"]}]}`,
-		`{"id":"ALBA-2024:1","withdrawn":"2026-01-01T00:00:00Z","affected":[{"package":{"name":"x","ecosystem":"AlmaLinux:9"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1"}]}]}]}`,
-		`{"id":"GHSA-real","withdrawn":"2026-01-01T00:00:00Z","affected":[{"package":{"name":"ok","ecosystem":"npm"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.0.0"}]}]}]}`,
+	for _, c := range []struct{ rec, want string }{
+		{`{"id":"GHSA-two",` + w + `"affected":[` + ent("npm", "a") + `,` + ent("npm", "b") + `,` + ent("PyPI", "c") + `]}`, "npm"},
+		{`{"id":"GHSA-two",` + w + `"affected":[` + ent("npm", "a") + `,` + ent("npm", "b") + `,` + ent("PyPI", "c") + `]}`, "PyPI"},
+		{`{"id":"GHSA-drupal",` + w + `"affected":[` + ent("Packagist:https://packages.drupal.org/8", "drupal/x") + `]}`, "Packagist"},
+		{`{"id":"UBUNTU-CVE-2026-1",` + w + `"affected":[` + ent("Ubuntu:22.04:LTS", "a") + `,` + ent("Ubuntu:Pro:18.04:LTS", "a") + `]}`, "Ubuntu"},
+		{`{"id":"GHSA-noname",` + w + `"affected":[` + ent("Go", "") + `]}`, "Go"},
+		{`{"id":"MAL-2025-1",` + w + `"affected":[{"package":{"name":"evil","ecosystem":"npm"},"versions":["1.0.0"]}]}`, "npm"},
+		{`{"id":"ALBA-2024:1",` + w + `"affected":[` + ent("AlmaLinux:9", "x") + `]}`, "AlmaLinux"},
+		{`{"id":"ECHO-s",` + w + `"affected":[{"package":{"name":"linux","ecosystem":"Echo"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1"}]}]}]}`, "Echo"},
+		{`{"id":"GHSA-git",` + w + `"affected":[{"package":{"name":"g","ecosystem":"Go"},"ranges":[{"type":"GIT","repo":"https://x","events":[{"introduced":"0"},{"fixed":"abc"}]}]}]}`, "Go"},
 	} {
-		want := "npm"
-		if strings.Contains(rec, "AlmaLinux") {
-			want = "AlmaLinux"
-		}
-		if _, ok, err := convert([]byte(rec), want, &st, nil); ok || err != nil {
-			t.Fatalf("convert(%s) = ok %v, err %v; want dropped", rec, ok, err)
+		if _, ok, err := convert([]byte(c.rec), c.want, &st, nil); ok || err != nil {
+			t.Fatalf("convert(%s) = ok %v, err %v; want dropped", c.rec, ok, err)
 		}
 	}
-	if got := st.withdrawnSummary(); got != "npm 1" {
-		t.Errorf("withdrawnSummary = %q, want npm 1 (the GHSA only)", got)
+	if got, want := st.withdrawnSummary(), "Packagist 1, PyPI 1, Ubuntu:22.04:LTS 1, npm 1"; got != want {
+		t.Errorf("withdrawnSummary = %q, want %q", got, want)
 	}
 }
