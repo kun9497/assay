@@ -39,11 +39,14 @@ type leakGuard struct{}
 // leakedIntoJob is the guard, read over the install jobs only (installJobs).
 var leakedIntoJob leakGuard
 
-// mktempAssign finds an assignment of a mktemp path in a command, before
-// quote removal: NAME=$(mktemp), NAME="$( mktemp )", NAME=`mktemp`,
-// NAME=$(TMPDIR=x mktemp), NAME=${X:-$(mktemp)} -- at the command's start or
-// after a space (a second assignment, a declaration builtin).
-var mktempAssign = regexp.MustCompile("(?:^|[ \\t])\\w+=[\"']?(?:\\$\\{\\w+:?[-=+]\\s*)?(?:\\$\\(\\s*(?:\\w+=\\S*\\s+)*(?:command\\s+)?|`\\s*)mktemp\\b")
+// mktempValue is an assignment word, after quote removal, whose value is a
+// mktemp path: NAME=$(mktemp), NAME=$( mktemp ), NAME=`mktemp`,
+// NAME=$(TMPDIR=x mktemp), NAME=$(command mktemp), NAME=${X:-$(mktemp)}. Only
+// a word that assigns in the job shell is read: a command's argument -- the
+// script of `sh -c '...'`, the text `printf` prints -- is not one (main QA of
+// 4d823d1, 2026-11-16: both had been refused from a pattern over the whole
+// command).
+var mktempValue = regexp.MustCompile("^\\w+=(?:\\$\\{\\w+:?[-=+]\\s*)?(?:\\$\\(\\s*(?:\\w+=\\S*\\s+)*(?:command\\s+)?|`\\s*)mktemp\\b")
 
 // mappingKey is a YAML mapping key with a scalar after it on the same line.
 var mappingKey = regexp.MustCompile(`^[A-Za-z_][\w-]*:[ \t]+`)
@@ -73,7 +76,7 @@ func logicalLines(text string) []string {
 	indent := func(s string) int { return len(s) - len(strings.TrimLeft(s, " \t")) }
 	for i := 0; i < len(raw); i++ {
 		line := raw[i]
-		for strings.HasSuffix(line, "\\") && !strings.HasSuffix(line, "\\\\") && i+1 < len(raw) {
+		for continues(line) && i+1 < len(raw) {
 			i++
 			line = line[:len(line)-1] + strings.TrimLeft(raw[i], " \t")
 		}
@@ -94,6 +97,42 @@ func logicalLines(text string) []string {
 		out = append(out, line)
 	}
 	return out
+}
+
+// continues reports whether a line ends in a backslash that joins the next
+// one: unquoted, unescaped, and not inside a comment -- a YAML comment line or
+// a shell comment after a command ends at the newline, backslash or not (main
+// QA of 4d823d1, 2026-11-16: a `# ... \\` comment had swallowed the real EXIT
+// trap on the line after it).
+func continues(line string) bool {
+	s := strings.TrimSpace(line)
+	if strings.HasPrefix(s, "#") {
+		return false
+	}
+	quote := byte(0)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote == '\'':
+			if c == '\'' {
+				quote = 0
+			}
+		case c == '\\':
+			if i == len(s)-1 {
+				return true
+			}
+			i++
+		case quote == '"':
+			if c == '"' {
+				quote = 0
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == '#' && (i == 0 || s[i-1] == ' ' || s[i-1] == '\t'):
+			return false
+		}
+	}
+	return false
 }
 
 func lineLeaks(line string) bool {
@@ -265,11 +304,14 @@ var prefixWords = map[string]bool{"{": true, "then": true, "do": true, "else": t
 // commandLeaks reports whether one simple command leaves a mktemp variable
 // or an EXIT trap in the shell that runs it.
 func commandLeaks(cmd string) bool {
-	if mktempAssign.MatchString(cmd) {
-		return true
-	}
 	words := shellWords(cmd)
-	for len(words) > 1 && (prefixWords[words[0]] || assignmentWord.MatchString(words[0])) {
+	// The words before the command name: body and condition openers,
+	// declaration builtins, and NAME=value assignments -- the last the
+	// only place a mktemp path is assigned in this shell.
+	for len(words) > 0 && (prefixWords[words[0]] || assignmentWord.MatchString(words[0])) {
+		if mktempValue.MatchString(words[0]) {
+			return true
+		}
 		words = words[1:]
 	}
 	if len(words) == 0 {
@@ -354,6 +396,13 @@ func shellWords(cmd string) []string {
 			inWord = true
 			i++
 			cur.WriteByte(cmd[i])
+		case (c == '$' && i+1 < len(cmd) && cmd[i+1] == '(') || c == '`':
+			// A command substitution is part of the word it appears in,
+			// spaces and all: t=$( mktemp ) is one word.
+			inWord = true
+			j := substitutionEnd(cmd, i)
+			cur.WriteString(cmd[i:j])
+			i = j - 1
 		default:
 			inWord = true
 			cur.WriteByte(c)
@@ -361,6 +410,31 @@ func shellWords(cmd string) []string {
 	}
 	end()
 	return words
+}
+
+// substitutionEnd is the index just past the command substitution starting
+// at cmd[i] -- $( ... ) with its nesting, or ` ... ` -- or len(cmd) when it
+// does not close on the line.
+func substitutionEnd(cmd string, i int) int {
+	if cmd[i] == '`' {
+		if k := strings.IndexByte(cmd[i+1:], '`'); k >= 0 {
+			return i + 1 + k + 1
+		}
+		return len(cmd)
+	}
+	depth := 0
+	for j := i + 1; j < len(cmd); j++ {
+		switch cmd[j] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return j + 1
+			}
+		}
+	}
+	return len(cmd)
 }
 
 func allDigitsWord(s string) bool {
@@ -422,6 +496,12 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		"    - |\n      t=$(\\\n        mktemp)",
 		"    - >\n      trap 'rm -f \"$t\"'\n      EXIT",
 		"  before_script: >-\n    t=$(mktemp)",
+		// Main QA of 4d823d1 (2026-11-16): a backslash ending a comment
+		// does not continue it, so the trap on the next line is read.
+		"    # example ending in backslash \\\n    - trap 'echo catch-me' EXIT",
+		"    - make # note \\\n    - trap 'echo catch-me' EXIT",
+		"    - set -e; t=$(mktemp)",
+		"    - x=1 t=$( mktemp )",
 		// A README fence line is sh, not YAML: its quotes are sh's
 		// (fourth review: unquoting it as YAML had shifted every pairing).
 		`"$CI_PROJECT_DIR/setup" && trap 'rm -f "$t"' "EXIT"`,
@@ -448,6 +528,13 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		`"$HOME/setup" && echo "done"`,
 		`  script: [ "echo one", "echo two" ]`,
 		`  image: alpine:3.20`,
+		// Main QA of 4d823d1 (2026-11-16): a child shell's assignment and
+		// trap are the child's, and text that mentions $(mktemp) assigns
+		// nothing.
+		`    - sh -c 'set -eu; t=$(mktemp); trap "rm -f $t" EXIT; echo child-done'`,
+		`    - printf '%s' 'No install - run t=$(mktemp) first'`,
+		`    - echo "t=$(mktemp)"`,
+		`    - echo t=$(mktemp)`,
 		// A README line that is one quoted word is a command of that name to
 		// sh, not a trap: only a YAML value is unquoted as YAML.
 		`"trap 'x' EXIT"`,
