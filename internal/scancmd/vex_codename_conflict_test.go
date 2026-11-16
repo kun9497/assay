@@ -82,6 +82,9 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 		// version, are contexts too.
 		{"numeric top, version-less jammy beside Debian 12", top22 + "," + apt + "," + branch(debian12(), osc("", []prop{id, cn("jammy")})), false},
 		{"numeric top, version-less jammy beside 22.04 and Debian 12", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), debian12(), osc("", []prop{id, cn("jammy")})), false},
+		// Beside a 22.04 sibling the level is two releases, so only the Debian
+		// parent itself keeps its child from the inherited 22.04.
+		{"numeric top, version-less jammy under Debian 12 beside 22.04", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), debian12(osc("", []prop{id, cn("jammy")}))), false},
 		{"numeric top, version-less jammy under a version-less Debian", top22 + "," + apt + "," + branch(debianAny(osc("", []prop{id, cn("jammy")}))), false},
 		{"numeric top, version-less jammy beside a version-less Debian", top22 + "," + apt + "," + branch(debianAny(), osc("", []prop{id, cn("jammy")})), false},
 		{"top jammy, version-less noble under Debian 12", top22j + "," + apt + "," + branch(debian12(osc("", []prop{id, cn("noble")}))), true},
