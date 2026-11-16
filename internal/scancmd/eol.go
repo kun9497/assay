@@ -57,11 +57,13 @@ func eolCycle(ecosystem string) (cycle string, ok bool) {
 	release = strings.TrimPrefix(release, "v")
 	// Debian's releases before 7 are keyed with OSV's two-part number
 	// (Debian:4.0, 5.0, 6.0; pkgmeta.Distro.Ecosystem), while endoflife.date
-	// names those cycles "4", "5", "6" -- and "3.0"/"3.1" as they are. The
-	// ".0" comes off here, at the read side (PR #321 review: with the key
-	// reshaped, --fail-on-eol had stopped firing for etch, lenny and
-	// squeeze, printing only "EOL unknown").
-	if strings.HasPrefix(ecosystem, "Debian:") && strings.HasSuffix(release, ".0") && release != "3.0" {
+	// names those cycles "4", "5", "6" -- and "2.0"/"3.0"/"3.1" as they are.
+	// The ".0" comes off here, at the read side, for those three only (PR
+	// #321 review: with the key reshaped, --fail-on-eol had stopped firing
+	// for etch, lenny and squeeze, printing only "EOL unknown"; review of
+	// the slink/potato branch: hamm's "2.0" had become "2", which no row
+	// names, while its 2.0rN spelling reached "2.0").
+	if strings.HasPrefix(ecosystem, "Debian:") && (release == "4.0" || release == "5.0" || release == "6.0") {
 		release = strings.TrimSuffix(release, ".0")
 	}
 	if strings.HasPrefix(ecosystem, "SLES:") {
@@ -102,15 +104,25 @@ func lookupEOL(distro *pkgmeta.Distro, eolRows []store.EOLRelease, now time.Time
 	if distro == nil {
 		return report.EOLStatus{Reason: "this target carries no distro identity"}
 	}
+	var cycle string
 	ecosystem, err := distro.Ecosystem()
 	if err != nil {
-		return report.EOLStatus{Reason: fmt.Sprintf(
-			"distro %q release %q is not one this build recognizes: %v", distro.ID, distro.VersionID, err)}
-	}
-	cycle, ok := eolCycle(ecosystem)
-	if !ok {
-		return report.EOLStatus{Reason: fmt.Sprintf(
-			"could not derive an end-of-life release cycle from ecosystem key %q", ecosystem)}
+		// Hamm, slink and potato spelled their point releases rN (2.1r5,
+		// 2.2r7) as woody, sarge and etch did, but have no advisory key
+		// (Distro.Ecosystem refuses them), so their spelling is read for
+		// the end-of-life cycle alone: no key, no VEX alias (main QA of
+		// 4d823d1, 2026-11-16: #326 had left slink and potato `EOL unknown`
+		// and exit 0 under --fail-on-eol, where `2.1` and `2.2` were refused).
+		if cycle = debianUnkeyedRevisionCycle(distro); cycle == "" {
+			return report.EOLStatus{Reason: fmt.Sprintf(
+				"distro %q release %q is not one this build recognizes: %v", distro.ID, distro.VersionID, err)}
+		}
+	} else {
+		var ok bool
+		if cycle, ok = eolCycle(ecosystem); !ok {
+			return report.EOLStatus{Reason: fmt.Sprintf(
+				"could not derive an end-of-life release cycle from ecosystem key %q", ecosystem)}
+		}
 	}
 	if eolRows == nil {
 		return report.EOLStatus{Reason: "this database carries no end-of-life data; run `assay db update`"}
@@ -123,6 +135,26 @@ func lookupEOL(distro *pkgmeta.Distro, eolRows []store.EOLRelease, now time.Time
 	}
 	return report.EOLStatus{Reason: fmt.Sprintf(
 		"no end-of-life data for distro %q release %q", distro.ID, cycle)}
+}
+
+// debianUnkeyedRevisionCycle is the end-of-life cycle of a Debian release
+// before woody spelled with its archive's rN point (2.0r5, 2.1r5, 2.2r7 are
+// cycles 2.0, 2.1, 2.2), or "". Only those three releases: the later rN
+// releases (3.0, 3.1, 4.0) have keys and are read by Distro.Ecosystem, and
+// lenny on never used the spelling.
+func debianUnkeyedRevisionCycle(d *pkgmeta.Distro) string {
+	if d.ID != "debian" {
+		return ""
+	}
+	release, rev, ok := strings.Cut(d.VersionID, "r")
+	if !ok || rev == "" || strings.Trim(rev, "0123456789") != "" {
+		return ""
+	}
+	switch release {
+	case "2.0", "2.1", "2.2":
+		return release
+	}
+	return ""
 }
 
 // dateLayout is every date field store.EOLRelease carries — endoflife.date
