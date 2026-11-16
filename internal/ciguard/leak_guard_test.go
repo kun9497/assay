@@ -133,6 +133,11 @@ func shellCommands(s string) []string {
 			}
 			continue
 		case c == '(' && atStart:
+			// Equivalent to leaving the subshell in: a command that starts
+			// with ( is neither trap nor an assignment, so commandLeaks
+			// refuses it either way (a mutation dropping this survives).
+			// Kept so a separator inside the subshell does not split it
+			// into commands that would then be read.
 			depth = 1
 			continue
 		case c == '#' && (i == 0 || s[i-1] == ' ' || s[i-1] == '\t' || s[i-1] == ';'):
