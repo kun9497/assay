@@ -1348,14 +1348,27 @@ func documentCodename(doc bom, release string) string {
 	const unreadable = "!unreadable"
 	var walk func(cs []component, inherited string)
 	walk = func(cs []component, inherited string) {
-		// The siblings' own versioned Ubuntu release is the nearer context.
+		// The siblings' own release is the nearer context: a versioned
+		// Ubuntu OS's, or any OS of another vendor's (review of the branch:
+		// a Debian 12 sibling had left a version-less jammy the outer 22.04,
+		// and beside a 22.04 sibling had not made the level two releases --
+		// package keying reads both as a mixed level).
 		local, ambiguous := "", false
 		for _, c := range cs {
-			if u, ok := ubuntuDeclaration(c); ok && u.version != "" {
-				r := ubuntuRelease(u.version)
-				if r == "" {
+			r := ""
+			if u, ok := ubuntuDeclaration(c); ok {
+				if u.version == "" {
+					continue
+				}
+				if r = ubuntuRelease(u.version); r == "" {
 					r = unreadable
 				}
+			} else if o := otherVendorContext(c); o != "" {
+				r = o
+			} else {
+				continue
+			}
+			{
 				switch {
 				case local == "":
 					local = r
@@ -1412,12 +1425,12 @@ func documentCodename(doc bom, release string) string {
 						codename = pkgmeta.MergeCodename(codename, pkgmeta.UbuntuCodenameOf(pkgmeta.Distro{ID: "ubuntu", VersionID: u.version, VersionCodename: u.codename}))
 					}
 				}
-			} else if d := distroOf(c); d != nil && d.VersionID != "" {
-				// Another vendor's versioned OS is the nearer context of what
-				// it holds: an Ubuntu declaration under Debian 12 is not the
-				// outer 22.04's (review of the branch; package keying reads
-				// that OS as the context too).
-				childContext = "!os:" + strings.ToLower(d.ID) + ":" + d.VersionID
+			} else if o := otherVendorContext(c); o != "" {
+				// Another vendor's OS, versioned or not, is the nearer context
+				// of what it holds: an Ubuntu declaration under Debian is not
+				// the outer 22.04's (review of the branch; package keying
+				// reads that OS as the context too).
+				childContext = o
 			}
 			walk(c.Components, childContext)
 		}
@@ -1427,6 +1440,18 @@ func documentCodename(doc bom, release string) string {
 		walk([]component{*doc.Metadata.Component}, "")
 	}
 	return codename
+}
+
+// otherVendorContext is the context an operating-system component of a vendor
+// other than Ubuntu gives what sits beside and under it -- "!os:<id>:<version>",
+// never a release documentCodename can match -- or "" for any other
+// component. An OS with no id names no vendor and is no context.
+func otherVendorContext(c component) string {
+	d := distroOf(c)
+	if d == nil || strings.EqualFold(d.ID, "ubuntu") {
+		return ""
+	}
+	return "!os:" + strings.ToLower(d.ID) + ":" + d.VersionID
 }
 
 // ubuntuEvidence is what one operating-system component says about an Ubuntu

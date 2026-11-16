@@ -45,6 +45,13 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 	debian12 := func(children ...string) string {
 		return `{"type":"operating-system","name":"debian","version":"12","properties":[{"name":"syft:distro:id","value":"debian"},{"name":"syft:distro:versionID","value":"12"}],"components":[` + strings.Join(children, ",") + `]}`
 	}
+	debianAny := func(children ...string) string {
+		out := `{"type":"operating-system","name":"debian","properties":[{"name":"syft:distro:id","value":"debian"}]`
+		if len(children) > 0 {
+			out += `,"components":[` + strings.Join(children, ",") + `]`
+		}
+		return out + `}`
+	}
 	top22 := osc("22.04", []prop{id, v("22.04")})
 	top22j := osc("22.04", []prop{id, v("22.04"), cn("jammy")})
 	for _, tc := range []struct {
@@ -71,6 +78,12 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 		{"jammy under a version-less parent beside two releases", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}), osc("", []prop{id}, osc("", []prop{id, cn("jammy")}))), false},
 		{"jammy under a self-contradicting parent", top22 + "," + apt + "," + branch(osc("", []prop{id, v("24.04"), v("22.04")}, osc("", []prop{id, cn("jammy")}))), false},
 		{"numeric top, version-less jammy under Debian 12", top22 + "," + apt + "," + branch(debian12(osc("", []prop{id, cn("jammy")}))), false},
+		// Second review: another vendor's OS as a sibling, and one with no
+		// version, are contexts too.
+		{"numeric top, version-less jammy beside Debian 12", top22 + "," + apt + "," + branch(debian12(), osc("", []prop{id, cn("jammy")})), false},
+		{"numeric top, version-less jammy beside 22.04 and Debian 12", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), debian12(), osc("", []prop{id, cn("jammy")})), false},
+		{"numeric top, version-less jammy under a version-less Debian", top22 + "," + apt + "," + branch(debianAny(osc("", []prop{id, cn("jammy")}))), false},
+		{"numeric top, version-less jammy beside a version-less Debian", top22 + "," + apt + "," + branch(debianAny(), osc("", []prop{id, cn("jammy")})), false},
 		{"top jammy, version-less noble under Debian 12", top22j + "," + apt + "," + branch(debian12(osc("", []prop{id, cn("noble")}))), true},
 		{"version-less jammy beside 22.04 and 24.04 siblings", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}), osc("", []prop{id, cn("jammy")})), false},
 		// Controls: the same value twice, an ordinary declaration, a
