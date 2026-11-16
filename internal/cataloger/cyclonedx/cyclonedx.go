@@ -1375,6 +1375,10 @@ func documentCodename(doc bom, release string) string {
 				switch {
 				case u.conflict:
 					codename = pkgmeta.MergeCodename(codename, pkgmeta.ContradictedCodename)
+					// Equivalent today -- the contradiction already voids the
+					// document's evidence, whatever its subtree adds (a
+					// mutation dropping this survives) -- kept so the subtree
+					// never inherits a release its parent disputes.
 					childContext = unreadable
 				case u.version != "" && r == "":
 					// A version that names no release: no evidence, and none
