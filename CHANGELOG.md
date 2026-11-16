@@ -125,7 +125,6 @@ All notable changes to this project are documented here. The format follows
   `JAMMY` statement exempted it with the ubuntu listing first (exit 0) and not the other way round
   (exit 1). (main QA of f554fb2, 2026-11-13)
 
-
 ## [0.18.1] - 2026-11-12
 
 ### Changed

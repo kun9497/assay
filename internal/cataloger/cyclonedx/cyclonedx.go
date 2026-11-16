@@ -551,6 +551,14 @@ func mergePURL(kept, other, ecosystem string) string {
 		kp.Version = op.Version
 	}
 	for k, v := range op.Qualifiers {
+		// A distro= is the other vendor's own release statement when the
+		// namespaces differ, not this purl's (PR #329 review: the kept
+		// pkg:deb/ubuntu/apt with no distro= took pkg:deb/debian/apt's
+		// distro=jammy here, and the codename exempted it in one listing
+		// order only).
+		if k == "distro" && !strings.EqualFold(kp.Namespace, op.Namespace) {
+			continue
+		}
 		if _, stated := kp.Qualifiers[k]; !stated {
 			kp.Qualifiers[k] = v
 		}
