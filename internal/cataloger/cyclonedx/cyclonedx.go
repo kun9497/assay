@@ -1335,7 +1335,9 @@ func childContext(parent component, inherited osContext) osContext {
 // (`24`) is no evidence either way. A declaration with no version belongs to
 // its nearest context's release -- a versioned Ubuntu OS among its siblings,
 // else its nearest versioned OS ancestor -- and its codename is held to that
-// release (2026-11-16 QA: a version-less noble under a 24.04 parent had
+// release -- an ancestor of another vendor counts, and one that contradicts
+// itself or names no release leaves its subtree no release at all
+// (2026-11-16 QA: a version-less noble under a 24.04 parent had
 // cancelled the top-level 22.04's own jammy, and a version-less jammy there
 // had given a numeric-only 22.04 its jammy). It counts when that release is
 // the target's or it has no context at all; one of another release is left
@@ -1373,16 +1375,20 @@ func documentCodename(doc bom, release string) string {
 				switch {
 				case u.conflict:
 					codename = pkgmeta.MergeCodename(codename, pkgmeta.ContradictedCodename)
+					childContext = unreadable
 				case u.version != "" && r == "":
 					// A version that names no release: no evidence, and none
 					// for what it holds.
 					childContext = unreadable
 				case u.version == "" && ambiguous:
 					// Siblings of two releases: this declaration belongs to
-					// neither provably.
+					// neither provably, and neither does what it holds
+					// (review of the branch: a codename-less one had passed
+					// the inherited 22.04 to a jammy child).
 					if u.codename != "" {
 						codename = pkgmeta.MergeCodename(codename, pkgmeta.ContradictedCodename)
 					}
+					childContext = unreadable
 				case u.version == "" && context == unreadable:
 				case u.version == "" && context == "":
 					codename = pkgmeta.MergeCodename(codename, u.codename)
@@ -1402,6 +1408,12 @@ func documentCodename(doc bom, release string) string {
 						codename = pkgmeta.MergeCodename(codename, pkgmeta.UbuntuCodenameOf(pkgmeta.Distro{ID: "ubuntu", VersionID: u.version, VersionCodename: u.codename}))
 					}
 				}
+			} else if d := distroOf(c); d != nil && d.VersionID != "" {
+				// Another vendor's versioned OS is the nearer context of what
+				// it holds: an Ubuntu declaration under Debian 12 is not the
+				// outer 22.04's (review of the branch; package keying reads
+				// that OS as the context too).
+				childContext = "!os:" + strings.ToLower(d.ID) + ":" + d.VersionID
 			}
 			walk(c.Components, childContext)
 		}

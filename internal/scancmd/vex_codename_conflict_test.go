@@ -42,6 +42,9 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 	branch := func(children ...string) string {
 		return `{"type":"library","name":"is-number","version":"7.0.0","purl":"pkg:npm/is-number@7.0.0","components":[` + strings.Join(children, ",") + `]}`
 	}
+	debian12 := func(children ...string) string {
+		return `{"type":"operating-system","name":"debian","version":"12","properties":[{"name":"syft:distro:id","value":"debian"},{"name":"syft:distro:versionID","value":"12"}],"components":[` + strings.Join(children, ",") + `]}`
+	}
 	top22 := osc("22.04", []prop{id, v("22.04")})
 	top22j := osc("22.04", []prop{id, v("22.04"), cn("jammy")})
 	for _, tc := range []struct {
@@ -62,6 +65,13 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 		// two releases; a version-less declaration beside two releases
 		// belongs to neither.
 		{"version-less jammy under 24.04 beside a 22.04 sibling", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}, osc("", []prop{id, cn("jammy")}))), false},
+		// Review of the branch: a codename-less version-less parent beside
+		// two releases, a self-contradicting parent, and another vendor's
+		// versioned OS each leave what they hold out of the outer 22.04.
+		{"jammy under a version-less parent beside two releases", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}), osc("", []prop{id}, osc("", []prop{id, cn("jammy")}))), false},
+		{"jammy under a self-contradicting parent", top22 + "," + apt + "," + branch(osc("", []prop{id, v("24.04"), v("22.04")}, osc("", []prop{id, cn("jammy")}))), false},
+		{"numeric top, version-less jammy under Debian 12", top22 + "," + apt + "," + branch(debian12(osc("", []prop{id, cn("jammy")}))), false},
+		{"top jammy, version-less noble under Debian 12", top22j + "," + apt + "," + branch(debian12(osc("", []prop{id, cn("noble")}))), true},
 		{"version-less jammy beside 22.04 and 24.04 siblings", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}), osc("", []prop{id, cn("jammy")})), false},
 		// Controls: the same value twice, an ordinary declaration, a
 		// standard version its VERSION_ID refines.
