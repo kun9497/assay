@@ -88,6 +88,13 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 		{"numeric top, version-less jammy under a version-less Debian", top22 + "," + apt + "," + branch(debianAny(osc("", []prop{id, cn("jammy")}))), false},
 		{"numeric top, version-less jammy beside a version-less Debian", top22 + "," + apt + "," + branch(debianAny(), osc("", []prop{id, cn("jammy")})), false},
 		{"top jammy, version-less noble under Debian 12", top22j + "," + apt + "," + branch(debian12(osc("", []prop{id, cn("noble")}))), true},
+		// Third review: a library-level parent beside two releases, and an
+		// empty syft:distro:id read as distroOf reads it (the name).
+		{"jammy two library levels under a level of 22.04 and 24.04", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}), branch(branch(osc("", []prop{id, cn("jammy")})))), false},
+		{"jammy under a library beside 22.04 and Debian 12", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), debian12(), branch(osc("", []prop{id, cn("jammy")}))), false},
+		{"jammy under a 24.04 whose id is empty", top22 + "," + apt + "," + branch(osc("24.04", []prop{{"syft:distro:id", ""}}, osc("", []prop{id, cn("jammy")}))), false},
+		{"top 22.04 jammy whose id is empty", osc("22.04", []prop{{"syft:distro:id", ""}, v("22.04"), cn("jammy")}) + "," + apt, true},
+		{"version-less jammy anywhere, every OS 22.04", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), branch(osc("", []prop{id, cn("jammy")}))), true},
 		{"version-less jammy beside 22.04 and 24.04 siblings", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}), osc("", []prop{id, cn("jammy")})), false},
 		// Controls: the same value twice, an ordinary declaration, a
 		// standard version its VERSION_ID refines.

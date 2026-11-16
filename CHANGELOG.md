@@ -147,11 +147,13 @@ All notable changes to this project are documented here. The format follows
   quoted name let through; a trap inside `sh -c '...'` or a subshell refused. A TERM or INT trap
   still passes. The examples themselves are unchanged. (main QA of f554fb2, 2026-11-13)
 - VEX: an Ubuntu operating-system declaration in an SBOM gives codename evidence only when it is
-  consistent with itself and with the release of its nearest context. One component with two
-  different `syft:distro:versionID` or `syft:distro:id` values, or whose standard `version`
-  disagrees with syft's (24.04 against 22.04), contradicts itself; a stated version that names
-  no release (`24`) is no evidence; a declaration with no version belongs to the release of a
-  versioned Ubuntu OS beside it, else of its nearest versioned OS ancestor. 4d823d1 had taken
+  consistent with itself and attributable to the target's release, by one rule over the whole
+  document. One component with two different `syft:distro:versionID` or `syft:distro:id`
+  values, or whose standard `version` disagrees with syft's (24.04 against 22.04), contradicts
+  itself and voids the evidence; a versioned declaration counts for its own release; a
+  declaration with no version counts only when every OS the document declares is Ubuntu of the
+  target's release -- another release, another vendor, or a version that names none (`24`)
+  leaves it unattributed. 4d823d1 had taken
   the last property's value and read a version-less declaration under a 24.04 parent as the
   target's, so a branch's jammy exempted a numeric-only 22.04 apt (exit 1 to 0) and a branch's
   noble cancelled a 22.04 jammy's own exemption (exit 0 to 1). (main QA of 4d823d1, 2026-11-16)
