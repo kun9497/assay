@@ -57,11 +57,13 @@ func eolCycle(ecosystem string) (cycle string, ok bool) {
 	release = strings.TrimPrefix(release, "v")
 	// Debian's releases before 7 are keyed with OSV's two-part number
 	// (Debian:4.0, 5.0, 6.0; pkgmeta.Distro.Ecosystem), while endoflife.date
-	// names those cycles "4", "5", "6" -- and "3.0"/"3.1" as they are. The
-	// ".0" comes off here, at the read side (PR #321 review: with the key
-	// reshaped, --fail-on-eol had stopped firing for etch, lenny and
-	// squeeze, printing only "EOL unknown").
-	if strings.HasPrefix(ecosystem, "Debian:") && strings.HasSuffix(release, ".0") && release != "3.0" {
+	// names those cycles "4", "5", "6" -- and "2.0"/"3.0"/"3.1" as they are.
+	// The ".0" comes off here, at the read side, for those three only (PR
+	// #321 review: with the key reshaped, --fail-on-eol had stopped firing
+	// for etch, lenny and squeeze, printing only "EOL unknown"; review of
+	// the slink/potato branch: hamm's "2.0" had become "2", which no row
+	// names, while its 2.0rN spelling reached "2.0").
+	if strings.HasPrefix(ecosystem, "Debian:") && (release == "4.0" || release == "5.0" || release == "6.0") {
 		release = strings.TrimSuffix(release, ".0")
 	}
 	if strings.HasPrefix(ecosystem, "SLES:") {

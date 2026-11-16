@@ -22,6 +22,7 @@ import (
 // alias. Lenny's 5.0r10, no Debian spelling, stays unknown.
 func TestRun_EOLGateReachesSlinkAndPotatoRevisions(t *testing.T) {
 	db := testDBWithEOL(t, []store.EOLRelease{
+		{DistroID: "debian", Release: "2.0", EOLFrom: "1999-02-15", EOLLabel: "Debian LTS"},
 		{DistroID: "debian", Release: "2.1", EOLFrom: "2000-10-30", EOLLabel: "Debian LTS"},
 		{DistroID: "debian", Release: "2.2", EOLFrom: "2003-06-30", EOLLabel: "Debian LTS"},
 		{DistroID: "debian", Release: "5", EOLFrom: "2012-02-06", EOLLabel: "Debian LTS"},
@@ -36,6 +37,10 @@ func TestRun_EOLGateReachesSlinkAndPotatoRevisions(t *testing.T) {
 		{"2.1r5", "2000-10-30", 1},
 		{"2.2r7", "2003-06-30", 1},
 		{"2.1", "2000-10-30", 1},
+		// Hamm, bare and rN, reach one cycle "2.0" (review: bare 2.0 had
+		// looked up "2").
+		{"2.0", "1999-02-15", 1},
+		{"2.0r5", "1999-02-15", 1},
 		{"5.0r10", "", 0},
 	} {
 		t.Run(tc.version, func(t *testing.T) {
