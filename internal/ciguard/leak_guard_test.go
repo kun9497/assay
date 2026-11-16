@@ -567,6 +567,7 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		"    - make;# note \\\n    - trap 'echo catch-me' EXIT",
 		"    - make&&# note \\\n    - trap 'echo catch-me' EXIT",
 		`    - t="$(mktemp)"`,
+		`    - t=''"$(mktemp)"`,
 		// A README fence line is sh, not YAML: its quotes are sh's
 		// (fourth review: unquoting it as YAML had shifted every pairing).
 		`"$CI_PROJECT_DIR/setup" && trap 'rm -f "$t"' "EXIT"`,
@@ -604,6 +605,7 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		// single-quoted value is text.
 		`    - "t=$(mktemp)" || true`,
 		`    - t='$(mktemp)'`,
+		`    - "x=1" trap 'echo cleanup' EXIT`,
 		`    - export PATH`,
 		// A README line that is one quoted word is a command of that name to
 		// sh, not a trap: only a YAML value is unquoted as YAML.
