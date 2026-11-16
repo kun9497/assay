@@ -144,13 +144,42 @@ func continues(line string) bool {
 }
 
 // commentStarts reports whether the # at s[i] opens a comment: it begins a
-// token, so it follows the line's start, a blank, or an operator (; & | (),
-// not a ) -- that closes a $( ) inside the word as often as a subshell, and
-// $(date)#tag is one word (second review).
+// token, so it follows the line's start, a blank, or an operator (; & | ( and
+// the ) of a subshell). The ) of a $( ) is inside the word: $(date)#tag is
+// one word (second review), (make)# note is a comment (third review).
 // a#b and $# are not comments. (Review of the guard branch: continues had
 // taken only a blank, so `make;# note \` still swallowed the next line.)
 func commentStarts(s string, i int) bool {
-	return i == 0 || strings.IndexByte(" \t;&|(", s[i-1]) >= 0
+	if i == 0 || strings.IndexByte(" \t;&|(", s[i-1]) >= 0 {
+		return true
+	}
+	return s[i-1] == ')' && !closesSubstitution(s, i-1)
+}
+
+// closesSubstitution reports whether the ) at s[j] closes a $( rather than a
+// subshell's (, reading the parentheses before it outside quotes.
+func closesSubstitution(s string, j int) bool {
+	var open []bool // true: $(
+	quote := byte(0)
+	for k := 0; k < j; k++ {
+		switch c := s[k]; {
+		case quote != 0:
+			if c == quote {
+				quote = 0
+			} else if c == '\\' && quote == '"' {
+				k++
+			}
+		case c == '\'' || c == '"':
+			quote = c
+		case c == '\\':
+			k++
+		case c == '(':
+			open = append(open, k > 0 && s[k-1] == '$')
+		case c == ')' && len(open) > 0:
+			open = open[:len(open)-1]
+		}
+	}
+	return len(open) > 0 && open[len(open)-1]
 }
 
 func lineLeaks(line string) bool {
@@ -448,8 +477,18 @@ func shellWords(cmd string) (words, raws []string) {
 			for i+1 < len(cmd) && (cmd[i+1] == ' ' || cmd[i+1] == '\t') {
 				i++
 			}
-			for i+1 < len(cmd) && cmd[i+1] != ' ' && cmd[i+1] != '\t' {
+			// The target is one word, quotes and all: >"$HOME/my log" is
+			// one target, not two words (third review).
+			for q := byte(0); i+1 < len(cmd) && (q != 0 || (cmd[i+1] != ' ' && cmd[i+1] != '\t')); {
 				i++
+				switch c := cmd[i]; {
+				case q != 0 && c == q:
+					q = 0
+				case q == 0 && (c == '\'' || c == '"'):
+					q = c
+				case q != '\'' && c == '\\' && i+1 < len(cmd):
+					i++
+				}
 			}
 		case c == '\'' || (c == '$' && i+1 < len(cmd) && cmd[i+1] == '\''):
 			if c == '$' {
@@ -607,6 +646,11 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		`    - echo $(date)#tag; trap 'x' EXIT`,
 		`    - export "t=$(mktemp)"`,
 		`    - x=$(echo ")") trap 'x' EXIT`,
+		// Third review: a quoted redirection target with a blank, a comment
+		// after a subshell's ).
+		`    - >"$HOME/my log" t=$(mktemp)`,
+		`    - > "a b" t=$(mktemp)`,
+		"    - (make)# note \\\n    - trap 'echo catch-me' EXIT",
 		// A README fence line is sh, not YAML: its quotes are sh's
 		// (fourth review: unquoting it as YAML had shifted every pairing).
 		`"$CI_PROJECT_DIR/setup" && trap 'rm -f "$t"' "EXIT"`,
