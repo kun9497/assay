@@ -17,6 +17,8 @@ func TestLookupEOL_DebianTwoPartKeysReachTheirCycle(t *testing.T) {
 		{DistroID: "debian", Release: "6", EOLFrom: "2014-05-31"},
 		{DistroID: "debian", Release: "4", EOLFrom: "2010-02-15"},
 		{DistroID: "debian", Release: "3.1", EOLFrom: "2008-03-31"},
+		{DistroID: "debian", Release: "2.1", EOLFrom: "2000-10-30"},
+		{DistroID: "debian", Release: "2.2", EOLFrom: "2003-06-30"},
 		{DistroID: "debian", Release: "12", EOLFrom: "2028-06-30"},
 	}
 	now := time.Date(2026, 11, 13, 0, 0, 0, 0, time.UTC)
@@ -31,6 +33,11 @@ func TestLookupEOL_DebianTwoPartKeysReachTheirCycle(t *testing.T) {
 		// stay unknown, never a false trip.
 		{"4.0r9", true, true}, {"3.1r8", true, true},
 		{"4.0r", false, false}, {"4.0rc1", false, false},
+		// Main QA of 4d823d1 (2026-11-16): slink and potato's own rN, for
+		// the cycle alone; hamm has no row in this fixture (unknown, not a
+		// false trip); lenny's 5.0r10 is no Debian spelling.
+		{"2.1r5", true, true}, {"2.2r7", true, true}, {"2.0r5", false, false},
+		{"2.1", true, true}, {"5.0r10", false, false}, {"2.1rc1", false, false},
 		{"12", true, false}, {"12.15", true, false},
 		{"5.0", false, false}, // no row for lenny in this fixture: unknown, never a false trip
 	} {
