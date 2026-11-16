@@ -771,8 +771,10 @@ func (d Distro) Ecosystem() (string, error) {
 	return "Alpine:v" + major + "." + minor, nil
 }
 
-// debianRevisionPoint is the "rN" point-release spelling Debian used for
-// woody, sarge and etch (3.0r6, 3.1r8, 4.0r9, the archive's own) as the
+// debianRevisionPoint is the "rN" point-release spelling Debian used up to
+// etch -- of the releases the store keys, woody, sarge and etch (3.0r6,
+// 3.1r8, 4.0r9, the archive's own; slink's 2.1rN and potato's 2.2rN have no
+// key) -- as the
 // three-number spelling it moved to with lenny (4.0.9), or "" for any other
 // string. Only those three releases qualify: lenny's point releases are
 // 5.0.1 to 5.0.10 and squeeze's 6.0.1 to 6.0.10, so "5.0r10" or "6.0r10" is
