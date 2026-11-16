@@ -375,7 +375,7 @@ func shellCommands(s string) []simpleCommand {
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
-		case quote != '\'' && ((c == '$' && i+1 < len(s) && s[i+1] == '(') || c == '`'):
+		case quote != '\'' && startsSubstitution(s, i):
 			// A pipe in a command substitution belongs to the substitution.
 			// The surrounding assignment is still in the calling shell.
 			end := substitutionEnd(s, i)
@@ -416,6 +416,11 @@ func shellCommands(s string) []simpleCommand {
 		case c == '(' && atStart:
 			depth = 1
 			continue
+		case c == ')':
+			// Outside a subshell or substitution, this can close a case
+			// pattern. Its | separated alternatives, not pipeline stages.
+			// Retain the existing checks on the following arm.
+			inPipe = false
 		case c == '#' && commentStarts(s, i):
 			flush("")
 			return cmds
@@ -674,7 +679,7 @@ func shellWords(cmd string) (words, raws []string) {
 			inWord = true
 			i++
 			cur.WriteByte(cmd[i])
-		case (c == '$' && i+1 < len(cmd) && cmd[i+1] == '(') || c == '`':
+		case startsSubstitution(cmd, i):
 			// A command substitution is part of the word it appears in,
 			// spaces and all: t=$( mktemp ) is one word.
 			inWord = true
@@ -690,8 +695,12 @@ func shellWords(cmd string) (words, raws []string) {
 	return words, raws
 }
 
-// substitutionEnd is the index just past the command substitution starting
-// at cmd[i] -- $( ... ) with its nesting, or ` ... ` -- or len(cmd) when it
+func startsSubstitution(cmd string, i int) bool {
+	return cmd[i] == '`' || (cmd[i] == '$' && i+1 < len(cmd) && (cmd[i+1] == '(' || cmd[i+1] == '{'))
+}
+
+// substitutionEnd is the index just past the substitution starting
+// at cmd[i] -- $( ... ), ${ ... }, or ` ... ` -- or len(cmd) when it
 // does not close on the line.
 func substitutionEnd(cmd string, i int) int {
 	if cmd[i] == '`' {
@@ -699,6 +708,10 @@ func substitutionEnd(cmd string, i int) int {
 			return i + 1 + k + 1
 		}
 		return len(cmd)
+	}
+	open, close := cmd[i+1], byte(')')
+	if open == '{' {
+		close = '}'
 	}
 	depth, quote := 0, byte(0)
 	for j := i + 1; j < len(cmd); j++ {
@@ -715,9 +728,9 @@ func substitutionEnd(cmd string, i int) int {
 			quote = c
 		case c == '\\':
 			j++
-		case c == '(':
+		case c == open:
 			depth++
-		case c == ')':
+		case c == close:
 			depth--
 			if depth == 0 {
 				return j + 1
@@ -764,6 +777,8 @@ eval "$cleanup_script"`, true},
 		{`cleanup='trap "echo cleanup" EXIT'; eval "$cleanup" & wait; echo done`, false},
 		{`cleanup='trap "echo cleanup" EXIT'; eval "$cleanup" | cat; eval "$cleanup"`, true},
 		{`t=$(mktemp | cat)`, true},
+		{`case a in a|b) t=$(mktemp);; esac`, true},
+		{`tag=${label#a|b} t=$(mktemp)`, true},
 		{`echo $(printf '%s' "a | b"); trap 'echo cleanup' EXIT >|log`, true},
 		{`msg=hello; script='eval printf "%s" "$msg"'; eval "$script" "$msg"`, false},
 		{`cleanup='eval "$cleanup"'; eval "$cleanup"`, true},
