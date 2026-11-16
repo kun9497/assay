@@ -1264,8 +1264,13 @@ func contextFor(siblings []component, inherited osContext) osContext {
 				inherited.distro = &d
 			}
 			if inherited.distro == nil {
+				// An inherited family of the same ID states the enclosing
+				// level's codename (third review of PR #328).
 				f := *family
 				f.VersionCodename = codename
+				if inherited.family != nil && strings.EqualFold(inherited.family.ID, f.ID) {
+					f.VersionCodename = pkgmeta.MergeCodename(inherited.family.VersionCodename, codename)
+				}
 				inherited.family = &f
 			}
 		}
@@ -1328,6 +1333,13 @@ func childContext(parent component, inherited osContext) osContext {
 			cp := *inherited.distro
 			cp.VersionCodename = pkgmeta.MergeCodename(cp.VersionCodename, d.VersionCodename)
 			inherited.distro = &cp
+		} else if d.VersionID == "" && d.VersionCodename != "" && inherited.distro == nil && inherited.family != nil && strings.EqualFold(inherited.family.ID, d.ID) {
+			// The same under an inherited family (a version-less OS at the
+			// top): the subject's noble had been dropped and the top's jammy
+			// had exempted its packages (third review of PR #328).
+			cp := *inherited.family
+			cp.VersionCodename = pkgmeta.MergeCodename(cp.VersionCodename, d.VersionCodename)
+			inherited.family = &cp
 		}
 	}
 	return contextFor(parent.Components, inherited)

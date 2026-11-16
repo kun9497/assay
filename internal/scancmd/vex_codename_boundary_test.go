@@ -238,6 +238,11 @@ func TestRun_VEXUbuntuCodenameFromVersionlessAndEnclosingOS(t *testing.T) {
 		{"top jammy, version-less noble subject holding the apt", osOf("22.04", "jammy"), `,"metadata":{"component":` + osOf("", "noble", apt) + `}`, "JAMMY", false},
 		{"top noble beside a jammy OS holding the apt", osOf("22.04", "noble") + "," + osOf("22.04", "jammy", apt), "", "JAMMY", false},
 		{"top jammy beside a jammy OS holding the apt", osOf("22.04", "jammy") + "," + osOf("22.04", "jammy", apt), "", "JAMMY", true},
+		// Third review of PR #328: a version-less OS at the top, and a
+		// version-less subject or branch saying another codename.
+		{"version-less jammy at the top, version-less noble subject holding the apt", osOf("", "jammy"), `,"metadata":{"component":` + osOf("", "noble", apt) + `}`, "JAMMY", false},
+		{"version-less noble at the top, branch version-less jammy", osOf("", "noble") + "," + branch(osOf("", "jammy"), apt), "", "JAMMY", false},
+		{"version-less jammy at the top, branch version-less jammy", osOf("", "jammy") + "," + branch(osOf("", "jammy"), apt), "", "JAMMY", true},
 		// A branch's family codename must not reach the top-level packages
 		// cataloged after it (the inherited distro is copied, not edited).
 		{"branch version-less jammy, then a top-level apt", osOf("22.04", "") + "," + branch(osOf("", "jammy"), `{"type":"library","name":"x","version":"1","purl":"pkg:npm/x@1"}`) + "," + apt, "", "JAMMY", false},
