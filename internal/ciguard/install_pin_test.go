@@ -55,14 +55,19 @@ var (
 	// as sh reads signal names, or by its number 0, alone or among other
 	// signals, quoted or not -- sh reads `"EXIT"` and `'EXIT'` as EXIT, and
 	// main QA of f554fb2 (2026-11-13) found both let through) with a quoted
-	// or named handler, written as a line of its own
+	// or named handler, after `trap --` too, written as a line of its own or
+	// after another command on it (`set -e; trap ...`, `... && trap ...`;
+	// PR #327 review), as a YAML scalar quoted or not
 	// (optionally a YAML list item, `export`ed, quoted, commented) -- the
 	// shapes a reader rewriting the four-line form would produce. A trap on
 	// TERM or INT alone is a job's own business, not the installer's
 	// leftover (main QA of 67e2cf6, 2026-11-13: `trap 'echo stopping' TERM`
 	// in an independent GitLab job was refused as one). Read over the
-	// install jobs only (installJobs).
-	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?\w+="?\$\(mktemp\b|^[ \t]*(?:-[ \t]+)?trap[ \t]+(?:'[^'\n]*'|"(?:[^"\\\n]|\\.)*"|[A-Za-z_]\w*)(?:[ \t]+["']?[A-Za-z0-9]+["']?)*?[ \t]+["']?(?i:EXIT|0)\b`)
+	// install jobs only (installJobs). Not matched, deliberately: a signal
+	// name quoted in part or escaped (`"EX"IT`, `E'XIT'`, `\EXIT`, `$'EXIT'`),
+	// which the shell also reads as EXIT -- no one writes those, and matching
+	// them would mean re-implementing quote removal here.
+	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?\w+="?\$\(mktemp\b|^[ \t]*(?:-[ \t]+)?["']?(?:[^\n]*?(?:;|&&|\|\|)[ \t]*)?trap[ \t]+(?:--[ \t]+)?(?:'[^'\n]*'|"(?:[^"\\\n]|\\.)*"|[A-Za-z_]\w*)(?:[ \t]+["']?[A-Za-z0-9]+["']?)*?[ \t]+["']?(?i:EXIT|0)\b`)
 )
 
 // leakedInInstallJob is what the guard refuses in a document: the first
@@ -180,6 +185,13 @@ func TestInstallOneLiners_LeakGuardCatchesTheFourLineForm(t *testing.T) {
 		"    - trap 'echo cleanup' 'EXIT'",
 		"    - trap 'echo cleanup' 'TERM' " + `"EXIT"`,
 		"    - trap 'echo cleanup' \"0\"",
+		// PR #327 review: the POSIX option separator, a YAML-quoted item,
+		// and a trap after another command on the same line.
+		"    - trap -- 'rm -f \"$t\"' EXIT",
+		"    - trap -- 'rm -f \"$t\"' \"EXIT\"",
+		"    - \"trap 'rm -f \\\"$t\\\"' EXIT\"",
+		"    - set -e; trap 'rm -f \"$t\"' EXIT",
+		"    - true && trap 'rm -f \"$t\"' EXIT",
 	} {
 		if !leakedIntoJob.MatchString(line + "\n") {
 			t.Errorf("leakedIntoJob does not catch %q", line)
@@ -197,6 +209,9 @@ func TestInstallOneLiners_LeakGuardCatchesTheFourLineForm(t *testing.T) {
 		"    - trap 'echo' 10",
 		"    - trap 'echo stopping' " + `"TERM"`,
 		"    - trap 'echo' '10'",
+		"    - trap -- 'echo stopping' TERM",
+		"    - set -e; trap 'echo stopping' TERM",
+		"    - echo 'no trap here; exit 0'",
 	} {
 		if leakedIntoJob.MatchString(line + "\n") {
 			t.Errorf("leakedIntoJob wrongly catches %q", line)

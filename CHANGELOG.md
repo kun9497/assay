@@ -124,7 +124,6 @@ All notable changes to this project are documented here. The format follows
   had let both through where 67e2cf6 refused them. A quoted TERM or INT trap still passes. The
   examples themselves are unchanged. (main QA of f554fb2, 2026-11-13)
 
-
 ## [0.18.1] - 2026-11-12
 
 ### Changed
