@@ -63,15 +63,25 @@ func UbuntuCodenameOf(d Distro) string {
 	if !strings.EqualFold(d.ID, "ubuntu") || d.VersionCodename == "" {
 		return ""
 	}
+	// An equivalent of the general path below, kept for the reader: the
+	// sentinel is in neither table, so it would come back either way (a
+	// mutation dropping this survives; PR #328 review).
 	if d.VersionCodename == ContradictedCodename {
 		return ContradictedCodename
 	}
+	codename := strings.ToLower(d.VersionCodename)
 	parts := strings.SplitN(d.VersionID, ".", 3)
 	if len(parts) < 2 {
+		// No version to hold it to: a codename either table names is the
+		// release it names, and the matcher holds that release to the
+		// package's key; one neither names proves nothing (PR #328 review:
+		// an OS of versionCodename=jammy alone had stopped counting).
+		if ubuntuCodenameRelease(codename) != "" {
+			return codename
+		}
 		return ""
 	}
 	release := parts[0] + "." + parts[1]
-	codename := strings.ToLower(d.VersionCodename)
 	if named := ubuntuCodenameRelease(codename); named != "" {
 		if named != release {
 			return ContradictedCodename

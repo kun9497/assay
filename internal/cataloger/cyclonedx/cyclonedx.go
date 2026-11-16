@@ -1035,6 +1035,8 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		osCodename = pkgmeta.ContradictedCodename
 	case ctx.distro != nil:
 		osCodename = pkgmeta.UbuntuCodenameOf(*ctx.distro)
+	case ctx.family != nil:
+		osCodename = pkgmeta.UbuntuCodenameOf(*ctx.family)
 	}
 	pkg := pkgmeta.Package{
 		Name:          name,
@@ -1211,6 +1213,11 @@ func contextFor(siblings []component, inherited osContext) osContext {
 					return osContext{mixedRelease: true}
 				}
 				family = d
+				// A version-less OS still states its codename (PR #328
+				// review: an Ubuntu sibling saying only noble had been
+				// dropped here, and the jammy beside it, or the document's,
+				// exempted the package).
+				noteCodename(d)
 			}
 			continue
 		}
@@ -1244,11 +1251,27 @@ func contextFor(siblings []component, inherited osContext) osContext {
 			if inherited.distro != nil && !strings.EqualFold(inherited.distro.ID, family.ID) {
 				return osContext{family: family}
 			}
+			// The family's codename refines what the packages beside it
+			// inherit, on a copy: the inherited distro is the parent's.
+			if inherited.distro != nil && codename != "" {
+				d := *inherited.distro
+				d.VersionCodename = pkgmeta.MergeCodename(d.VersionCodename, codename)
+				inherited.distro = &d
+			}
 			if inherited.distro == nil {
-				inherited.family = family
+				f := *family
+				f.VersionCodename = codename
+				inherited.family = &f
 			}
 		}
 		return inherited
+	}
+	// An enclosing OS of the same release states the same install's
+	// codename too: a parent saying noble on 22.04 contradicts itself, and
+	// a nearer OS saying nothing must not let the document's jammy through
+	// (PR #328 review).
+	if inherited.distro != nil && sameDistro(inherited.distro, found) {
+		codename = pkgmeta.MergeCodename(codename, inherited.distro.VersionCodename)
 	}
 	found.VersionCodename = codename
 	ctx := osContext{distro: found, mixedRelease: mixedRelease}

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/report"
@@ -179,6 +180,66 @@ func TestRun_VEXUbuntuCodenameAcrossListingsAndRetiredReleases(t *testing.T) {
 			if sup[want] != tc.suppressed || kept[want] == tc.suppressed {
 				t.Fatalf("suppressed = %v, kept = %v, exit %d; want suppressed %v\nstderr: %s",
 					sup[want], kept[want], code, tc.suppressed, errOut.String())
+			}
+		})
+	}
+}
+
+// PR #328 review, through Run: an Ubuntu OS with no version still states its
+// codename, as a sibling, as the branch's own OS or alone; a parent OS's
+// codename evidence carries to a nearer OS of the same release; and a
+// codename this build does not know beside a release it does is refused.
+func TestRun_VEXUbuntuCodenameFromVersionlessAndEnclosingOS(t *testing.T) {
+	db := vexDB(t, "Ubuntu:22.04:LTS", vexAdv{"UBUNTU-2031-0108", "CVE-2031-9108", "apt", "2.4.99"})
+	want := pair{"apt", "CVE-2031-9108"}
+	osOf := func(version, codename string, children ...string) string {
+		props := `{"name":"syft:distro:id","value":"ubuntu"}`
+		if version != "" {
+			props += `,{"name":"syft:distro:versionID","value":"` + version + `"}`
+		}
+		if codename != "" {
+			props += `,{"name":"syft:distro:versionCodename","value":"` + codename + `"}`
+		}
+		out := `{"type":"operating-system","name":"ubuntu","version":"` + version + `","properties":[` + props + `]`
+		if len(children) > 0 {
+			out += `,"components":[` + strings.Join(children, ",") + `]`
+		}
+		return out + `}`
+	}
+	const apt = `{"type":"library","name":"apt","version":"2.4.14","purl":"pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-22.04"}`
+	branch := func(children ...string) string {
+		return `{"type":"library","name":"is-number","version":"7.0.0","purl":"pkg:npm/is-number@7.0.0","components":[` + strings.Join(children, ",") + `]}`
+	}
+	for _, tc := range []struct {
+		name, components, meta, statement string
+		suppressed                        bool
+	}{
+		{"22.04 jammy beside a version-less noble", osOf("22.04", "jammy") + "," + osOf("", "noble") + "," + apt, "", "JAMMY", false},
+		{"a version-less noble beside 22.04 jammy", osOf("", "noble") + "," + osOf("22.04", "jammy") + "," + apt, "", "JAMMY", false},
+		{"top jammy, branch OS only noble", osOf("22.04", "jammy") + "," + branch(osOf("", "noble"), apt), "", "JAMMY", false},
+		{"top jammy, branch OS only kinetic", osOf("22.04", "jammy") + "," + branch(osOf("", "kinetic"), apt), "", "JAMMY", false},
+		{"top jammy, branch OS only jammy", osOf("22.04", "jammy") + "," + branch(osOf("", "jammy"), apt), "", "JAMMY", true},
+		{"top jammy, subject noble on 22.04 holding an OS that says nothing", osOf("22.04", "jammy"), `,"metadata":{"component":` + osOf("22.04", "noble", osOf("22.04", ""), apt) + `}`, "JAMMY", false},
+		{"a codename-only jammy OS", osOf("", "jammy") + "," + apt, "", "JAMMY", true},
+		{"a codename-only noble OS", osOf("", "noble") + "," + apt, "", "JAMMY", false},
+		{"22.04 saying a codename no table knows", osOf("22.04", "tangy") + "," + apt, "", "tangy", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := filepath.Join(t.TempDir(), "sbom.cdx.json")
+			doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[` + tc.components + `]` + tc.meta + `}`
+			if err := os.WriteFile(p, []byte(doc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var out, errOut bytes.Buffer
+			Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnUnknown: true,
+				VEXFiles: []string{writeVEX(t, stmt("CVE-2031-9108", product("pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro="+tc.statement)))}}, &out, &errOut)
+			var rep report.Document
+			if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+				t.Fatalf("stdout is not one JSON document: %v\nstderr: %s", err, errOut.String())
+			}
+			sup, kept := suppressedPairs(rep), pairsOf(rep.Findings)
+			if sup[want] != tc.suppressed || kept[want] == tc.suppressed {
+				t.Fatalf("suppressed = %v, kept = %v; want suppressed %v\nstderr: %s", sup[want], kept[want], tc.suppressed, errOut.String())
 			}
 		})
 	}
