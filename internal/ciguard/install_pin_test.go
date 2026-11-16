@@ -55,9 +55,13 @@ var (
 	// as sh reads signal names, or by its number 0, alone or among other
 	// signals, quoted or not -- sh reads `"EXIT"` and `'EXIT'` as EXIT, and
 	// main QA of f554fb2 (2026-11-13) found both let through) with a quoted
-	// or named handler, after `trap --` too, written as a line of its own or
-	// after another command on it (`set -e; trap ...`, `... && trap ...`;
-	// PR #327 review), as a YAML scalar quoted or not
+	// or named handler, after `trap --` too -- either of them written as a
+	// line of its own or after another command on it (`set -e; trap ...`,
+	// `... && trap ...`, `x & trap ...`), in a group or a compound command's
+	// body (`{ trap ...; }`, `if ...; then trap ...`), as a YAML scalar quoted
+	// or not (PR #327 reviews). The separator is looked for only outside
+	// quotes: a trap inside `sh -c '...'` is the child shell's, and refusing
+	// it had been a false positive the second review found
 	// (optionally a YAML list item, `export`ed, quoted, commented) -- the
 	// shapes a reader rewriting the four-line form would produce. A trap on
 	// TERM or INT alone is a job's own business, not the installer's
@@ -67,7 +71,7 @@ var (
 	// name quoted in part or escaped (`"EX"IT`, `E'XIT'`, `\EXIT`, `$'EXIT'`),
 	// which the shell also reads as EXIT -- no one writes those, and matching
 	// them would mean re-implementing quote removal here.
-	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?\w+="?\$\(mktemp\b|^[ \t]*(?:-[ \t]+)?["']?(?:[^\n]*?(?:;|&&|\|\|)[ \t]*)?trap[ \t]+(?:--[ \t]+)?(?:'[^'\n]*'|"(?:[^"\\\n]|\\.)*"|[A-Za-z_]\w*)(?:[ \t]+["']?[A-Za-z0-9]+["']?)*?[ \t]+["']?(?i:EXIT|0)\b`)
+	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]+)?["']?(?:[^\n'"]*?(?:;|&&|\|\||&)[ \t]*)?(?:(?:\{|\(|then|do|else)[ \t]+)*(?:export[ \t]+)?\w+="?\$\(mktemp\b|^[ \t]*(?:-[ \t]+)?["']?(?:[^\n'"]*?(?:;|&&|\|\||&)[ \t]*)?(?:(?:\{|\(|then|do|else)[ \t]+)*trap[ \t]+(?:--[ \t]+)?(?:'[^'\n]*'|"(?:[^"\\\n]|\\.)*"|[A-Za-z_]\w*)(?:[ \t]+["']?[A-Za-z0-9]+["']?)*?[ \t]+["']?(?i:EXIT|0)\b`)
 )
 
 // leakedInInstallJob is what the guard refuses in a document: the first
@@ -192,6 +196,14 @@ func TestInstallOneLiners_LeakGuardCatchesTheFourLineForm(t *testing.T) {
 		"    - \"trap 'rm -f \\\"$t\\\"' EXIT\"",
 		"    - set -e; trap 'rm -f \"$t\"' EXIT",
 		"    - true && trap 'rm -f \"$t\"' EXIT",
+		// Second review of PR #327: the mktemp half takes the same prefix,
+		// and a trap in a group, a compound body or after `&` is a trap.
+		"    - set -e; t=$(mktemp)",
+		"    - true && t=\"$(mktemp)\"",
+		"    - \"t=$(mktemp)\"",
+		"    - if true; then trap 'rm -f \"$t\"' EXIT; fi",
+		"    - { trap 'rm -f \"$t\"' EXIT; }",
+		"    - true & trap 'rm -f \"$t\"' EXIT",
 	} {
 		if !leakedIntoJob.MatchString(line + "\n") {
 			t.Errorf("leakedIntoJob does not catch %q", line)
@@ -212,6 +224,10 @@ func TestInstallOneLiners_LeakGuardCatchesTheFourLineForm(t *testing.T) {
 		"    - trap -- 'echo stopping' TERM",
 		"    - set -e; trap 'echo stopping' TERM",
 		"    - echo 'no trap here; exit 0'",
+		// A trap inside a quoted string -- a child shell's, or text -- is
+		// not the job shell's (second review of PR #327).
+		"    - sh -c 'd=$(mktemp -d); trap \"rm -rf $d\" EXIT; make'",
+		"    - echo \"a; trap 'x' EXIT\"",
 	} {
 		if leakedIntoJob.MatchString(line + "\n") {
 			t.Errorf("leakedIntoJob wrongly catches %q", line)
