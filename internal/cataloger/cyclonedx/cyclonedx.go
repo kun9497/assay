@@ -571,7 +571,10 @@ func mergePURL(kept, other, ecosystem string) string {
 	// contradiction as `ubuntu-24.04`, and had passed here unrecognised.
 	if d, ok := kp.Qualifiers["distro"]; ok && ecosystem != "" && !language {
 		if eco, known := pkgmeta.EcosystemForDistroQualifier(pkgmeta.CanonicalDistroQualifier(d)); known && eco != ecosystem {
-			if od, ok := op.Qualifiers["distro"]; ok {
+			// Nor here, from another vendor's listing (second review of PR
+			// #329: a kept pkg:deb/ubuntu purl naming 24.04 took
+			// pkg:deb/debian's distro=jammy through this branch).
+			if od, ok := op.Qualifiers["distro"]; ok && strings.EqualFold(kp.Namespace, op.Namespace) {
 				if oeco, known := pkgmeta.EcosystemForDistroQualifier(pkgmeta.CanonicalDistroQualifier(od)); known && oeco == ecosystem {
 					kp.Qualifiers["distro"] = od
 					return kp.String()

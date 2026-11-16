@@ -77,3 +77,35 @@ func TestRun_VEXUbuntuCodenameIsNotCopiedFromAnotherVendor(t *testing.T) {
 		}
 	}
 }
+
+// Second review of PR #329: the ubuntu listing names another release
+// (24.04, or noble) under a document OS of 22.04, so mergePURL replaces its
+// distro= -- and had taken the debian listing's jammy as the replacement.
+// Refused in both orders.
+func TestRun_VEXUbuntuCodenameIsNotReplacedFromAnotherVendor(t *testing.T) {
+	db := vexDB(t, "Ubuntu:22.04:LTS", vexAdv{"UBUNTU-2031-0106", "CVE-2031-9106", "apt", "2.4.99"})
+	want := pair{"apt", "CVE-2031-9106"}
+	const ubuntuOS = `{"type":"operating-system","name":"ubuntu","version":"22.04","properties":[{"name":"syft:distro:id","value":"ubuntu"},{"name":"syft:distro:versionID","value":"22.04"}]}`
+	for _, own := range []string{"ubuntu-24.04", "noble"} {
+		ubuntu := `{"type":"library","name":"apt","version":"2.4.14","bom-ref":"u","purl":"pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=` + own + `"}`
+		const debian = `{"type":"library","name":"apt","version":"2.4.14","bom-ref":"d","purl":"pkg:deb/debian/apt@2.4.14?arch=amd64&distro=jammy"}`
+		for _, order := range [][2]string{{ubuntu, debian}, {debian, ubuntu}} {
+			doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[` + ubuntuOS + `,` + order[0] + `],` +
+				`"metadata":{"component":{"type":"container","name":"subject","components":[` + order[1] + `]}}}`
+			p := filepath.Join(t.TempDir(), "sbom.cdx.json")
+			if err := os.WriteFile(p, []byte(doc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var out, errOut bytes.Buffer
+			Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnUnknown: true,
+				VEXFiles: []string{writeVEX(t, stmt("CVE-2031-9106", product("pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=JAMMY")))}}, &out, &errOut)
+			var rep report.Document
+			if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+				t.Fatalf("stdout is not one JSON document: %v\nstderr: %s", err, errOut.String())
+			}
+			if suppressedPairs(rep)[want] {
+				t.Errorf("own distro %s, top %s: the JAMMY statement exempted the ubuntu apt through the debian listing\nstderr: %s", own, order[0], errOut.String())
+			}
+		}
+	}
+}
