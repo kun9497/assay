@@ -1376,8 +1376,11 @@ func documentCodename(doc bom, release string) string {
 			attributable = false
 		case e.version == "":
 			versionless = append(versionless, e.codename)
-		case ubuntuRelease(e.version) != release:
-			// Another release, or a version that names none.
+		case release == "" || ubuntuRelease(e.version) != release:
+			// Another release, a version that names none, or a target of
+			// no release that no version can be shown to be (fourth
+			// review: `24` and a version-less target both read "" and had
+			// matched).
 			attributable = false
 		default:
 			// Held to its own version here and, merged, to the target's

@@ -95,6 +95,11 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 		{"jammy under a 24.04 whose id is empty", top22 + "," + apt + "," + branch(osc("24.04", []prop{{"syft:distro:id", ""}}, osc("", []prop{id, cn("jammy")}))), false},
 		{"top 22.04 jammy whose id is empty", osc("22.04", []prop{{"syft:distro:id", ""}, v("22.04"), cn("jammy")}) + "," + apt, true},
 		{"version-less jammy beside a Debian that contradicts itself", top22 + "," + apt + "," + branch(`{"type":"operating-system","name":"debian","properties":[{"name":"syft:distro:id","value":"debian"},{"name":"syft:distro:versionID","value":"11"},{"name":"syft:distro:versionID","value":"12"}]}`, osc("", []prop{id, cn("jammy")})), false},
+		// Fourth review: a self-contradiction voids even the top's own
+		// jammy, and `24` never matches a target of no version.
+		{"top jammy, a branch OS saying 24.04 and 22.04", top22j + "," + apt + "," + branch(osc("", []prop{id, v("24.04"), v("22.04")})), false},
+		{"top jammy, a branch OS of version 24.04 and syft 22.04", top22j + "," + apt + "," + branch(osc("24.04", []prop{id, v("22.04")})), false},
+		{"version-less top, 24 jammy beside 24.04 noble", osc("", []prop{id}) + "," + apt + "," + branch(osc("24", []prop{id, cn("jammy")}), osc("24.04", []prop{id, v("24.04"), cn("noble")})), false},
 		{"version-less jammy anywhere, every OS 22.04", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), branch(osc("", []prop{id, cn("jammy")}))), true},
 		{"version-less jammy beside 22.04 and 24.04 siblings", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}), osc("", []prop{id, cn("jammy")})), false},
 		// Controls: the same value twice, an ordinary declaration, a
