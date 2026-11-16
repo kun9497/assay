@@ -230,6 +230,17 @@ func TestRun_VEXUbuntuCodenameFromVersionlessAndEnclosingOS(t *testing.T) {
 		{"a codename-only kinetic OS, statement kinetic", osOf("", "kinetic") + "," + apt, "", "kinetic", false},
 		{"a codename-only kinetic OS, statement KINETIC", osOf("", "kinetic") + "," + apt, "", "KINETIC", false},
 		{"22.04 saying a codename no table knows", osOf("22.04", "tangy") + "," + apt, "", "tangy", false},
+		// Second review of PR #328.
+		{"debian at the top, branch version-less noble then jammy", `{"type":"operating-system","name":"debian","version":"12"},` + branch(osOf("", "noble"), osOf("", "jammy"), apt), "", "JAMMY", false},
+		{"debian at the top, branch version-less jammy then noble", `{"type":"operating-system","name":"debian","version":"12"},` + branch(osOf("", "jammy"), osOf("", "noble"), apt), "", "JAMMY", false},
+		{"version-less jammy then noble, nothing else", osOf("", "jammy") + "," + osOf("", "noble") + "," + apt, "", "JAMMY", false},
+		{"version-less noble then jammy, nothing else", osOf("", "noble") + "," + osOf("", "jammy") + "," + apt, "", "JAMMY", false},
+		{"top jammy, version-less noble subject holding the apt", osOf("22.04", "jammy"), `,"metadata":{"component":` + osOf("", "noble", apt) + `}`, "JAMMY", false},
+		{"top noble beside a jammy OS holding the apt", osOf("22.04", "noble") + "," + osOf("22.04", "jammy", apt), "", "JAMMY", false},
+		{"top jammy beside a jammy OS holding the apt", osOf("22.04", "jammy") + "," + osOf("22.04", "jammy", apt), "", "JAMMY", true},
+		// A branch's family codename must not reach the top-level packages
+		// cataloged after it (the inherited distro is copied, not edited).
+		{"branch version-less jammy, then a top-level apt", osOf("22.04", "") + "," + branch(osOf("", "jammy"), `{"type":"library","name":"x","version":"1","purl":"pkg:npm/x@1"}`) + "," + apt, "", "JAMMY", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := filepath.Join(t.TempDir(), "sbom.cdx.json")

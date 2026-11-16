@@ -1249,7 +1249,12 @@ func contextFor(siblings []component, inherited osContext) osContext {
 	if found == nil {
 		if family != nil {
 			if inherited.distro != nil && !strings.EqualFold(inherited.distro.ID, family.ID) {
-				return osContext{family: family}
+				// The merged codename, not the last sibling's own (second
+				// review of PR #328: [noble, jammy] and [jammy, noble]
+				// version-less had given exit 0 and 1).
+				f := *family
+				f.VersionCodename = codename
+				return osContext{family: &f}
 			}
 			// The family's codename refines what the packages beside it
 			// inherit, on a copy: the inherited distro is the parent's.
@@ -1295,6 +1300,12 @@ func childContext(parent component, inherited osContext) osContext {
 	// the purl qualifier fallback switched off (PR #270 review).
 	if d := distroOf(parent); d != nil {
 		if eco, err := d.Ecosystem(); err == nil {
+			// The enclosing level's codename evidence of the same release is
+			// this OS's too (second review of PR #328: a 22.04 jammy parent
+			// beside a 22.04 noble had replaced the contradiction outright).
+			if inherited.distro != nil && sameDistro(inherited.distro, d) {
+				d.VersionCodename = pkgmeta.MergeCodename(d.VersionCodename, inherited.distro.VersionCodename)
+			}
 			inherited = osContext{distro: d, ecosystem: eco}
 		} else if d.VersionID == "" && pkgmeta.KnownDistroID(d.ID) && inherited.distro != nil && !strings.EqualFold(inherited.distro.ID, d.ID) {
 			// A known family with no release refuses an inherited context
@@ -1308,6 +1319,15 @@ func childContext(parent component, inherited osContext) osContext {
 			// A release no key is built from: the document's identity, as
 			// a sibling OS of that shape is (contextFor).
 			inherited = osContext{distro: d}
+		} else if d.VersionID == "" && d.VersionCodename != "" && inherited.distro != nil && strings.EqualFold(inherited.distro.ID, d.ID) {
+			// A version-less parent of the inherited family still states
+			// its codename, as a version-less sibling does (second review
+			// of PR #328: a subject OS saying only noble had let the
+			// document's jammy through). On a copy: the inherited distro
+			// is the enclosing level's.
+			cp := *inherited.distro
+			cp.VersionCodename = pkgmeta.MergeCodename(cp.VersionCodename, d.VersionCodename)
+			inherited.distro = &cp
 		}
 	}
 	return contextFor(parent.Components, inherited)
