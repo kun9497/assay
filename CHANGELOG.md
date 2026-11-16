@@ -9,7 +9,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 - CycloneDX package assignment and Ubuntu VEX now read the same OS evidence. Repeated
-  compatible versions such as 22.04 and 22.04.5 agree. When an OS contradicts itself
+  compatible versions such as 22.04 and 22.04.5 agree. When an OS contradicts itself or multiple OS releases apply
   and the package has no independent release, the scan reports why it was not evaluated
   and exits 2 under `--fail-on-incomplete=target`. Merged Debian package listings with
   different vendor namespaces cannot use a package VEX exemption for either vendor.

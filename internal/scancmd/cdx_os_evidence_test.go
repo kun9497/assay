@@ -50,6 +50,40 @@ func TestRun_CDXConflictingOSNeedsTargetEvidence(t *testing.T) {
 	}
 }
 
+func TestRun_CDXMultipleOSDeclarationsNeedAnIndependentRelease(t *testing.T) {
+	db := vexDB(t, "Ubuntu:24.04:LTS", vexAdv{"QA-24", "CVE-2031-9110", "apt", "2.8.5"})
+	const os22 = `{"type":"operating-system","name":"ubuntu","version":"22.04"}`
+	const os24 = `{"type":"operating-system","name":"ubuntu","version":"24.04"}`
+	const apt = `{"type":"library","purl":"pkg:deb/ubuntu/apt@2.8.4"}`
+	const qualified = `{"type":"library","purl":"pkg:deb/ubuntu/apt@2.8.4?distro=ubuntu-24.04"}`
+	const language = `{"type":"library","purl":"pkg:npm/is-number@7.0.0"}`
+	for _, order := range []string{os22 + "," + os24, os24 + "," + os22} {
+		for _, tc := range []struct {
+			packages                string
+			exit, missing, findings int
+		}{
+			{apt + "," + qualified, 2, 1, 1},
+			{qualified + "," + language, 0, 0, 1},
+			{`{"type":"application","name":"nested","components":[` + os24 + "," + apt + `]}`, 0, 0, 1},
+		} {
+			p := filepath.Join(t.TempDir(), "scopes.cdx.json")
+			doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[` + order + "," + tc.packages + `]}`
+			if err := os.WriteFile(p, []byte(doc), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var out, stderr bytes.Buffer
+			rc := Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnIncompleteTarget: true}, &out, &stderr)
+			var rep report.Document
+			if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+				t.Fatal(err)
+			}
+			if rc != tc.exit || rep.Summary.TargetIncomplete != tc.missing || len(rep.Findings) != tc.findings {
+				t.Fatalf("packages %s: exit %d, summary %+v, skips %+v", tc.packages, rc, rep.Summary, rep.Skipped)
+			}
+		}
+	}
+}
+
 func TestRun_CDXVEXCannotBorrowAnotherDebVendorsSource(t *testing.T) {
 	db := vexDB(t, "Ubuntu:22.04:LTS", vexAdv{"QA-22", "CVE-2031-9110", "apt", "2.4.15"})
 	st := writeVEX(t, stmt("CVE-2031-9110", product("pkg:deb/ubuntu/apt@2.4.14?arch=source&distro=ubuntu-22.04")))

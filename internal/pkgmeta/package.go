@@ -24,7 +24,7 @@ type Package struct {
 	// DistroContext retains the local OS evidence separately from the (often
 	// coarser) advisory key. Only CycloneDX has nested OS declarations.
 	DistroContext DistroScope `json:"-"`
-	// OSConflict records why a contradictory local OS declaration supplied
+	// OSConflict records why ambiguous or contradictory local OS evidence supplied
 	// no advisory key. Refreshing the database cannot resolve it.
 	OSConflict string `json:"-"`
 	// MixedDebVendors marks a merged CycloneDX package whose listings name

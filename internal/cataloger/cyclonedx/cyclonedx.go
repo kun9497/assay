@@ -1136,13 +1136,12 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		// dedupe identity, nothing else here.
 		Arch: arch,
 	}
-	if eco == "" && ctx.conflict != "" {
-		// No release keys it: the OS declared for it contradicts itself and
-		// its purl names none. Reported with the contradiction, as the
-		// target's own (D21 =target), rather than as an ecosystem this
-		// build lacks (main QA of 353e24a: both property orders now refuse
-		// to guess, and the reason says why).
-		pkg.OSConflict = ctx.conflict
+	if eco == "" && ctx.mixedRelease && ctx.distro == nil {
+		if ctx.conflict != "" {
+			pkg.OSConflict = fmt.Sprintf("the SBOM's operating-system declaration contradicts itself (%s), so %s %s is keyed to no release", ctx.conflict, name, version)
+		} else {
+			pkg.OSConflict = fmt.Sprintf("the SBOM declares multiple OS families or releases in the context of %s %s, and its purl identifies no release", name, version)
+		}
 	}
 	switch p.Type {
 	case "deb":
