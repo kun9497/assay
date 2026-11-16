@@ -102,8 +102,9 @@ var assignmentWord = regexp.MustCompile(`^\w+=`)
 
 // FindString is the first line of text that leaks, "" when none does.
 func (leakGuard) FindString(text string) string {
+	state := shellState{vars: map[string]string{}, evaluating: map[string]bool{}, evalBytesLeft: 1 << 20}
 	for _, line := range logicalLines(text) {
-		if lineLeaks(line) {
+		if state.lineLeaks(line) {
 			return line
 		}
 	}
@@ -151,8 +152,10 @@ func logicalLines(text string) []string {
 // QA of 4d823d1, 2026-11-16: a `# ... \\` comment had swallowed the real EXIT
 // trap on the line after it).
 func continues(line string) bool {
-	s := strings.TrimSpace(line)
-	if strings.HasPrefix(s, "#") {
+	// Only a backslash immediately before the physical newline can escape
+	// it. In a literal YAML block a trailing space or tab is shell input.
+	s := line
+	if !strings.HasSuffix(s, "\\") {
 		return false
 	}
 	quote := byte(0)
@@ -229,7 +232,15 @@ func closesSubstitution(s string, j int) bool {
 	return len(open) == 0 || open[len(open)-1]
 }
 
-func lineLeaks(line string) bool {
+// shellState carries literal shell assignments between commands in one
+// install shell. Only eval interprets a stored string as shell commands.
+type shellState struct {
+	vars          map[string]string
+	evaluating    map[string]bool
+	evalBytesLeft int
+}
+
+func (state *shellState) lineLeaks(line string) bool {
 	s := strings.TrimSpace(line)
 	yamlValue := false
 	if strings.HasPrefix(s, "- ") || s == "-" {
@@ -237,26 +248,32 @@ func lineLeaks(line string) bool {
 		yamlValue = true
 	}
 	if m := mappingKey.FindString(s); m != "" {
+		if strings.TrimSpace(m) == "run:" {
+			// GitHub Actions starts each run step in its own shell.
+			clear(state.vars)
+		}
 		s = strings.TrimSpace(s[len(m):])
 		yamlValue = true
 	}
 	if !yamlValue {
-		return shellLeaks(s)
+		return state.shellLeaks(s)
 	}
 	if strings.HasPrefix(s, "[") && strings.HasSuffix(s, "]") {
 		for _, item := range flowItems(s[1 : len(s)-1]) {
-			if shellLeaks(yamlUnquote(item)) {
+			if state.shellLeaks(yamlUnquote(item)) {
 				return true
 			}
 		}
 		return false
 	}
-	return shellLeaks(yamlUnquote(s))
+	return state.shellLeaks(yamlUnquote(s))
 }
 
-func shellLeaks(s string) bool {
+func (state *shellState) shellLeaks(s string) bool {
 	for _, cmd := range shellCommands(s) {
-		if commandLeaks(cmd) {
+		// Pipeline stages and asynchronous lists run in child shells;
+		// neither their variables nor their traps reach the parent.
+		if !cmd.child && state.commandLeaks(cmd.text) {
 			return true
 		}
 	}
@@ -320,27 +337,54 @@ func yamlUnquote(s string) string {
 	return s
 }
 
+type simpleCommand struct {
+	text  string
+	child bool
+}
+
 // shellCommands splits one line of sh into its simple commands at the
 // separators that end one outside quotes. A subshell `( ... )` at a
 // command's start is skipped whole, so a separator inside it does not split
 // off a command that is then read as the job shell's; a comment, from an
 // unquoted # that starts a word, ends the line.
-func shellCommands(s string) []string {
-	var cmds []string
+func shellCommands(s string) []simpleCommand {
+	var cmds []simpleCommand
 	var cur strings.Builder
 	quote := byte(0)
 	depth := 0
 	atStart := true
-	flush := func() {
+	listStart := 0
+	inPipe := false
+	flush := func(operator string) {
 		if c := strings.TrimSpace(cur.String()); c != "" {
-			cmds = append(cmds, c)
+			cmds = append(cmds, simpleCommand{text: c, child: inPipe || operator == "|"})
 		}
+		if operator == "&" {
+			// a && b & backgrounds the whole AND-OR list.
+			for i := listStart; i < len(cmds); i++ {
+				cmds[i].child = true
+			}
+		}
+		if operator == ";" || operator == "&" {
+			listStart = len(cmds)
+		}
+		inPipe = operator == "|"
 		cur.Reset()
 		atStart = true
 	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
+		case quote != '\'' && startsSubstitution(s, i):
+			// A pipe in a command substitution belongs to the substitution.
+			// The surrounding assignment is still in the calling shell.
+			end := substitutionEnd(s, i)
+			if depth == 0 {
+				cur.WriteString(s[i:end])
+			}
+			i = end - 1
+			atStart = false
+			continue
 		case quote != 0:
 			if c == '\\' && quote == '"' && i+1 < len(s) {
 				if depth == 0 {
@@ -372,14 +416,26 @@ func shellCommands(s string) []string {
 		case c == '(' && atStart:
 			depth = 1
 			continue
+		case c == ')':
+			// Outside a subshell or substitution, this can close a case
+			// pattern. Its | separated alternatives, not pipeline stages.
+			// Retain the existing checks on the following arm.
+			inPipe = false
 		case c == '#' && commentStarts(s, i):
-			flush()
+			flush("")
 			return cmds
 		case c == '&' && i > 0 && (s[i-1] == '>' || s[i-1] == '<'):
 			// 2>&1, <&3: the redirection's, not a background operator
 			// (second review: 2>&1 t=$(mktemp) had split into "1 t=...").
+		case c == '|' && i > 0 && s[i-1] == '>', c == '&' && i+1 < len(s) && s[i+1] == '>':
+			// The | of >| and the & of bash's &> are redirections.
 		case c == ';' || c == '&' || c == '|':
-			flush()
+			end := i + 1
+			if c != ';' && end < len(s) && s[end] == c {
+				end++
+			}
+			flush(s[i:end])
+			i = end - 1
 			continue
 		}
 		if c != ' ' && c != '\t' {
@@ -389,7 +445,7 @@ func shellCommands(s string) []string {
 			cur.WriteByte(c)
 		}
 	}
-	flush()
+	flush("")
 	return cmds
 }
 
@@ -436,11 +492,12 @@ func shView(raw string) string {
 
 // commandLeaks reports whether one simple command leaves a mktemp variable
 // or an EXIT trap in the shell that runs it.
-func commandLeaks(cmd string) bool {
+func (state *shellState) commandLeaks(cmd string) bool {
 	if mktempAssign.MatchString(blankSingleQuoted(cmd)) {
 		return true
 	}
 	words, raws := shellWords(cmd)
+	allWords, allRaws := words, raws
 	// The words before the command name: body and condition openers,
 	// declaration builtins, and NAME=value assignments -- the places a
 	// mktemp path is assigned in this shell.
@@ -453,21 +510,49 @@ func commandLeaks(cmd string) bool {
 			// this shell, after its options and plain names too: export
 			// PATH t=$(mktemp), local -r t=$(mktemp) (review of the guard
 			// branch: the loop had stopped at PATH and -r).
-			for _, r := range raws[1:] {
+			for i, r := range raws[1:] {
 				// Its operand is an assignment after expansion, so a quoted
 				// one assigns too: export "t=$(mktemp)" (second review).
 				if mktempValue.MatchString(shView(r)) {
 					return true
 				}
+				state.remember(r, words[i+1])
 			}
 		}
 		words, raws = words[1:], raws[1:]
 	}
 	if len(words) == 0 {
+		// NAME=value before a regular command is only in that command's
+		// environment. An assignment without a command persists.
+		for i, r := range allRaws {
+			state.remember(r, allWords[i])
+		}
 		return false
 	}
+	if words[0] == "unset" {
+		for _, name := range words[1:] {
+			delete(state.vars, name)
+		}
+	}
 	if words[0] == "eval" {
-		return shellLeaks(strings.Join(words[1:], " "))
+		for i, raw := range raws[1:] {
+			if value, ok := state.variableWord(raw); ok {
+				words[i+1] = value
+			}
+			// Bound total expanded code before allocating it. Even without
+			// a cycle, one stored script can invoke the next twice.
+			state.evalBytesLeft -= len(words[i+1]) + 1
+			if state.evalBytesLeft < 0 {
+				return true
+			}
+		}
+		script := strings.Join(words[1:], " ")
+		if state.evaluating[script] {
+			return true
+		}
+		state.evaluating[script] = true
+		defer delete(state.evaluating, script)
+		return state.shellLeaks(script)
 	}
 	if words[0] != "trap" {
 		return false
@@ -487,6 +572,40 @@ func commandLeaks(cmd string) bool {
 		}
 	}
 	return false
+}
+
+// remember records a statically known assignment. An unknown reassignment
+// invalidates the old value, just as unset does.
+func (state *shellState) remember(raw, word string) {
+	if !assigns(raw) {
+		return
+	}
+	name, rawValue, _ := strings.Cut(raw, "=")
+	_, value, _ := strings.Cut(word, "=")
+	if expanded, ok := state.variableWord(rawValue); ok {
+		state.vars[name] = expanded
+	} else if !strings.ContainsAny(blankSingleQuoted(rawValue), "$`") {
+		state.vars[name] = value
+	} else {
+		delete(state.vars, name)
+	}
+}
+
+// variableWord resolves a direct $name or ${name} argument, optionally
+// double quoted. Single quoting defers expansion to the shell eval starts.
+func (state *shellState) variableWord(raw string) (string, bool) {
+	if len(raw) >= 2 && raw[0] == '"' && raw[len(raw)-1] == '"' {
+		raw = raw[1 : len(raw)-1]
+	}
+	name, ok := strings.CutPrefix(raw, "$")
+	if !ok {
+		return "", false
+	}
+	if len(name) >= 2 && name[0] == '{' && name[len(name)-1] == '}' {
+		name = name[1 : len(name)-1]
+	}
+	value, ok := state.vars[name]
+	return value, ok
 }
 
 // shellWords is cmd's words after sh's quote removal, and beside each its
@@ -560,7 +679,7 @@ func shellWords(cmd string) (words, raws []string) {
 			inWord = true
 			i++
 			cur.WriteByte(cmd[i])
-		case (c == '$' && i+1 < len(cmd) && cmd[i+1] == '(') || c == '`':
+		case startsSubstitution(cmd, i):
 			// A command substitution is part of the word it appears in,
 			// spaces and all: t=$( mktemp ) is one word.
 			inWord = true
@@ -576,8 +695,12 @@ func shellWords(cmd string) (words, raws []string) {
 	return words, raws
 }
 
-// substitutionEnd is the index just past the command substitution starting
-// at cmd[i] -- $( ... ) with its nesting, or ` ... ` -- or len(cmd) when it
+func startsSubstitution(cmd string, i int) bool {
+	return cmd[i] == '`' || (cmd[i] == '$' && i+1 < len(cmd) && (cmd[i+1] == '(' || cmd[i+1] == '{'))
+}
+
+// substitutionEnd is the index just past the substitution starting
+// at cmd[i] -- $( ... ), ${ ... }, or ` ... ` -- or len(cmd) when it
 // does not close on the line.
 func substitutionEnd(cmd string, i int) int {
 	if cmd[i] == '`' {
@@ -585,6 +708,10 @@ func substitutionEnd(cmd string, i int) int {
 			return i + 1 + k + 1
 		}
 		return len(cmd)
+	}
+	open, close := cmd[i+1], byte(')')
+	if open == '{' {
+		close = '}'
 	}
 	depth, quote := 0, byte(0)
 	for j := i + 1; j < len(cmd); j++ {
@@ -601,9 +728,9 @@ func substitutionEnd(cmd string, i int) int {
 			quote = c
 		case c == '\\':
 			j++
-		case c == '(':
+		case c == open:
 			depth++
-		case c == ')':
+		case c == close:
 			depth--
 			if depth == 0 {
 				return j + 1
@@ -623,6 +750,60 @@ func allDigitsWord(s string) bool {
 		}
 	}
 	return true
+}
+
+func TestLeakGuardPhysicalWhitespaceAndEval(t *testing.T) {
+	for _, tc := range []struct {
+		script string
+		leaks  bool
+	}{
+		{"    - |\n      echo safe\\ \n      trap 'echo cleanup' EXIT", true},
+		{"    - |\n      echo safe\\\t\n      trap 'echo cleanup' EXIT", true},
+		{"    - |\n      echo safe\\\n      trap 'echo cleanup' EXIT", false},
+		{`cleanup_script='set -e; t=$(mktemp); trap "echo cleanup" EXIT'
+eval "$cleanup_script"`, true},
+		{`cleanup='trap "echo cleanup" EXIT'; eval "${cleanup}"`, true},
+		{`cleanup='t=$(mktemp)'; eval $cleanup`, true},
+		{`cleanup='trap "echo cleanup" TERM'; eval "$cleanup"`, false},
+		{`cleanup='trap "echo cleanup" EXIT'; printf '%s' "$cleanup"`, false},
+		{`cleanup='trap "echo cleanup" EXIT'; sh -c "$cleanup"`, false},
+		{`cleanup='trap "echo cleanup" EXIT'; cleanup='echo ok'; eval "$cleanup"`, false},
+		{`cleanup='trap "echo cleanup" EXIT'; unset cleanup; eval "$cleanup"`, false},
+		{`cleanup='trap "echo cleanup" EXIT' env; eval "$cleanup"`, false},
+		{`cleanup='trap "echo cleanup" EXIT' | cat; eval "$cleanup"`, false},
+		{`true | cleanup='trap "echo cleanup" EXIT'; eval "$cleanup"`, false},
+		{`true && cleanup='trap "echo cleanup" EXIT' & wait; eval "$cleanup"`, false},
+		{`cleanup='trap "echo cleanup" EXIT'; eval "$cleanup" | cat; echo done`, false},
+		{`cleanup='trap "echo cleanup" EXIT'; eval "$cleanup" & wait; echo done`, false},
+		{`cleanup='trap "echo cleanup" EXIT'; eval "$cleanup" | cat; eval "$cleanup"`, true},
+		{`t=$(mktemp | cat)`, true},
+		{`case a in a|b) t=$(mktemp);; esac`, true},
+		{`tag=${label#a|b} t=$(mktemp)`, true},
+		{`echo $(printf '%s' "a | b"); trap 'echo cleanup' EXIT >|log`, true},
+		{`msg=hello; script='eval printf "%s" "$msg"'; eval "$script" "$msg"`, false},
+		{`cleanup='eval "$cleanup"'; eval "$cleanup"`, true},
+	} {
+		if got := leakedIntoJob.MatchString(tc.script); got != tc.leaks {
+			t.Errorf("leaks = %v, want %v for %q", got, tc.leaks, tc.script)
+		}
+	}
+}
+
+func TestLeakGuardBoundsStoredEvalExpansion(t *testing.T) {
+	// Each script evaluates the previous one twice. The input fits on a
+	// page but would execute the leaf command over a billion times.
+	var script strings.Builder
+	name := "a"
+	script.WriteString("a='echo ok'\n")
+	for i := 0; i < 30; i++ {
+		next := name + "a"
+		script.WriteString(next + "='eval \"$" + name + "\"; eval \"$" + name + "\"'\n")
+		name = next
+	}
+	script.WriteString("eval \"$" + name + "\"")
+	if !leakedIntoJob.MatchString(script.String()) {
+		t.Fatal("accepted an eval tree that exceeds the inspection budget")
+	}
 }
 
 // The review rounds of PR #327, line by line: what a reader adapting the

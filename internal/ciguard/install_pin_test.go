@@ -60,7 +60,12 @@ var (
 // holds it to composed ones -- the shipped documents are clean, so only the
 // composed ones can show the job scoping and the EXIT-only match at work.
 func leakedInInstallJob(text string) string {
-	return leakedIntoJob.FindString(installJobs(text))
+	for _, job := range installJobs(text) {
+		if line := leakedIntoJob.FindString(job); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 // installJobs is the part of a document the install lines are steps of:
@@ -73,7 +78,7 @@ func leakedInInstallJob(text string) string {
 // (PR #325 review: only the first had been, so a second installing job's
 // EXIT trap passed). A document with no install line is returned whole, so
 // the leak check still reads it.
-func installJobs(text string) string {
+func installJobs(text string) []string {
 	lines := strings.Split(text, "\n")
 	indent := func(line string) int { return len(line) - len(strings.TrimLeft(line, " \t")) }
 	// A boundary starts a block: a fence line, or a line outside a fence
@@ -133,9 +138,9 @@ func installJobs(text string) string {
 		}
 	}
 	if blocks == nil {
-		return text
+		return []string{text}
 	}
-	return strings.Join(blocks, "\n")
+	return blocks
 }
 
 // TestInstallOneLiners_LeakGuardCatchesTheFourLineForm holds the guard that
@@ -320,7 +325,7 @@ func TestInstallOneLiners_LeakGuardReadsTheInstallJobOnly(t *testing.T) {
 	if m := leakedInInstallJob(fourLine + "\n" + independent); m == "" {
 		t.Errorf("the four-line form inside the install job is not refused when another job follows")
 	}
-	if got := installJobs("a: 1\nb:\n  - x\n"); got != "a: 1\nb:\n  - x\n" {
+	if got := installJobs("a: 1\nb:\n  - x\n"); len(got) != 1 || got[0] != "a: 1\nb:\n  - x\n" {
 		t.Errorf("a document with no install line is not read whole: %q", got)
 	}
 }
