@@ -701,6 +701,8 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		`    - ver="$(date "+%Y %m")" t=$(mktemp)`,
 		`    - f() { t=$(mktemp); }; f`,
 		`    - x=it\'s t=$(mktemp)'y'`,
+		`    - case x in *) x=it\'s t=$(mktemp)'y';; esac`,
+		`    - case x in *) y="it's" t=$(mktemp);; esac`,
 		`    - case x in *) t=$(mktemp);; esac`,
 		`    - echo $(case a in a) echo y;; esac)#x; trap "echo LEAK" EXIT`,
 		// A README fence line is sh, not YAML: its quotes are sh's
