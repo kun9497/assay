@@ -152,6 +152,17 @@ All notable changes to this project are documented here. The format follows
   trap "rm -f $t" EXIT; ...'` step and a `printf` mentioning `t=$(mktemp)`, and let through a real
   `trap ... EXIT` on the line after a YAML comment ending in a backslash, which joined the two.
   The examples themselves are unchanged. (main QA of 4d823d1, 2026-11-16)
+- VEX: an Ubuntu operating-system declaration in an SBOM gives codename evidence only when it is
+  consistent with itself and attributable to the target's release, by one rule over the whole
+  document. One component with two different `syft:distro:versionID` or `syft:distro:id`
+  values, or whose standard `version` disagrees with syft's (24.04 against 22.04), contradicts
+  itself and voids the evidence; a versioned declaration counts for its own release; a
+  declaration with no version counts only when every OS the document declares is Ubuntu of the
+  target's release -- another release, another vendor, or a version that names none (`24`)
+  leaves it unattributed. 4d823d1 had taken
+  the last property's value and read a version-less declaration under a 24.04 parent as the
+  target's, so a branch's jammy exempted a numeric-only 22.04 apt (exit 1 to 0) and a branch's
+  noble cancelled a 22.04 jammy's own exemption (exit 0 to 1). (main QA of 4d823d1, 2026-11-16)
 - `db build`'s `osv:` progress line names the records D16 dropped as withdrawn, per affected
   ecosystem (`withdrawn (D16) by affected ecosystem: Echo:Go 241, ...`). When Echo withdrew
   most of its language advisories on 2026-11-12, three nightlies were refused by the push guard
