@@ -89,6 +89,11 @@
   67e2cf6는 예제의 독립된 GitLab 잡에 넣은 `trap 'echo stopping' TERM`을 설치기의 잔재로 거부했습니다.
   네 줄 설치 형태(호출 셸의 `t=$(mktemp)`와 `trap 'rm -f "$t"' EXIT`)는 설치 잡 안에서 여전히 거부되며,
   예제 자체는 바뀌지 않았습니다. (main 67e2cf6 QA, 2026-11-13)
+- VEX: 한 설치의 두 기록이 병합될 때 Ubuntu 코드네임은 같은 vendor(purl namespace)의 기록에서만 가져옵니다.
+  f554fb2는 `pkg:deb/ubuntu/apt`(숫자 `distro=`)와 `pkg:deb/debian/apt?distro=jammy`를 병합하며 debian 기록의 코드네임을
+  ubuntu 패키지에 넘겨, ubuntu 기록이 먼저면 `JAMMY` 문장이 면제하고(종료 0) 반대면 하지 않았습니다(종료 1).
+  (main f554fb2 QA, 2026-11-13)
+
 
 ## [0.18.1] - 2026-11-12
 

@@ -119,6 +119,12 @@ All notable changes to this project are documented here. The format follows
   GitLab job of the example as the installer's leftover. The four-line install form (`t=$(mktemp)`
   and `trap 'rm -f "$t"' EXIT` in the calling shell) is still refused inside the install job;
   the examples themselves are unchanged. (main QA of 67e2cf6, 2026-11-13)
+- VEX: when two listings of one install merge, the Ubuntu codename is taken only from a listing of
+  the same vendor (purl namespace). f554fb2 merged `pkg:deb/ubuntu/apt` (numeric `distro=`) with
+  `pkg:deb/debian/apt?distro=jammy` and gave the ubuntu package the debian listing's codename, so a
+  `JAMMY` statement exempted it with the ubuntu listing first (exit 0) and not the other way round
+  (exit 1). (main QA of f554fb2, 2026-11-13)
+
 
 ## [0.18.1] - 2026-11-12
 

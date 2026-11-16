@@ -572,7 +572,14 @@ func mergePURL(kept, other, ecosystem string) string {
 			delete(kp.Qualifiers, "distro")
 		}
 	}
-	if od, ok := op.Qualifiers["distro"]; ok && kp.Type == "deb" && pkgmeta.UbuntuCodename(od) != "" {
+	// The other listing must be the same vendor's: a deb purl's namespace
+	// names the distribution that built it, and an Ubuntu codename read off
+	// pkg:deb/debian/apt is not evidence about pkg:deb/ubuntu/apt (main QA
+	// of f554fb2, 2026-11-13: the two merged as one install and the debian
+	// listing's distro=jammy exempted the ubuntu one -- exit 0 or 1 by
+	// listing order).
+	if od, ok := op.Qualifiers["distro"]; ok && kp.Type == "deb" && strings.EqualFold(kp.Namespace, "ubuntu") &&
+		strings.EqualFold(op.Namespace, kp.Namespace) && pkgmeta.UbuntuCodename(od) != "" {
 		if kd := kp.Qualifiers["distro"]; pkgmeta.UbuntuCodename(kd) == "" &&
 			pkgmeta.CanonicalDistroQualifier(kd) == pkgmeta.CanonicalDistroQualifier(od) {
 			kp.Qualifiers["distro"] = od
