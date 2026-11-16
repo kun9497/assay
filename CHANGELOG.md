@@ -120,8 +120,8 @@ All notable changes to this project are documented here. The format follows
   and `trap 'rm -f "$t"' EXIT` in the calling shell) is still refused inside the install job;
   the examples themselves are unchanged. (main QA of 67e2cf6, 2026-11-13)
 - Debian's `rN` point-release spelling is read only for woody, sarge and etch (`3.0r6`, `3.1r8`,
-  `4.0r9`), the keyed releases that used it (slink and potato used it too, and have no key). Lenny and squeeze spell their points with three numbers
-  (`5.0.10`, `6.0.10`); f554fb2 had read `6.0r10` as `6.0.10`, so a VEX statement written with that
+  `4.0r9`), the keyed releases that used it (slink and potato used it too, and have no key).
+  Lenny and squeeze spell their points with three numbers (`5.0.10`, `6.0.10`); f554fb2 had read `6.0r10` as `6.0.10`, so a VEX statement written with that
   unofficial alias exempted a squeeze install (DLA-53-1 suppressed, exit 1 to 0) and `5.0r10` a
   lenny one. Such a spelling now names no release. (main QA of f554fb2, 2026-11-13)
 

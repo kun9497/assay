@@ -774,9 +774,8 @@ func (d Distro) Ecosystem() (string, error) {
 // debianRevisionPoint is the "rN" point-release spelling Debian used up to
 // etch -- of the releases the store keys, woody, sarge and etch (3.0r6,
 // 3.1r8, 4.0r9, the archive's own; slink's 2.1rN and potato's 2.2rN have no
-// key) -- as the
-// three-number spelling it moved to with lenny (4.0.9), or "" for any other
-// string. Only those three releases qualify: lenny's point releases are
+// key) -- as the three-number spelling it moved to with lenny (4.0.9), or ""
+// for any other string. Only those three releases qualify: lenny's point releases are
 // 5.0.1 to 5.0.10 and squeeze's 6.0.1 to 6.0.10, so "5.0r10" or "6.0r10" is
 // no Debian spelling, and reading it as 6.0.10 had made it an alias a VEX
 // statement could exempt a squeeze install by (main QA of f554fb2,
