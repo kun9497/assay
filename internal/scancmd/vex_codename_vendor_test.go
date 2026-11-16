@@ -66,14 +66,17 @@ func TestRun_VEXUbuntuCodenameIsNotCopiedFromAnotherVendor(t *testing.T) {
 			t.Fatal(err)
 		}
 		var out, errOut bytes.Buffer
-		Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnUnknown: true,
+		code := Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnUnknown: true,
 			VEXFiles: []string{writeVEX(t, stmt("CVE-2031-9106", product("pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=JAMMY")))}}, &out, &errOut)
 		var rep report.Document
 		if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 			t.Fatalf("stdout is not one JSON document: %v\nstderr: %s", err, errOut.String())
 		}
-		if suppressedPairs(rep)[want] {
-			t.Errorf("top %s: the JAMMY statement exempted the ubuntu apt through the debian listing's codename\nstderr: %s", order[0], errOut.String())
+		// The finding must still be reported, not merely unsuppressed: a merge
+		// that lost the install would pass a suppression-only check (third
+		// review of PR #329).
+		if suppressedPairs(rep)[want] || !pairsOf(rep.Findings)[want] || code != 1 {
+			t.Errorf("top %s: suppressed %v, exit %d; want the finding kept, exit 1\nstderr: %s", order[0], suppressedPairs(rep), code, errOut.String())
 		}
 	}
 }
@@ -97,14 +100,14 @@ func TestRun_VEXUbuntuCodenameIsNotReplacedFromAnotherVendor(t *testing.T) {
 				t.Fatal(err)
 			}
 			var out, errOut bytes.Buffer
-			Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnUnknown: true,
+			code := Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnUnknown: true,
 				VEXFiles: []string{writeVEX(t, stmt("CVE-2031-9106", product("pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=JAMMY")))}}, &out, &errOut)
 			var rep report.Document
 			if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
 				t.Fatalf("stdout is not one JSON document: %v\nstderr: %s", err, errOut.String())
 			}
-			if suppressedPairs(rep)[want] {
-				t.Errorf("own distro %s, top %s: the JAMMY statement exempted the ubuntu apt through the debian listing\nstderr: %s", own, order[0], errOut.String())
+			if suppressedPairs(rep)[want] || !pairsOf(rep.Findings)[want] || code != 1 {
+				t.Errorf("own distro %s, top %s: suppressed %v, exit %d; want the finding kept, exit 1\nstderr: %s", own, order[0], suppressedPairs(rep), code, errOut.String())
 			}
 		}
 	}
