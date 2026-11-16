@@ -33,14 +33,49 @@ import (
 // refusal there is loud -- the documents' test goes red -- and a miss is a
 // spelling nobody writes in an install step. Refused though sh would not
 // leave them in the job shell, on the same loud side: an assignment after
-// `command` or `time`, and one before a regular command (t=$(mktemp) make),
-// which only that command's environment sees. A trap on TERM or INT alone is a
+// `command` or `time`, one before a regular command (t=$(mktemp) make),
+// which only that command's environment sees, and a NAME=$(mktemp) after a
+// blank anywhere outside single quotes (echo t=$(mktemp)), which mktempAssign
+// reads as 4d823d1 did. A trap on TERM or INT alone is a
 // job's own business, not the installer's leftover (main QA of 67e2cf6,
 // 2026-11-13: `trap 'echo stopping' TERM` in an independent job was refused).
 type leakGuard struct{}
 
 // leakedIntoJob is the guard, read over the install jobs only (installJobs).
 var leakedIntoJob leakGuard
+
+// mktempAssign finds an assignment of a mktemp path anywhere in a command,
+// before quote removal: NAME=$(mktemp), NAME="$( mktemp )", NAME=`mktemp`,
+// NAME=$(TMPDIR=x mktemp), NAME=${X:-$(mktemp)} -- at the command's start or
+// after a space. It is the conservative half of the check, read over the
+// command with its single-quoted text blanked (blankSingleQuoted), so it
+// refuses every line 4d823d1 refused except those whose mktemp is quoted
+// text that never runs in this shell -- the script of sh -c '...', the
+// string printf '...' prints (main QA of 4d823d1, 2026-11-16). Four review
+// rounds of reading assignments word by word kept finding real leaks the
+// pattern had caught: nested quotes, a function body, a case arm.
+var mktempAssign = regexp.MustCompile("(?:^|[ \\t])\\w+=[\"']?(?:\\$\\{\\w+:?[-=+]\\s*)?(?:\\$\\(\\s*(?:\\w+=\\S*\\s+)*(?:command\\s+)?|`\\s*)mktemp\\b")
+
+// blankSingleQuoted is cmd with the text of every single-quoted string --
+// outside double quotes, where ' is a quote -- replaced by underscores.
+func blankSingleQuoted(cmd string) string {
+	b := []byte(cmd)
+	dq := false
+	for i := 0; i < len(b); i++ {
+		switch c := b[i]; {
+		case c == '\\' && i+1 < len(b):
+			// An escaped quote is no quote: it's.
+			i++
+		case c == '"':
+			dq = !dq
+		case c == '\'' && !dq:
+			for i++; i < len(b) && b[i] != '\''; i++ {
+				b[i] = '_'
+			}
+		}
+	}
+	return string(b)
+}
 
 // mktempValue is an assignment word, after quote removal, whose value is a
 // mktemp path: NAME=$(mktemp), NAME=$( mktemp ), NAME=`mktemp`,
@@ -177,9 +212,17 @@ func closesSubstitution(s string, j int) bool {
 			open = append(open, k > 0 && s[k-1] == '$')
 		case c == ')' && len(open) > 0:
 			open = open[:len(open)-1]
+		case c == ')':
+			// Unpaired: the reading is lost, so no ) after it is trusted
+			// as a subshell's.
+			return true
 		}
 	}
-	return len(open) > 0 && open[len(open)-1]
+	// A ) that pairs with nothing -- a case pattern's inside $( ) has
+	// taken its $( -- is not taken for a subshell's: reading on is the
+	// loud side (fourth review: $(case a in a) ...;; esac)#x; trap ...
+	// EXIT had hidden the trap).
+	return len(open) == 0 || open[len(open)-1]
 }
 
 func lineLeaks(line string) bool {
@@ -390,6 +433,9 @@ func shView(raw string) string {
 // commandLeaks reports whether one simple command leaves a mktemp variable
 // or an EXIT trap in the shell that runs it.
 func commandLeaks(cmd string) bool {
+	if mktempAssign.MatchString(blankSingleQuoted(cmd)) {
+		return true
+	}
 	words, raws := shellWords(cmd)
 	// The words before the command name: body and condition openers,
 	// declaration builtins, and NAME=value assignments -- the places a
@@ -651,6 +697,12 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		`    - >"$HOME/my log" t=$(mktemp)`,
 		`    - > "a b" t=$(mktemp)`,
 		"    - (make)# note \\\n    - trap 'echo catch-me' EXIT",
+		// Fourth review: real leaks the word reading alone had let through.
+		`    - ver="$(date "+%Y %m")" t=$(mktemp)`,
+		`    - f() { t=$(mktemp); }; f`,
+		`    - x=it\'s t=$(mktemp)'y'`,
+		`    - case x in *) t=$(mktemp);; esac`,
+		`    - echo $(case a in a) echo y;; esac)#x; trap "echo LEAK" EXIT`,
 		// A README fence line is sh, not YAML: its quotes are sh's
 		// (fourth review: unquoting it as YAML had shifted every pairing).
 		`"$CI_PROJECT_DIR/setup" && trap 'rm -f "$t"' "EXIT"`,
@@ -682,8 +734,7 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		// nothing.
 		`    - sh -c 'set -eu; t=$(mktemp); trap "rm -f $t" EXIT; echo child-done'`,
 		`    - printf '%s' 'No install - run t=$(mktemp) first'`,
-		`    - echo "t=$(mktemp)"`,
-		`    - echo t=$(mktemp)`,
+
 		// A quoted word is a command name, not an assignment, and a
 		// single-quoted value is text.
 		`    - "t=$(mktemp)" || true`,
