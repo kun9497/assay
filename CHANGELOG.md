@@ -124,6 +124,36 @@ All notable changes to this project are documented here. The format follows
   `pkg:deb/debian/apt?distro=jammy` and gave the ubuntu package the debian listing's codename, so a
   `JAMMY` statement exempted it with the ubuntu listing first (exit 0) and not the other way round
   (exit 1). (main QA of f554fb2, 2026-11-13)
+- VEX: the Ubuntu codename an SBOM gives as evidence is what every Ubuntu operating-system
+  declaration in it says -- versioned or not, at any depth, the subject's included -- and none
+  when two disagree; and it holds only for the release it names. A 22.04 OS saying `kinetic`
+  (22.10, which the build had not known and took at its word), two different codenames on one OS
+  component (CycloneDX lets a property repeat; the last had won), and a document whose branches,
+  parents or siblings name `jammy` and `noble` all exempt nothing now, in any order or nesting;
+  f554fb2 had let each turn exit 1 into 0 under a codename statement. A codename-only OS names the
+  release its codename does. An SBOM with no Ubuntu OS naming the target gives no codename
+  evidence, as before. (main QA of f554fb2, 2026-11-13)
+- Debian's archive spelling of a point release before lenny -- `4.0r9`, `3.1r8`, `3.0r6`, as
+  the etch Release file says -- names its release (`Debian:4.0`, `3.1`, `3.0`) in a `VERSION_ID`,
+  an SBOM's operating-system version or a purl's `distro=` qualifier, where 67e2cf6 had refused it
+  as no release at all: an SBOM naming etch as the archive does was scanned with `EOL unknown`
+  and exit 0 under `--fail-on-eol`, where ef0bc1a had reported the 2010-02-15 end of life and
+  exit 1. The revision is a point of the release (`debian-4.0` includes `debian-4.0r9`; a
+  statement for `debian-4.0r9` is a point statement); a bare `3` and sid stay refused. (main QA
+  of 67e2cf6, 2026-11-13)
+- Debian's `rN` point-release spelling is read only for woody, sarge and etch (`3.0r6`, `3.1r8`,
+  `4.0r9`), the keyed releases that used it (slink and potato used it too, and have no key).
+  Lenny and squeeze spell their points with three numbers (`5.0.10`, `6.0.10`); f554fb2 had read `6.0r10` as `6.0.10`, so a VEX statement written with that
+  unofficial alias exempted a squeeze install (DLA-53-1 suppressed, exit 1 to 0) and `5.0r10` a
+  lenny one. Such a spelling now names no release. (main QA of f554fb2, 2026-11-13)
+- `internal/ciguard`'s guard on the CI examples reads each line of an install job as sh would --
+  YAML quoting removed, commands split at `;` `&&` `||` `&` `|` outside quotes, subshells and
+  comments skipped, words through sh's quote removal -- instead of matching a pattern. f554fb2's
+  pattern let a quoted signal name through (`trap 'echo cleanup' "EXIT"` and `'EXIT'` set the same
+  EXIT trap in GitLab's shared shell; 67e2cf6 had refused them), and the review rounds found more
+  on both sides: `trap --`, a trap after another command or in a compound body, and a partly
+  quoted name let through; a trap inside `sh -c '...'` or a subshell refused. A TERM or INT trap
+  still passes. The examples themselves are unchanged. (main QA of f554fb2, 2026-11-13)
 
 ## [0.18.1] - 2026-11-12
 

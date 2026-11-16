@@ -73,7 +73,7 @@ func CanonicalDistroQualifier(q string) string {
 	if (family == "" || family == "ubuntu") && UbuntuReleases()[name] != "" {
 		return "ubuntu-" + UbuntuReleases()[name]
 	}
-	// The archive's "r" spelling of a point release before squeeze
+	// The archive's "r" spelling of a point release before lenny
 	// (debian-4.0r9) compares as the point it is (debian-4.0.9), so the one
 	// inclusion rule serves both spellings: debian-4.0 includes it, and a
 	// statement for it is a point statement, not the whole key.

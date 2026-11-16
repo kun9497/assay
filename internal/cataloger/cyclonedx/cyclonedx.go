@@ -95,6 +95,23 @@ func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 	// branch's packages. See osContext.
 	top := contextFor(doc.Components, osContext{})
 	target.Distro = documentDistro(doc, top)
+	if target.Distro != nil && strings.EqualFold(target.Distro.ID, "ubuntu") {
+		// The codename the document gives as evidence is what every Ubuntu
+		// operating-system declaration in it says -- versioned or not, at
+		// any depth, the subject's included -- and none when two disagree.
+		// Main QA of f554fb2 (2026-11-13) and four review rounds had found
+		// a branch, a parent, a sibling or a version-less declaration saying
+		// noble while the document's jammy exempted a package, each fix to
+		// one nesting shape leaving another; one merge over the whole
+		// document cannot depend on where a declaration sits or in which
+		// order. The codename is still held to the release the target's
+		// version names (pkgmeta.UbuntuCodenameOf, in scancmd.vexTarget) and
+		// to each package's key (vex.resolve). A copy: the context's distro
+		// keys packages.
+		d := *target.Distro
+		d.VersionCodename = documentCodename(doc, ubuntuRelease(d.VersionID))
+		target.Distro = &d
+	}
 
 	catalog(doc.Components, top, &target, &stats)
 	if doc.Metadata.Component != nil {
@@ -1305,6 +1322,57 @@ func childContext(parent component, inherited osContext) osContext {
 	return contextFor(parent.Components, inherited)
 }
 
+// documentCodename is the Ubuntu codename the operating-system components of
+// doc state for release -- at any depth and in metadata.component -- merged
+// (pkgmeta.MergeCodename): "" when none states one, ContradictedCodename
+// when two disagree. A declaration counts when it is of that release, its
+// codename held to its own version first (pkgmeta.UbuntuCodenameOf: 22.04
+// saying noble contradicts itself), or when it states no version at all.
+// One of another release is left out: its packages carry their own key,
+// which the matcher holds a codename to, and counting it had let a 24.04
+// saying jammy lend jammy to 22.04 packages and a consistent 24.04 noble
+// cancel the target's own jammy (review of the redesign of PR #328).
+func documentCodename(doc bom, release string) string {
+	codename := ""
+	var walk func(cs []component)
+	visit := func(c component) {
+		if d := distroOf(c); d != nil && strings.EqualFold(d.ID, "ubuntu") {
+			switch r := ubuntuRelease(d.VersionID); {
+			case r == "":
+				codename = pkgmeta.MergeCodename(codename, d.VersionCodename)
+			case r == release:
+				// Held to its own version here and, merged, to the target's
+				// again in scancmd.vexTarget -- one release, so the second
+				// check alone reaches the same answer (a mutation dropping
+				// this survives); kept so the merge never carries a codename
+				// that names another release.
+				codename = pkgmeta.MergeCodename(codename, pkgmeta.UbuntuCodenameOf(*d))
+			}
+		}
+		walk(c.Components)
+	}
+	walk = func(cs []component) {
+		for _, c := range cs {
+			visit(c)
+		}
+	}
+	walk(doc.Components)
+	if doc.Metadata.Component != nil {
+		visit(*doc.Metadata.Component)
+	}
+	return codename
+}
+
+// ubuntuRelease is a VERSION_ID's YY.MM release ("22.04.5" is 22.04), or ""
+// when it names none.
+func ubuntuRelease(versionID string) string {
+	parts := strings.SplitN(versionID, ".", 3)
+	if len(parts) < 2 {
+		return ""
+	}
+	return parts[0] + "." + parts[1]
+}
+
 // documentDistro is the Target's distro, the one the scan reports and its
 // end-of-life and coverage lines read: the top-level context's when the
 // document declares one there, else the one the subject itself declares --
@@ -1365,7 +1433,11 @@ func distroOf(c component) *pkgmeta.Distro {
 			// (2026-11-13) had the same JAMMY statement suppress two
 			// advisories on the Ubuntu image and none on syft's SBOM of it,
 			// whose OS component said versionCodename=jammy all along.
-			d.VersionCodename = p.Value
+			// CycloneDX allows a property name to repeat; two different
+			// codenames on one component contradict each other (main QA of
+			// f554fb2: the last one had won, so jammy,noble and noble,jammy
+			// gave exit 1 and 0).
+			d.VersionCodename = pkgmeta.MergeCodename(d.VersionCodename, p.Value)
 		}
 	}
 	// Fall back to the component's own fields: the properties are a syft
