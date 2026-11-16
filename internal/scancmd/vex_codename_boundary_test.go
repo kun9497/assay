@@ -221,6 +221,9 @@ func TestRun_VEXUbuntuCodenameFromVersionlessAndEnclosingOS(t *testing.T) {
 		{"top jammy, branch OS only jammy", osOf("22.04", "jammy") + "," + branch(osOf("", "jammy"), apt), "", "JAMMY", true},
 		{"top jammy, subject noble on 22.04 holding an OS that says nothing", osOf("22.04", "jammy"), `,"metadata":{"component":` + osOf("22.04", "noble", osOf("22.04", ""), apt) + `}`, "JAMMY", false},
 		{"a codename-only jammy OS", osOf("", "jammy") + "," + apt, "", "JAMMY", true},
+		// The branch's own version-less jammy is its evidence when the
+		// document's own OS (the subject, 22.04 saying noble) gives none.
+		{"branch OS only jammy, subject noble on 22.04", branch(osOf("", "jammy"), apt), `,"metadata":{"component":` + osOf("22.04", "noble") + `}`, "JAMMY", true},
 		{"a codename-only noble OS", osOf("", "noble") + "," + apt, "", "JAMMY", false},
 		{"22.04 saying a codename no table knows", osOf("22.04", "tangy") + "," + apt, "", "tangy", false},
 	} {
