@@ -271,6 +271,7 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		`    - echo "a; trap 'x' EXIT"`,
 		`    - trap EXIT`,
 		`    - trap - EXIT`,
+		`    - trap -- - EXIT`, // a reset, after the option separator
 		`    - echo trap 'x' EXIT`,
 		`    - printf '%s\n' "t=$(mktemp)"`,
 	} {
