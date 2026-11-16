@@ -1168,7 +1168,10 @@ func applyVEX(res *matcher.Result, paths []string, target vex.Target, stderr io.
 func vexTarget(kind source.TargetKind, target string, image *report.ImageRecord, outer []string, d *pkgmeta.Distro) vex.Target {
 	var t vex.Target
 	if d != nil && d.ID == "ubuntu" {
-		t.UbuntuCodename = d.VersionCodename
+		// Held to the release VERSION_ID names: os-release (or an SBOM's
+		// operating system) saying kinetic beside 22.04 is evidence of
+		// nothing (main QA of f554fb2, 2026-11-13).
+		t.UbuntuCodename = pkgmeta.UbuntuCodenameEvidence(pkgmeta.UbuntuCodenameOf(*d))
 		if eco, err := d.Ecosystem(); err == nil {
 			t.UbuntuCodenameKey = eco
 		}

@@ -658,6 +658,14 @@ func resolve(live []liveStatement, f matcher.Finding, target Target, matched []b
 	if target.UbuntuCodenameKey != "" && f.Package.Ecosystem != "" && f.Package.Ecosystem != target.UbuntuCodenameKey {
 		s.codename = ""
 	}
+	// The package's own OS declaration decides when it states a codename
+	// (or contradicts itself); one that states none leaves the target's,
+	// which the key check above holds to its own release (main QA of
+	// f554fb2: a branch declaring 22.04 as noble had answered to the
+	// document's jammy).
+	if c := f.Package.OSCodename; c != "" {
+		s.codename = pkgmeta.UbuntuCodenameEvidence(c)
+	}
 
 	var (
 		best     liveStatement

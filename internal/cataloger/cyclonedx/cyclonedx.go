@@ -792,6 +792,7 @@ func keyedReleases(pkgs []pkgmeta.Package) map[string]releases {
 // already states is never overwritten.
 func keepEvidence(kept *pkgmeta.Package, dropped pkgmeta.Package) {
 	kept.DistroContext = kept.DistroContext.Merge(dropped.DistroContext)
+	kept.OSCodename = pkgmeta.MergeCodename(kept.OSCodename, dropped.OSCodename)
 	// The keyed listing's key wins over an unkeyed twin's (indexOfPackage).
 	if kept.Ecosystem == "" && dropped.Ecosystem != "" {
 		kept.Ecosystem = dropped.Ecosystem
@@ -1025,12 +1026,23 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 		loc.LayerDigest = layer
 	}
 
+	// The codename evidence is the package's own OS context's, held to the
+	// release it names (UbuntuCodenameOf); a context of two releases states
+	// a contradiction.
+	osCodename := ""
+	switch {
+	case ctx.mixedRelease:
+		osCodename = pkgmeta.ContradictedCodename
+	case ctx.distro != nil:
+		osCodename = pkgmeta.UbuntuCodenameOf(*ctx.distro)
+	}
 	pkg := pkgmeta.Package{
 		Name:          name,
 		Version:       version,
 		Type:          p.Type,
 		Ecosystem:     eco,
 		PURL:          c.PURL,
+		OSCodename:    osCodename,
 		DistroContext: scope.ForInstallation(p.Qualifiers["distro"]),
 		Locations:     []pkgmeta.Location{loc},
 		Source:        source,
@@ -1167,15 +1179,9 @@ func contextFor(siblings []component, inherited osContext) osContext {
 	// the release carries none (PR #323 review: the first declaration's had
 	// won, so [jammy, noble] exempted under a jammy statement and [noble,
 	// jammy] did not -- exit 0 or 1 by component order).
-	codename, codenameConflict := "", false
+	codename := ""
 	noteCodename := func(d *pkgmeta.Distro) {
-		switch {
-		case d.VersionCodename == "":
-		case codename == "":
-			codename = d.VersionCodename
-		case !strings.EqualFold(codename, d.VersionCodename):
-			codenameConflict = true
-		}
+		codename = pkgmeta.MergeCodename(codename, d.VersionCodename)
 	}
 	for _, c := range siblings {
 		d := distroOf(c)
@@ -1243,9 +1249,6 @@ func contextFor(siblings []component, inherited osContext) osContext {
 			}
 		}
 		return inherited
-	}
-	if codenameConflict {
-		codename = ""
 	}
 	found.VersionCodename = codename
 	ctx := osContext{distro: found, mixedRelease: mixedRelease}
@@ -1347,7 +1350,16 @@ func distroOf(c component) *pkgmeta.Distro {
 			// (2026-11-13) had the same JAMMY statement suppress two
 			// advisories on the Ubuntu image and none on syft's SBOM of it,
 			// whose OS component said versionCodename=jammy all along.
-			d.VersionCodename = p.Value
+			// CycloneDX allows a property name to repeat; two different
+			// codenames on one component contradict each other (main QA of
+			// f554fb2: the last one had won, so jammy,noble and noble,jammy
+			// gave exit 1 and 0).
+			switch {
+			case d.VersionCodename == "":
+				d.VersionCodename = p.Value
+			case !strings.EqualFold(d.VersionCodename, p.Value):
+				d.VersionCodename = pkgmeta.ContradictedCodename
+			}
 		}
 	}
 	// Fall back to the component's own fields: the properties are a syft
