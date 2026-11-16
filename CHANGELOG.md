@@ -119,6 +119,11 @@ All notable changes to this project are documented here. The format follows
   GitLab job of the example as the installer's leftover. The four-line install form (`t=$(mktemp)`
   and `trap 'rm -f "$t"' EXIT` in the calling shell) is still refused inside the install job;
   the examples themselves are unchanged. (main QA of 67e2cf6, 2026-11-13)
+- `internal/ciguard`'s guard on the CI examples reads a quoted signal name as the signal: `trap
+  'echo cleanup' "EXIT"` and `'EXIT'` set the same EXIT trap in GitLab's shared shell, and f554fb2
+  had let both through where 67e2cf6 refused them. A quoted TERM or INT trap still passes. The
+  examples themselves are unchanged. (main QA of f554fb2, 2026-11-13)
+
 
 ## [0.18.1] - 2026-11-12
 

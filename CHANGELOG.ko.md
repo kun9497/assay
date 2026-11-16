@@ -89,6 +89,10 @@
   67e2cf6는 예제의 독립된 GitLab 잡에 넣은 `trap 'echo stopping' TERM`을 설치기의 잔재로 거부했습니다.
   네 줄 설치 형태(호출 셸의 `t=$(mktemp)`와 `trap 'rm -f "$t"' EXIT`)는 설치 잡 안에서 여전히 거부되며,
   예제 자체는 바뀌지 않았습니다. (main 67e2cf6 QA, 2026-11-13)
+- `internal/ciguard`의 CI 예제 가드가 따옴표로 감싼 신호 이름도 신호로 읽습니다: `trap 'echo cleanup' "EXIT"`와
+  `'EXIT'`는 GitLab의 공유 셸에 같은 EXIT trap을 설정하는데, f554fb2는 67e2cf6가 거부하던 두 형태를 통과시켰습니다.
+  따옴표로 감싼 TERM·INT trap은 여전히 통과합니다. 예제 자체는 바뀌지 않았습니다. (main f554fb2 QA, 2026-11-13)
+
 
 ## [0.18.1] - 2026-11-12
 
