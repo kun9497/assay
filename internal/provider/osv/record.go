@@ -313,7 +313,12 @@ func convert(data []byte, wantEcosystem string, st *stats, tracker *ubuntuTracke
 	// false positive. Dropped here rather than at query time so no lookup path
 	// can forget the check (D16).
 	if r.Withdrawn != nil {
-		st.countWithdrawn(r.Affected, wantEcosystem)
+		// Counted only where the record would have filled a key: MAL-*
+		// (D15) and ALBA/ALEA (D72) are dropped below either way (second
+		// review: a withdrawn MAL-* had counted under npm).
+		if db := databaseOf(r.ID); !strings.HasPrefix(r.ID, "MAL-") && db != "ALBA" && db != "ALEA" {
+			st.countWithdrawn(r.Affected, wantEcosystem)
+		}
 		return advisory.Advisory{}, false, nil
 	}
 
@@ -681,7 +686,7 @@ func (s *stats) countWithdrawn(affected []rawAffected, wantEcosystem string) {
 	seen := map[string]bool{}
 	for _, a := range affected {
 		e := a.Package.Ecosystem
-		if ubuntuLineage(e) || !familyMatches(e, wantEcosystem) {
+		if a.Package.Name == "" || ubuntuLineage(e) || !familyMatches(e, wantEcosystem) {
 			continue
 		}
 		if e = foldPackagistEcosystem(e); !seen[e] {

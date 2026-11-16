@@ -61,7 +61,7 @@ func TestStats_WithdrawnSummaryNone(t *testing.T) {
 		var out []rawAffected
 		for _, e := range ecos {
 			var a rawAffected
-			a.Package.Ecosystem = e
+			a.Package.Ecosystem, a.Package.Name = e, "pkg"
 			out = append(out, a)
 		}
 		return out
@@ -72,7 +72,37 @@ func TestStats_WithdrawnSummaryNone(t *testing.T) {
 	st.countWithdrawn(aff("npm", "npm", "PyPI", "Ubuntu:Pro:18.04:LTS"), "npm")
 	st.countWithdrawn(aff("npm", "npm", "PyPI", "Ubuntu:Pro:18.04:LTS"), "PyPI")
 	st.countWithdrawn(aff("Packagist:https://packages.drupal.org/8"), "Packagist")
-	if got := st.withdrawnSummary(); got != "Packagist 1, PyPI 1, npm 1" {
-		t.Errorf("withdrawnSummary = %q, want %q", got, "Packagist 1, PyPI 1, npm 1")
+	// The Ubuntu archive: mainline counts, a lineage key never indexed does
+	// not, though familyMatches ties both to the family.
+	st.countWithdrawn(aff("Ubuntu:22.04:LTS", "Ubuntu:Pro:18.04:LTS"), "Ubuntu")
+	if got, want := st.withdrawnSummary(), "Packagist 1, PyPI 1, Ubuntu:22.04:LTS 1, npm 1"; got != want {
+		t.Errorf("withdrawnSummary = %q, want %q", got, want)
+	}
+	var empty stats
+	empty.countWithdrawn([]rawAffected{{}}, "")
+	if len(empty.Withdrawn) != 0 {
+		t.Errorf("a nameless entry counted: %v", empty.Withdrawn)
+	}
+}
+
+// Through convert: a withdrawn MAL-* or ALBA record is no lost advisory --
+// D15 and D72 drop them live too -- so it is not counted.
+func TestConvert_WithdrawnCountSkipsRecordsNeverStored(t *testing.T) {
+	var st stats
+	for _, rec := range []string{
+		`{"id":"MAL-2025-1","withdrawn":"2026-01-01T00:00:00Z","affected":[{"package":{"name":"evil","ecosystem":"npm"},"versions":["1.0.0"]}]}`,
+		`{"id":"ALBA-2024:1","withdrawn":"2026-01-01T00:00:00Z","affected":[{"package":{"name":"x","ecosystem":"AlmaLinux:9"},"ranges":[{"type":"ECOSYSTEM","events":[{"introduced":"0"},{"fixed":"1"}]}]}]}`,
+		`{"id":"GHSA-real","withdrawn":"2026-01-01T00:00:00Z","affected":[{"package":{"name":"ok","ecosystem":"npm"},"ranges":[{"type":"SEMVER","events":[{"introduced":"0"},{"fixed":"1.0.0"}]}]}]}`,
+	} {
+		want := "npm"
+		if strings.Contains(rec, "AlmaLinux") {
+			want = "AlmaLinux"
+		}
+		if _, ok, err := convert([]byte(rec), want, &st, nil); ok || err != nil {
+			t.Fatalf("convert(%s) = ok %v, err %v; want dropped", rec, ok, err)
+		}
+	}
+	if got := st.withdrawnSummary(); got != "npm 1" {
+		t.Errorf("withdrawnSummary = %q, want npm 1 (the GHSA only)", got)
 	}
 }
