@@ -57,12 +57,20 @@ var leakedIntoJob leakGuard
 var mktempAssign = regexp.MustCompile("(?:^|[ \\t])\\w+=[\"']?(?:\\$\\{\\w+:?[-=+]\\s*)?(?:\\$\\(\\s*(?:\\w+=\\S*\\s+)*(?:command\\s+)?|`\\s*)mktemp\\b")
 
 // blankSingleQuoted is cmd with the text of every single-quoted string --
-// outside double quotes, where ' is a quote -- replaced by underscores.
+// outside double quotes, where ' is a quote -- replaced by underscores, or
+// cmd unchanged when a substitution ($( or `) or a $'...' string sits outside
+// single quotes. Quotes nest inside a substitution ("$(echo "it's")"), and a
+// reader that does not track that nesting can take a real assignment for
+// quoted text; with the command left as written, mktempAssign refuses what
+// 4d823d1 refused (fifth review). The QA's two false positives quote their
+// $(mktemp) whole, so they are still blanked.
 func blankSingleQuoted(cmd string) string {
 	b := []byte(cmd)
 	dq := false
 	for i := 0; i < len(b); i++ {
 		switch c := b[i]; {
+		case c == '$' && i+1 < len(b) && (b[i+1] == '(' || (b[i+1] == '\'' && !dq)), c == '`':
+			return cmd
 		case c == '\\' && i+1 < len(b):
 			// An escaped quote is no quote: it's.
 			i++
@@ -699,6 +707,10 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		`    - x=it\'s t=$(mktemp)'y'`,
 		`    - case x in *) x=it\'s t=$(mktemp)'y';; esac`,
 		`    - case x in *) y="it's" t=$(mktemp);; esac`,
+		// Fifth review: quotes nested in a substitution, and $'...' (ash; dash has none).
+		`    - v="$(echo "it's")" t=$(mktemp)`,
+		`    - tag="$(echo a | tr "'" _)" t=$(mktemp)`,
+		`    - v=$'a\'b' t=$(mktemp)`,
 		`    - case x in *) t=$(mktemp);; esac`,
 		`    - echo $(case a in a) echo y;; esac)#x; trap "echo LEAK" EXIT`,
 		// A README fence line is sh, not YAML: its quotes are sh's
