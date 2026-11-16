@@ -448,6 +448,9 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		`"$HOME/setup" && echo "done"`,
 		`  script: [ "echo one", "echo two" ]`,
 		`  image: alpine:3.20`,
+		// A README line that is one quoted word is a command of that name to
+		// sh, not a trap: only a YAML value is unquoted as YAML.
+		`"trap 'x' EXIT"`,
 	} {
 		if leakedIntoJob.MatchString(line) {
 			t.Errorf("wrongly caught: %s", line)
