@@ -51,16 +51,6 @@ var (
 	// #315 review).
 	oneLinerShape = regexp.MustCompile(`(?m)^[ \t]*(?:- )?sh -c 't=\$\(mktemp\) && curl -sSfL -o "\$t" ` + pinnedScript + ` && (?:sudo )?sh "\$t" -b /usr/local/bin; s=\$\?; rm -f "\$t"; exit \$s'$`)
 	fixedName     = regexp.MustCompile(`-o +\.?/?assay-install\.sh`)
-	// Any variable holding a mktemp path, or a trap on EXIT (in any case,
-	// as sh reads signal names, or by its number 0, alone or among other
-	// signals) with a quoted or named handler, written as a line of its own
-	// (optionally a YAML list item, `export`ed, quoted, commented) -- the
-	// shapes a reader rewriting the four-line form would produce. A trap on
-	// TERM or INT alone is a job's own business, not the installer's
-	// leftover (main QA of 67e2cf6, 2026-11-13: `trap 'echo stopping' TERM`
-	// in an independent GitLab job was refused as one). Read over the
-	// install jobs only (installJobs).
-	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]+)?(?:export[ \t]+)?\w+="?\$\(mktemp\b|^[ \t]*(?:-[ \t]+)?trap[ \t]+(?:'[^'\n]*'|"(?:[^"\\\n]|\\.)*"|[A-Za-z_]\w*)(?:[ \t]+[A-Za-z0-9]+)*?[ \t]+(?i:EXIT|0)\b`)
 )
 
 // leakedInInstallJob is what the guard refuses in a document: the first
@@ -173,6 +163,26 @@ func TestInstallOneLiners_LeakGuardCatchesTheFourLineForm(t *testing.T) {
 		"    - trap 'rm -f \"$t\"' exit",
 		"    - trap \"rm -f \\\"$t\\\"\" EXIT",
 		"    - trap cleanup EXIT",
+		// A quoted signal name is the signal (main QA of f554fb2).
+		"    - trap 'echo cleanup' " + `"EXIT"`,
+		"    - trap 'echo cleanup' 'EXIT'",
+		"    - trap 'echo cleanup' 'TERM' " + `"EXIT"`,
+		"    - trap 'echo cleanup' \"0\"",
+		// PR #327 review: the POSIX option separator, a YAML-quoted item,
+		// and a trap after another command on the same line.
+		"    - trap -- 'rm -f \"$t\"' EXIT",
+		"    - trap -- 'rm -f \"$t\"' \"EXIT\"",
+		"    - \"trap 'rm -f \\\"$t\\\"' EXIT\"",
+		"    - set -e; trap 'rm -f \"$t\"' EXIT",
+		"    - true && trap 'rm -f \"$t\"' EXIT",
+		// Second review of PR #327: the mktemp half takes the same prefix,
+		// and a trap in a group, a compound body or after `&` is a trap.
+		"    - set -e; t=$(mktemp)",
+		"    - true && t=\"$(mktemp)\"",
+		"    - \"t=$(mktemp)\"",
+		"    - if true; then trap 'rm -f \"$t\"' EXIT; fi",
+		"    - { trap 'rm -f \"$t\"' EXIT; }",
+		"    - true & trap 'rm -f \"$t\"' EXIT",
 	} {
 		if !leakedIntoJob.MatchString(line + "\n") {
 			t.Errorf("leakedIntoJob does not catch %q", line)
@@ -188,6 +198,15 @@ func TestInstallOneLiners_LeakGuardCatchesTheFourLineForm(t *testing.T) {
 		"    - trap 'cleanup' INT TERM",
 		"    - trap - EXIT",
 		"    - trap 'echo' 10",
+		"    - trap 'echo stopping' " + `"TERM"`,
+		"    - trap 'echo' '10'",
+		"    - trap -- 'echo stopping' TERM",
+		"    - set -e; trap 'echo stopping' TERM",
+		"    - echo 'no trap here; exit 0'",
+		// A trap inside a quoted string -- a child shell's, or text -- is
+		// not the job shell's (second review of PR #327).
+		"    - sh -c 'd=$(mktemp -d); trap \"rm -rf $d\" EXIT; make'",
+		"    - echo \"a; trap 'x' EXIT\"",
 	} {
 		if leakedIntoJob.MatchString(line + "\n") {
 			t.Errorf("leakedIntoJob wrongly catches %q", line)
@@ -341,6 +360,9 @@ func TestInstallOneLiners_LeakGuardBlocksPerDocumentShape(t *testing.T) {
 		refused   bool
 	}{
 		{"second GitLab install job with an EXIT trap", gitlab + "\nsecond_scan:\n  before_script:\n    - trap 'rm -f \"$t\"' EXIT\n    - " + oneLiner + "\n  script:\n    - assay scan x > report.txt\n", true},
+		{"GitLab install job with a double-quoted EXIT", strings.Replace(gitlab, "    - "+oneLiner, "    - trap 'echo cleanup' \"EXIT\"\n    - "+oneLiner, 1), true},
+		{"GitLab install job with a single-quoted EXIT", strings.Replace(gitlab, "    - "+oneLiner, "    - trap 'echo cleanup' 'EXIT'\n    - "+oneLiner, 1), true},
+		{"GitLab install job with a quoted TERM", strings.Replace(gitlab, "    - "+oneLiner, "    - trap 'echo stopping' \"TERM\"\n    - "+oneLiner, 1), false},
 		{"second GitLab install job with a mktemp variable", gitlab + "\nsecond_scan:\n  before_script:\n    - t=$(mktemp)\n    - " + oneLiner + "\n", true},
 		{"README: a trap beside the one-liner in its fence", strings.Replace(readme, readmeLine, readmeLine+"\ntrap 'rm -f \"$t\"' EXIT", 1), true},
 		{"README: a mktemp variable opening the fence", strings.Replace(readme, readmeLine, "t=$(mktemp)\n"+readmeLine, 1), true},
