@@ -225,6 +225,10 @@ func TestRun_VEXUbuntuCodenameFromVersionlessAndEnclosingOS(t *testing.T) {
 		// document's own OS (the subject, 22.04 saying noble) gives none.
 		{"branch OS only jammy, subject noble on 22.04", branch(osOf("", "jammy"), apt), `,"metadata":{"component":` + osOf("22.04", "noble") + `}`, "JAMMY", true},
 		{"a codename-only noble OS", osOf("", "noble") + "," + apt, "", "JAMMY", false},
+		// A retired codename alone names 22.10, not the apt's 22.04
+		// (the QA's unversioned-kinetic input).
+		{"a codename-only kinetic OS, statement kinetic", osOf("", "kinetic") + "," + apt, "", "kinetic", false},
+		{"a codename-only kinetic OS, statement KINETIC", osOf("", "kinetic") + "," + apt, "", "KINETIC", false},
 		{"22.04 saying a codename no table knows", osOf("22.04", "tangy") + "," + apt, "", "tangy", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

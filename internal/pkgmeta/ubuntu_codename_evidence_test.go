@@ -21,9 +21,9 @@ func TestUbuntuCodenameOf(t *testing.T) {
 		{"ubuntu", "27.04", "tangy", "tangy"},              // a release newer than the tables
 		{"ubuntu", "22.04", ContradictedCodename, ContradictedCodename},
 		{"ubuntu", "22.04", "", ""},
-		{"ubuntu", "", "jammy", "jammy"},     // the codename names its release; the matcher holds it to the key
-		{"ubuntu", "", "kinetic", "kinetic"}, // so 22.10, which a 22.04 package's key refuses
-		{"ubuntu", "", "tangy", ""},          // nothing to hold an unknown codename to
+		{"ubuntu", "", "jammy", "jammy"}, // the codename names its release; the matcher holds it to the key
+		{"ubuntu", "", "kinetic", ""},    // retired: the matcher could not hold it to 22.10
+		{"ubuntu", "", "tangy", ""},      // nothing to hold an unknown codename to
 		{"debian", "12", "bookworm", ""},
 	} {
 		got := UbuntuCodenameOf(Distro{ID: tc.id, VersionID: tc.version, VersionCodename: tc.codename})

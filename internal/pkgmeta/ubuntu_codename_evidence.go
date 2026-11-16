@@ -41,6 +41,13 @@ func ubuntuCodenameRelease(codename string) string {
 	return ubuntuRetiredReleases[codename]
 }
 
+// UbuntuCodenameRelease is the YY.MM release an Ubuntu codename names in
+// either table -- the tracker's or the retired one -- or "" for a codename
+// neither knows.
+func UbuntuCodenameRelease(codename string) string {
+	return ubuntuCodenameRelease(strings.ToLower(codename))
+}
+
 // ubuntuReleaseHasCodename reports whether either table names release.
 func ubuntuReleaseHasCodename(release string) bool {
 	for _, table := range []map[string]string{UbuntuReleases(), ubuntuRetiredReleases} {
@@ -72,11 +79,13 @@ func UbuntuCodenameOf(d Distro) string {
 	codename := strings.ToLower(d.VersionCodename)
 	parts := strings.SplitN(d.VersionID, ".", 3)
 	if len(parts) < 2 {
-		// No version to hold it to: a codename either table names is the
-		// release it names, and the matcher holds that release to the
-		// package's key; one neither names proves nothing (PR #328 review:
-		// an OS of versionCodename=jammy alone had stopped counting).
-		if ubuntuCodenameRelease(codename) != "" {
+		// No version to hold it to: a codename of the tracker table names
+		// the release the matcher holds to the package's key (PR #328
+		// review: an OS of versionCodename=jammy alone had stopped
+		// counting). A retired one is no evidence here -- the matcher reads
+		// a codename the tracker table lacks as a newly named release, and
+		// kinetic alone had exempted a 22.04 install that way.
+		if UbuntuReleases()[codename] != "" {
 			return codename
 		}
 		return ""
