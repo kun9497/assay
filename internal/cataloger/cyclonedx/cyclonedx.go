@@ -1323,6 +1323,11 @@ func documentCodename(doc bom, release string) string {
 			case r == "":
 				codename = pkgmeta.MergeCodename(codename, d.VersionCodename)
 			case r == release:
+				// Held to its own version here and, merged, to the target's
+				// again in scancmd.vexTarget -- one release, so the second
+				// check alone reaches the same answer (a mutation dropping
+				// this survives); kept so the merge never carries a codename
+				// that names another release.
 				codename = pkgmeta.MergeCodename(codename, pkgmeta.UbuntuCodenameOf(*d))
 			}
 		}
