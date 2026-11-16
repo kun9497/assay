@@ -94,6 +94,7 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 		{"jammy under a library beside 22.04 and Debian 12", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), debian12(), branch(osc("", []prop{id, cn("jammy")}))), false},
 		{"jammy under a 24.04 whose id is empty", top22 + "," + apt + "," + branch(osc("24.04", []prop{{"syft:distro:id", ""}}, osc("", []prop{id, cn("jammy")}))), false},
 		{"top 22.04 jammy whose id is empty", osc("22.04", []prop{{"syft:distro:id", ""}, v("22.04"), cn("jammy")}) + "," + apt, true},
+		{"version-less jammy beside a Debian that contradicts itself", top22 + "," + apt + "," + branch(`{"type":"operating-system","name":"debian","properties":[{"name":"syft:distro:id","value":"debian"},{"name":"syft:distro:versionID","value":"11"},{"name":"syft:distro:versionID","value":"12"}]}`, osc("", []prop{id, cn("jammy")})), false},
 		{"version-less jammy anywhere, every OS 22.04", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), branch(osc("", []prop{id, cn("jammy")}))), true},
 		{"version-less jammy beside 22.04 and 24.04 siblings", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}), osc("", []prop{id, cn("jammy")})), false},
 		// Controls: the same value twice, an ordinary declaration, a
