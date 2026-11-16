@@ -150,7 +150,8 @@ All notable changes to this project are documented here. The format follows
   the spelling is read for the end-of-life cycle alone, since those releases have no advisory key,
   so it creates no key and no VEX alias. 4d823d1 (#326) had left both `EOL unknown` and exit 0,
   where `2.1` and `2.2` were refused with their 2000-10-30 and 2003-06-30 end of life. Lenny's
-  `5.0r10`, no Debian spelling, stays unknown. (main QA of 4d823d1, 2026-11-16)
+  `5.0r10`, no Debian spelling, stays unknown, and hamm's bare `2.0` now reaches its own cycle `2.0`
+  rather than `2`. (main QA of 4d823d1, 2026-11-16)
 
 
 ## [0.18.1] - 2026-11-12
