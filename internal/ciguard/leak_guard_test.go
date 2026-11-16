@@ -1,6 +1,7 @@
 package ciguard
 
 import (
+	"maps"
 	"regexp"
 	"strings"
 	"testing"
@@ -102,7 +103,7 @@ var assignmentWord = regexp.MustCompile(`^\w+=`)
 
 // FindString is the first line of text that leaks, "" when none does.
 func (leakGuard) FindString(text string) string {
-	state := shellState{vars: map[string]string{}, evaluating: map[string]bool{}}
+	state := shellState{vars: map[string]string{}, evaluating: map[string]bool{}, evalBytesLeft: 1 << 20}
 	for _, line := range logicalLines(text) {
 		if state.lineLeaks(line) {
 			return line
@@ -235,8 +236,9 @@ func closesSubstitution(s string, j int) bool {
 // shellState carries literal shell assignments between commands in one
 // install shell. Only eval interprets a stored string as shell commands.
 type shellState struct {
-	vars       map[string]string
-	evaluating map[string]bool
+	vars          map[string]string
+	evaluating    map[string]bool
+	evalBytesLeft int
 }
 
 func (state *shellState) lineLeaks(line string) bool {
@@ -270,7 +272,15 @@ func (state *shellState) lineLeaks(line string) bool {
 
 func (state *shellState) shellLeaks(s string) bool {
 	for _, cmd := range shellCommands(s) {
-		if state.commandLeaks(cmd) {
+		// Pipeline stages and asynchronous lists run in child shells.
+		// Only their parent can set what a later eval reads.
+		parent := state.vars
+		if cmd.child {
+			state.vars = maps.Clone(parent)
+		}
+		leaks := state.commandLeaks(cmd.text)
+		state.vars = parent
+		if leaks {
 			return true
 		}
 	}
@@ -334,21 +344,38 @@ func yamlUnquote(s string) string {
 	return s
 }
 
+type simpleCommand struct {
+	text  string
+	child bool
+}
+
 // shellCommands splits one line of sh into its simple commands at the
 // separators that end one outside quotes. A subshell `( ... )` at a
 // command's start is skipped whole, so a separator inside it does not split
 // off a command that is then read as the job shell's; a comment, from an
 // unquoted # that starts a word, ends the line.
-func shellCommands(s string) []string {
-	var cmds []string
+func shellCommands(s string) []simpleCommand {
+	var cmds []simpleCommand
 	var cur strings.Builder
 	quote := byte(0)
 	depth := 0
 	atStart := true
-	flush := func() {
+	listStart := 0
+	inPipe := false
+	flush := func(operator string) {
 		if c := strings.TrimSpace(cur.String()); c != "" {
-			cmds = append(cmds, c)
+			cmds = append(cmds, simpleCommand{text: c, child: inPipe || operator == "|"})
 		}
+		if operator == "&" {
+			// a && b & backgrounds the whole AND-OR list.
+			for i := listStart; i < len(cmds); i++ {
+				cmds[i].child = true
+			}
+		}
+		if operator == ";" || operator == "&" {
+			listStart = len(cmds)
+		}
+		inPipe = operator == "|"
 		cur.Reset()
 		atStart = true
 	}
@@ -387,13 +414,18 @@ func shellCommands(s string) []string {
 			depth = 1
 			continue
 		case c == '#' && commentStarts(s, i):
-			flush()
+			flush("")
 			return cmds
 		case c == '&' && i > 0 && (s[i-1] == '>' || s[i-1] == '<'):
 			// 2>&1, <&3: the redirection's, not a background operator
 			// (second review: 2>&1 t=$(mktemp) had split into "1 t=...").
 		case c == ';' || c == '&' || c == '|':
-			flush()
+			end := i + 1
+			if c != ';' && end < len(s) && s[end] == c {
+				end++
+			}
+			flush(s[i:end])
+			i = end - 1
 			continue
 		}
 		if c != ' ' && c != '\t' {
@@ -403,7 +435,7 @@ func shellCommands(s string) []string {
 			cur.WriteByte(c)
 		}
 	}
-	flush()
+	flush("")
 	return cmds
 }
 
@@ -493,23 +525,24 @@ func (state *shellState) commandLeaks(cmd string) bool {
 		}
 	}
 	if words[0] == "eval" {
-		var expanded []string
 		for i, raw := range raws[1:] {
 			if value, ok := state.variableWord(raw); ok {
-				// The same stored script trying to evaluate itself would
-				// keep the check (and the install example) from returning.
-				if state.evaluating[value] {
-					return true
-				}
 				words[i+1] = value
-				expanded = append(expanded, value)
+			}
+			// Bound total expanded code before allocating it. Even without
+			// a cycle, one stored script can invoke the next twice.
+			state.evalBytesLeft -= len(words[i+1]) + 1
+			if state.evalBytesLeft < 0 {
+				return true
 			}
 		}
-		for _, value := range expanded {
-			state.evaluating[value] = true
-			defer delete(state.evaluating, value)
+		script := strings.Join(words[1:], " ")
+		if state.evaluating[script] {
+			return true
 		}
-		return state.shellLeaks(strings.Join(words[1:], " "))
+		state.evaluating[script] = true
+		defer delete(state.evaluating, script)
+		return state.shellLeaks(script)
 	}
 	if words[0] != "trap" {
 		return false
@@ -719,11 +752,32 @@ eval "$cleanup_script"`, true},
 		{`cleanup='trap "echo cleanup" EXIT'; cleanup='echo ok'; eval "$cleanup"`, false},
 		{`cleanup='trap "echo cleanup" EXIT'; unset cleanup; eval "$cleanup"`, false},
 		{`cleanup='trap "echo cleanup" EXIT' env; eval "$cleanup"`, false},
+		{`cleanup='trap "echo cleanup" EXIT' | cat; eval "$cleanup"`, false},
+		{`true | cleanup='trap "echo cleanup" EXIT'; eval "$cleanup"`, false},
+		{`true && cleanup='trap "echo cleanup" EXIT' & wait; eval "$cleanup"`, false},
+		{`msg=hello; script='eval printf "%s" "$msg"'; eval "$script" "$msg"`, false},
 		{`cleanup='eval "$cleanup"'; eval "$cleanup"`, true},
 	} {
 		if got := leakedIntoJob.MatchString(tc.script); got != tc.leaks {
 			t.Errorf("leaks = %v, want %v for %q", got, tc.leaks, tc.script)
 		}
+	}
+}
+
+func TestLeakGuardBoundsStoredEvalExpansion(t *testing.T) {
+	// Each script evaluates the previous one twice. The input fits on a
+	// page but would execute the leaf command over a billion times.
+	var script strings.Builder
+	name := "a"
+	script.WriteString("a='echo ok'\n")
+	for i := 0; i < 30; i++ {
+		next := name + "a"
+		script.WriteString(next + "='eval \"$" + name + "\"; eval \"$" + name + "\"'\n")
+		name = next
+	}
+	script.WriteString("eval \"$" + name + "\"")
+	if !leakedIntoJob.MatchString(script.String()) {
+		t.Fatal("accepted an eval tree that exceeds the inspection budget")
 	}
 }
 
