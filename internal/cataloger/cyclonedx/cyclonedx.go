@@ -568,6 +568,14 @@ func mergePURL(kept, other, ecosystem string) string {
 		kp.Version = op.Version
 	}
 	for k, v := range op.Qualifiers {
+		// A distro= is the other vendor's own release statement when the
+		// namespaces differ, not this purl's (PR #329 review: the kept
+		// pkg:deb/ubuntu/apt with no distro= took pkg:deb/debian/apt's
+		// distro=jammy here, and the codename exempted it in one listing
+		// order only).
+		if k == "distro" && !strings.EqualFold(kp.Namespace, op.Namespace) {
+			continue
+		}
 		if _, stated := kp.Qualifiers[k]; !stated {
 			kp.Qualifiers[k] = v
 		}
@@ -580,7 +588,10 @@ func mergePURL(kept, other, ecosystem string) string {
 	// contradiction as `ubuntu-24.04`, and had passed here unrecognised.
 	if d, ok := kp.Qualifiers["distro"]; ok && ecosystem != "" && !language {
 		if eco, known := pkgmeta.EcosystemForDistroQualifier(pkgmeta.CanonicalDistroQualifier(d)); known && eco != ecosystem {
-			if od, ok := op.Qualifiers["distro"]; ok {
+			// Nor here, from another vendor's listing (second review of PR
+			// #329: a kept pkg:deb/ubuntu purl naming 24.04 took
+			// pkg:deb/debian's distro=jammy through this branch).
+			if od, ok := op.Qualifiers["distro"]; ok && strings.EqualFold(kp.Namespace, op.Namespace) {
 				if oeco, known := pkgmeta.EcosystemForDistroQualifier(pkgmeta.CanonicalDistroQualifier(od)); known && oeco == ecosystem {
 					kp.Qualifiers["distro"] = od
 					return kp.String()
@@ -589,7 +600,14 @@ func mergePURL(kept, other, ecosystem string) string {
 			delete(kp.Qualifiers, "distro")
 		}
 	}
-	if od, ok := op.Qualifiers["distro"]; ok && kp.Type == "deb" && pkgmeta.UbuntuCodename(od) != "" {
+	// The other listing must be the same vendor's: a deb purl's namespace
+	// names the distribution that built it, and an Ubuntu codename read off
+	// pkg:deb/debian/apt is not evidence about pkg:deb/ubuntu/apt (main QA
+	// of f554fb2, 2026-11-13: the two merged as one install and the debian
+	// listing's distro=jammy exempted the ubuntu one -- exit 0 or 1 by
+	// listing order).
+	if od, ok := op.Qualifiers["distro"]; ok && kp.Type == "deb" && strings.EqualFold(kp.Namespace, "ubuntu") &&
+		strings.EqualFold(op.Namespace, kp.Namespace) && pkgmeta.UbuntuCodename(od) != "" {
 		if kd := kp.Qualifiers["distro"]; pkgmeta.UbuntuCodename(kd) == "" &&
 			pkgmeta.CanonicalDistroQualifier(kd) == pkgmeta.CanonicalDistroQualifier(od) {
 			kp.Qualifiers["distro"] = od

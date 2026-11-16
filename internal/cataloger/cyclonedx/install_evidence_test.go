@@ -231,3 +231,21 @@ func TestMergedLanguageListingsKeepTheKeptUbuntuSpelling(t *testing.T) {
 		}
 	}
 }
+
+// Main QA of f554fb2 (2026-11-13): the codename is taken only from a listing
+// of the same vendor. pkg:deb/debian/apt?distro=jammy beside
+// pkg:deb/ubuntu/apt?distro=ubuntu-22.04 lends the ubuntu listing nothing,
+// in either order.
+func TestMergedListingsTakeTheCodenameOnlyFromTheSameVendor(t *testing.T) {
+	const (
+		ubuntu = "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-22.04"
+		debian = "pkg:deb/debian/apt@2.4.14?arch=amd64&distro=jammy"
+	)
+	for _, tc := range [][2]string{{ubuntu, debian}, {debian, ubuntu}} {
+		for _, p := range parseListingGroups(t, []string{tc[0]}, []string{tc[1]}) {
+			if p.PURL == "pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=jammy" {
+				t.Errorf("top %s, subject %s: the ubuntu listing took the debian listing's codename: %+v", tc[0], tc[1], p)
+			}
+		}
+	}
+}
