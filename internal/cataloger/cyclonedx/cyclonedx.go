@@ -1450,6 +1450,13 @@ func osDeclaration(c component) (osEvidence, bool) {
 	}
 	e.ubuntu = ids["ubuntu"]
 	e.conflict = e.conflict || len(ids) > 1 || len(versions) > 1
+	// A codename that names another release than the declaration's own
+	// version (24.04 jammy) contradicts it like two versions do (fifth
+	// review: it had only been left out, so the top's jammy still exempted).
+	if e.ubuntu && e.codename != "" && ubuntuRelease(e.version) != "" &&
+		pkgmeta.UbuntuCodenameOf(pkgmeta.Distro{ID: "ubuntu", VersionID: e.version, VersionCodename: e.codename}) == pkgmeta.ContradictedCodename {
+		e.conflict = true
+	}
 	return e, true
 }
 

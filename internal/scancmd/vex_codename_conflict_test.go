@@ -100,6 +100,11 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 		{"top jammy, a branch OS saying 24.04 and 22.04", top22j + "," + apt + "," + branch(osc("", []prop{id, v("24.04"), v("22.04")})), false},
 		{"top jammy, a branch OS of version 24.04 and syft 22.04", top22j + "," + apt + "," + branch(osc("24.04", []prop{id, v("22.04")})), false},
 		{"version-less top, 24 jammy beside 24.04 noble", osc("", []prop{id}) + "," + apt + "," + branch(osc("24", []prop{id, cn("jammy")}), osc("24.04", []prop{id, v("24.04"), cn("noble")})), false},
+		// Fifth review: a nameless OS that states a version is no Ubuntu
+		// 22.04, and a declaration whose codename names another release
+		// than its own version contradicts itself.
+		{"version-less jammy beside a nameless 24.04 OS", top22 + "," + apt + "," + branch(`{"type":"operating-system","version":"24.04"}`, osc("", []prop{id, cn("jammy")})), false},
+		{"top jammy, a branch OS of 24.04 saying jammy", top22j + "," + apt + "," + branch(osc("24.04", []prop{id, v("24.04"), cn("jammy")})), false},
 		{"version-less jammy anywhere, every OS 22.04", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), branch(osc("", []prop{id, cn("jammy")}))), true},
 		{"version-less jammy beside 22.04 and 24.04 siblings", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04")}), osc("24.04", []prop{id, v("24.04"), cn("noble")}), osc("", []prop{id, cn("jammy")})), false},
 		// Controls: the same value twice, an ordinary declaration, a
