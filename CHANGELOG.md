@@ -146,6 +146,16 @@ All notable changes to this project are documented here. The format follows
   on both sides: `trap --`, a trap after another command or in a compound body, and a partly
   quoted name let through; a trap inside `sh -c '...'` or a subshell refused. A TERM or INT trap
   still passes. The examples themselves are unchanged. (main QA of f554fb2, 2026-11-13)
+- VEX: an Ubuntu operating-system declaration in an SBOM gives codename evidence only when it is
+  consistent with itself and with the release of its nearest context. One component with two
+  different `syft:distro:versionID` or `syft:distro:id` values, or whose standard `version`
+  disagrees with syft's (24.04 against 22.04), contradicts itself; a stated version that names
+  no release (`24`) is no evidence; a declaration with no version belongs to the release of a
+  versioned Ubuntu OS beside it, else of its nearest versioned OS ancestor. 4d823d1 had taken
+  the last property's value and read a version-less declaration under a 24.04 parent as the
+  target's, so a branch's jammy exempted a numeric-only 22.04 apt (exit 1 to 0) and a branch's
+  noble cancelled a 22.04 jammy's own exemption (exit 0 to 1). (main QA of 4d823d1, 2026-11-16)
+
 
 ## [0.18.1] - 2026-11-12
 

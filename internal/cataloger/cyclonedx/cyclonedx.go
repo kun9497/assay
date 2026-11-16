@@ -1325,42 +1325,146 @@ func childContext(parent component, inherited osContext) osContext {
 // documentCodename is the Ubuntu codename the operating-system components of
 // doc state for release -- at any depth and in metadata.component -- merged
 // (pkgmeta.MergeCodename): "" when none states one, ContradictedCodename
-// when two disagree. A declaration counts when it is of that release, its
-// codename held to its own version first (pkgmeta.UbuntuCodenameOf: 22.04
-// saying noble contradicts itself), or when it states no version at all.
-// One of another release is left out: its packages carry their own key,
-// which the matcher holds a codename to, and counting it had let a 24.04
-// saying jammy lend jammy to 22.04 packages and a consistent 24.04 noble
-// cancel the target's own jammy (review of the redesign of PR #328).
+// when two disagree or one declaration contradicts itself.
+//
+// Each declaration is read whole (ubuntuDeclaration): two different ids or
+// VERSION_IDs on one component, or a standard version that disagrees with
+// syft's VERSION_ID, contradict it (2026-11-16 QA: the last property had won,
+// so a component saying 24.04 and 22.04 gave a 22.04 target jammy evidence
+// from a 24.04 branch -- exit 1 to 0). A stated version that names no release
+// (`24`) is no evidence either way. A declaration with no version belongs to
+// its nearest context's release -- a versioned Ubuntu OS among its siblings,
+// else its nearest versioned OS ancestor -- and its codename is held to that
+// release (2026-11-16 QA: a version-less noble under a 24.04 parent had
+// cancelled the top-level 22.04's own jammy, and a version-less jammy there
+// had given a numeric-only 22.04 its jammy). It counts when that release is
+// the target's or it has no context at all; one of another release is left
+// out: its packages carry their own key, which the matcher holds a codename
+// to (review of the redesign of PR #328).
 func documentCodename(doc bom, release string) string {
 	codename := ""
-	var walk func(cs []component)
-	visit := func(c component) {
-		if d := distroOf(c); d != nil && strings.EqualFold(d.ID, "ubuntu") {
-			switch r := ubuntuRelease(d.VersionID); {
-			case r == "":
-				codename = pkgmeta.MergeCodename(codename, d.VersionCodename)
-			case r == release:
-				// Held to its own version here and, merged, to the target's
-				// again in scancmd.vexTarget -- one release, so the second
-				// check alone reaches the same answer (a mutation dropping
-				// this survives); kept so the merge never carries a codename
-				// that names another release.
-				codename = pkgmeta.MergeCodename(codename, pkgmeta.UbuntuCodenameOf(*d))
+	const unreadable = "!unreadable"
+	var walk func(cs []component, inherited string)
+	walk = func(cs []component, inherited string) {
+		// The siblings' own versioned Ubuntu release is the nearer context.
+		local, ambiguous := "", false
+		for _, c := range cs {
+			if u, ok := ubuntuDeclaration(c); ok && u.version != "" {
+				r := ubuntuRelease(u.version)
+				if r == "" {
+					r = unreadable
+				}
+				switch {
+				case local == "":
+					local = r
+				case local != r:
+					ambiguous = true
+				}
 			}
 		}
-		walk(c.Components)
-	}
-	walk = func(cs []component) {
+		context := inherited
+		if local != "" && !ambiguous {
+			context = local
+		}
 		for _, c := range cs {
-			visit(c)
+			childContext := context
+			if u, ok := ubuntuDeclaration(c); ok {
+				r := ubuntuRelease(u.version)
+				switch {
+				case u.conflict:
+					codename = pkgmeta.MergeCodename(codename, pkgmeta.ContradictedCodename)
+				case u.version != "" && r == "":
+					// A version that names no release: no evidence, and none
+					// for what it holds.
+					childContext = unreadable
+				case u.version == "" && ambiguous:
+					// Siblings of two releases: this declaration belongs to
+					// neither provably.
+					if u.codename != "" {
+						codename = pkgmeta.MergeCodename(codename, pkgmeta.ContradictedCodename)
+					}
+				case u.version == "" && context == unreadable:
+				case u.version == "" && context == "":
+					codename = pkgmeta.MergeCodename(codename, u.codename)
+				case u.version == "":
+					if context == release {
+						codename = pkgmeta.MergeCodename(codename, pkgmeta.UbuntuCodenameOf(pkgmeta.Distro{ID: "ubuntu", VersionID: context, VersionCodename: u.codename}))
+					}
+				default:
+					childContext = r
+					if r == release {
+						// Held to its own version here and, merged, to the
+						// target's again in scancmd.vexTarget -- one release,
+						// so the second check alone reaches the same answer
+						// (a mutation dropping this survives); kept so the
+						// merge never carries a codename that names another
+						// release.
+						codename = pkgmeta.MergeCodename(codename, pkgmeta.UbuntuCodenameOf(pkgmeta.Distro{ID: "ubuntu", VersionID: u.version, VersionCodename: u.codename}))
+					}
+				}
+			}
+			walk(c.Components, childContext)
 		}
 	}
-	walk(doc.Components)
+	walk(doc.Components, "")
 	if doc.Metadata.Component != nil {
-		visit(*doc.Metadata.Component)
+		walk([]component{*doc.Metadata.Component}, "")
 	}
 	return codename
+}
+
+// ubuntuEvidence is what one operating-system component says about an Ubuntu
+// release: its version (syft's VERSION_ID, else the standard version), its
+// codename, and whether it contradicts itself.
+type ubuntuEvidence struct {
+	version, codename string
+	conflict          bool
+}
+
+// ubuntuDeclaration reads c as an Ubuntu operating-system declaration, false
+// when it is not one. Every value of a property is read, not the last: two
+// different syft:distro:id values (one of them ubuntu), two different
+// syft:distro:versionID values, or a standard version that neither includes
+// nor is included by syft's VERSION_ID (24.04 against 22.04; 22.04 and
+// 22.04.5 agree) is a conflict.
+func ubuntuDeclaration(c component) (ubuntuEvidence, bool) {
+	if c.Type != "operating-system" {
+		return ubuntuEvidence{}, false
+	}
+	var e ubuntuEvidence
+	ids, versions := map[string]bool{}, map[string]bool{}
+	for _, p := range c.Properties {
+		switch p.Name {
+		case "syft:distro:id":
+			ids[strings.ToLower(p.Value)] = true
+		case "syft:distro:versionID":
+			versions[p.Value] = true
+		case "syft:distro:versionCodename":
+			e.codename = pkgmeta.MergeCodename(e.codename, p.Value)
+		}
+	}
+	if len(ids) == 0 && c.Name != "" {
+		ids[strings.ToLower(c.Name)] = true
+	}
+	if !ids["ubuntu"] {
+		return ubuntuEvidence{}, false
+	}
+	e.conflict = len(ids) > 1 || len(versions) > 1
+	for v := range versions {
+		e.version = v
+	}
+	if e.version == "" {
+		e.version = c.Version
+	} else if c.Version != "" && !versionsAgree(e.version, c.Version) {
+		e.conflict = true
+	}
+	return e, true
+}
+
+// versionsAgree reports whether two spellings of an OS version name one
+// release: equal, or one a dotted refinement of the other.
+func versionsAgree(a, b string) bool {
+	return a == b || strings.HasPrefix(a, b+".") || strings.HasPrefix(b, a+".")
 }
 
 // ubuntuRelease is a VERSION_ID's YY.MM release ("22.04.5" is 22.04), or ""
