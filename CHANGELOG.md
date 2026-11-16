@@ -146,6 +146,12 @@ All notable changes to this project are documented here. The format follows
   on both sides: `trap --`, a trap after another command or in a compound body, and a partly
   quoted name let through; a trap inside `sh -c '...'` or a subshell refused. A TERM or INT trap
   still passes. The examples themselves are unchanged. (main QA of f554fb2, 2026-11-13)
+- `db build`'s `osv:` progress line names the records D16 dropped as withdrawn, per affected
+  ecosystem (`withdrawn (D16) by affected ecosystem: Echo:Go 241, ...`). When Echo withdrew
+  most of its language advisories on 2026-11-12, three nightlies were refused by the push guard
+  (Echo:Go 285 to 2) and none of their logs said why; telling an upstream withdrawal from a
+  fetch or parse fault took re-downloading the archive afterwards.
+
 
 ## [0.18.1] - 2026-11-12
 

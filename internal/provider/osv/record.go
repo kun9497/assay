@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -312,6 +313,7 @@ func convert(data []byte, wantEcosystem string, st *stats, tracker *ubuntuTracke
 	// false positive. Dropped here rather than at query time so no lookup path
 	// can forget the check (D16).
 	if r.Withdrawn != nil {
+		st.countWithdrawn(r.Affected)
 		return advisory.Advisory{}, false, nil
 	}
 
@@ -655,6 +657,53 @@ type stats struct {
 	// (echoNotAffectedSentinel's own comment). A build that stops seeing
 	// this count on an Echo fetch is a build whose upstream shape changed.
 	EchoNotAffectedSentinel int
+
+	// Withdrawn is D16's drop, counted per affected ecosystem as upstream
+	// names it (a record listing two counts under each). Without it a build
+	// whose key collapses says only that it collapsed: on 2026-11-15 Echo:Go
+	// went from 285 published advisories to 2 and the push guard refused,
+	// and telling an upstream withdrawal from a parse or fetch fault took a
+	// re-download of the archive, a day after the fact.
+	Withdrawn map[string]int
+}
+
+func (s *stats) countWithdrawn(affected []rawAffected) {
+	if s == nil {
+		return
+	}
+	if s.Withdrawn == nil {
+		s.Withdrawn = map[string]int{}
+	}
+	seen := map[string]bool{}
+	for _, a := range affected {
+		if e := a.Package.Ecosystem; !seen[e] {
+			seen[e] = true
+			s.Withdrawn[e]++
+		}
+	}
+}
+
+// withdrawnSummary is Withdrawn as "Echo:Go 241, Go 12", largest first,
+// ties by name, or "none".
+func (s stats) withdrawnSummary() string {
+	if len(s.Withdrawn) == 0 {
+		return "none"
+	}
+	keys := make([]string, 0, len(s.Withdrawn))
+	for k := range s.Withdrawn {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if s.Withdrawn[keys[i]] != s.Withdrawn[keys[j]] {
+			return s.Withdrawn[keys[i]] > s.Withdrawn[keys[j]]
+		}
+		return keys[i] < keys[j]
+	})
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s %d", k, s.Withdrawn[k])
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (s stats) String() string {
@@ -662,7 +711,8 @@ func (s stats) String() string {
 		"module streams (D82): %d module-tagged Rocky/AlmaLinux entr(y/ies) streamed from summary prose, "+
 			"%d record(s) left stream-less for no token, %d record(s) left stream-less for 2+ tokens; "+
 			"ubuntu fix state (D85): %d range(s) stamped wont-fix, %d range(s) stamped not-fixed; "+
-			"echo not-affected sentinel (D92): %d range(s) dropped for fixed:\"1\"",
+			"echo not-affected sentinel (D92): %d range(s) dropped for fixed:\"1\"; "+
+			"withdrawn (D16) by affected ecosystem: %s",
 		s.ModuleEntriesStreamed, s.ModuleRecordsZeroToken, s.ModuleRecordsMultiToken,
-		s.UbuntuStampedWontFix, s.UbuntuStampedNotFixed, s.EchoNotAffectedSentinel)
+		s.UbuntuStampedWontFix, s.UbuntuStampedNotFixed, s.EchoNotAffectedSentinel, s.withdrawnSummary())
 }
