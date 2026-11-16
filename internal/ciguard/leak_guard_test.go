@@ -710,6 +710,7 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 		// Fifth review: quotes nested in a substitution, and $'...' (ash; dash has none).
 		`    - v="$(echo "it's")" t=$(mktemp)`,
 		`    - tag="$(echo a | tr "'" _)" t=$(mktemp)`,
+		"    - v=\"`echo \"it's\"`\" t=$(mktemp)",
 		`    - v=$'a\'b' t=$(mktemp)`,
 		`    - case x in *) t=$(mktemp);; esac`,
 		`    - echo $(case a in a) echo y;; esac)#x; trap "echo LEAK" EXIT`,
