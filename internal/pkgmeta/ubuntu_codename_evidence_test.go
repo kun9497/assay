@@ -14,6 +14,7 @@ func TestUbuntuCodenameOf(t *testing.T) {
 		{"ubuntu", "22.04", "noble", ContradictedCodename},
 		{"ubuntu", "22.04", "kinetic", ContradictedCodename},
 		{"ubuntu", "22.10", "kinetic", "kinetic"},
+		{"ubuntu", "22.10", "lunar", ContradictedCodename}, // both retired: the table holds them to their releases
 		{"ubuntu", "16.04", "xenial", "xenial"},
 		{"ubuntu", "12.04", "precise", "precise"},
 		{"ubuntu", "22.04", "tangy", ContradictedCodename}, // 22.04 is named: jammy

@@ -122,3 +122,64 @@ ID=ubuntu
 		}
 	}
 }
+
+// The shapes the boundary table cannot reach with one list of components:
+// an OS of a retired release (22.10) whose codename names another retired
+// one, a top level of two releases beside a subject that is the jammy OS,
+// and the two listings of one apt -- at the top and under the subject --
+// whose own OS declarations say different things about the codename.
+func TestRun_VEXUbuntuCodenameAcrossListingsAndRetiredReleases(t *testing.T) {
+	osOf := func(version, codename string) string {
+		props := `{"name":"syft:distro:id","value":"ubuntu"},{"name":"syft:distro:versionID","value":"` + version + `"}`
+		if codename != "" {
+			props += `,{"name":"syft:distro:versionCodename","value":"` + codename + `"}`
+		}
+		return `{"type":"operating-system","name":"ubuntu","version":"` + version + `","properties":[` + props + `]}`
+	}
+	apt := func(release string) string {
+		return `{"type":"library","name":"apt","version":"2.4.14","purl":"pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-` + release + `"}`
+	}
+	subjectOf := func(children string) string {
+		return `,"metadata":{"component":{"type":"container","name":"subject","components":[` + children + `]}}`
+	}
+	for _, tc := range []struct {
+		name, key, top, meta, statement string
+		suppressed                      bool
+	}{
+		// 22.10 is kinetic; lunar is 23.04. Without the retired table a
+		// codename the tracker table does not know was accepted for a
+		// release it does not name.
+		{"22.10 OS saying lunar, statement lunar", "Ubuntu:22.10", osOf("22.10", "lunar") + "," + apt("22.10"), "", "lunar", false},
+		{"22.10 OS saying kinetic, statement kinetic", "Ubuntu:22.10", osOf("22.10", "kinetic") + "," + apt("22.10"), "", "kinetic", true},
+		// Two releases at the top: the apt there answers to neither OS's
+		// codename, though the subject is a jammy OS.
+		{"top 22.04 and 24.04, subject jammy", "Ubuntu:22.04:LTS", osOf("22.04", "jammy") + "," + osOf("24.04", "noble") + "," + apt("22.04"), `,"metadata":{"component":` + osOf("22.04", "jammy") + `}`, "JAMMY", false},
+		// One apt, two listings: the subject's own OS states jammy while the
+		// top's states none -- the merged install carries jammy; and a top
+		// jammy beside a subject OS contradicting itself carries nothing.
+		{"top OS no codename, subject OS jammy", "Ubuntu:22.04:LTS", osOf("22.04", "") + "," + apt("22.04"), subjectOf(osOf("22.04", "jammy") + "," + apt("22.04")), "JAMMY", true},
+		{"top OS jammy, subject OS noble on 22.04", "Ubuntu:22.04:LTS", osOf("22.04", "jammy") + "," + apt("22.04"), subjectOf(osOf("22.04", "noble") + "," + apt("22.04")), "JAMMY", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := vexDB(t, tc.key, vexAdv{"UBUNTU-2031-0107", "CVE-2031-9107", "apt", "2.4.99"})
+			want := pair{"apt", "CVE-2031-9107"}
+			p := filepath.Join(t.TempDir(), "sbom.cdx.json")
+			doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[` + tc.top + `]` + tc.meta + `}`
+			if err := os.WriteFile(p, []byte(doc), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			var out, errOut bytes.Buffer
+			code := Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnUnknown: true,
+				VEXFiles: []string{writeVEX(t, stmt("CVE-2031-9107", product("pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro="+tc.statement)))}}, &out, &errOut)
+			var rep report.Document
+			if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+				t.Fatalf("stdout is not one JSON document: %v\nstderr: %s", err, errOut.String())
+			}
+			sup, kept := suppressedPairs(rep), pairsOf(rep.Findings)
+			if sup[want] != tc.suppressed || kept[want] == tc.suppressed {
+				t.Fatalf("suppressed = %v, kept = %v, exit %d; want suppressed %v\nstderr: %s",
+					sup[want], kept[want], code, tc.suppressed, errOut.String())
+			}
+		})
+	}
+}
