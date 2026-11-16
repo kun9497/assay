@@ -157,6 +157,11 @@ All notable changes to this project are documented here. The format follows
   the last property's value and read a version-less declaration under a 24.04 parent as the
   target's, so a branch's jammy exempted a numeric-only 22.04 apt (exit 1 to 0) and a branch's
   noble cancelled a 22.04 jammy's own exemption (exit 0 to 1). (main QA of 4d823d1, 2026-11-16)
+- `db build`'s `osv:` progress line names the records D16 dropped as withdrawn, per affected
+  ecosystem (`withdrawn (D16) by affected ecosystem: Echo:Go 241, ...`). When Echo withdrew
+  most of its language advisories on 2026-11-12, three nightlies were refused by the push guard
+  (Echo:Go 285 to 2) and none of their logs said why; telling an upstream withdrawal from a
+  fetch or parse fault took re-downloading the archive afterwards.
 - `--fail-on-eol` reaches Debian slink and potato as their archive spells them (`2.1r5`, `2.2r7`):
   the spelling is read for the end-of-life cycle alone, since those releases have no advisory key,
   so it creates no key and no VEX alias. 4d823d1 (#326) had left both `EOL unknown` and exit 0,
