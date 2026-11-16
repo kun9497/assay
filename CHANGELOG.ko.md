@@ -114,6 +114,10 @@
   에서만 읽고, 주석은 다음 줄로 이어지지 않습니다. 4d823d1는 격리된 `sh -c 'set -eu; t=$(mktemp); trap "rm -f $t" EXIT; ...'`
   단계와 `t=$(mktemp)`를 언급하는 `printf`를 거부했고, 역슬래시로 끝나는 YAML 주석 다음 줄의 실제 `trap ... EXIT`를 두 줄을
   이어 붙여 놓쳤습니다. 예제 자체는 바뀌지 않았습니다. (main 4d823d1 QA, 2026-11-16)
+- `db build`의 `osv:` 진행 줄이 D16으로 버린 withdrawn 레코드 수를 영향 생태계별로 보여 줍니다
+  (`withdrawn (D16) by affected ecosystem: Echo:Go 241, ...`). Echo가 2026-11-12에 언어 advisory 대부분을 철회했을 때
+  nightly 세 번이 push 가드에 거부됐지만(Echo:Go 285 → 2) 어느 로그도 이유를 말하지 않았고, 업스트림 철회와 수집·파싱
+  오류를 구분하려면 나중에 아카이브를 다시 받아야 했습니다.
 - `--fail-on-eol`이 아카이브 표기(`2.1r5`, `2.2r7`)로 적힌 Debian slink·potato에도 닿습니다. 이 표기는 EOL 주기 조회에만
   쓰입니다. 두 릴리스에는 advisory 키가 없으므로 키나 VEX 별칭을 만들지 않습니다. 4d823d1(#326)는 둘 다 `EOL unknown`·종료
   0으로 두었고, `2.1`·`2.2`는 2000-10-30·2003-06-30 EOL로 거부됐습니다. Debian이 쓰지 않은 lenny의 `5.0r10`은 계속

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -312,6 +313,7 @@ func convert(data []byte, wantEcosystem string, st *stats, tracker *ubuntuTracke
 	// false positive. Dropped here rather than at query time so no lookup path
 	// can forget the check (D16).
 	if r.Withdrawn != nil {
+		st.countWithdrawn(data, wantEcosystem)
 		return advisory.Advisory{}, false, nil
 	}
 
@@ -655,6 +657,77 @@ type stats struct {
 	// (echoNotAffectedSentinel's own comment). A build that stops seeing
 	// this count on an Echo fetch is a build whose upstream shape changed.
 	EchoNotAffectedSentinel int
+
+	// Withdrawn is D16's drop, counted per store key a record would have
+	// filled (countWithdrawn): once per record under each key this archive
+	// is the family of. A record shipped in several archives is so counted
+	// once per key, not once per archive (review of the branch: npm+PyPI
+	// archives had each counted both). Without it a build
+	// whose key collapses says only that it collapsed: on 2026-11-15 Echo:Go
+	// went from 285 published advisories to 2 and the push guard refused,
+	// and telling an upstream withdrawal from a parse or fetch fault took a
+	// re-download of the archive, a day after the fact.
+	Withdrawn map[string]int
+}
+
+// countWithdrawn counts a withdrawn record under each key it would have
+// filled had it not been withdrawn: the record is converted again without
+// its withdrawn field, with no stats and no tracker, and the keys of what
+// comes back that this archive is the family of are counted, once each. So
+// every live filter -- MAL-* (D15), ALBA/ALEA (D72), nameless and lineage
+// entries, the Echo sentinel (D92), GIT-only ranges -- applies here too,
+// with no second copy of it to drift (third review: the sentinel and
+// GIT-only entries had been counted though the live path stores neither).
+func (s *stats) countWithdrawn(data []byte, wantEcosystem string) {
+	if s == nil {
+		return
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(data, &fields) != nil {
+		return
+	}
+	delete(fields, "withdrawn")
+	live, err := json.Marshal(fields)
+	if err != nil {
+		return
+	}
+	a, ok, err := convert(live, wantEcosystem, nil, nil)
+	if err != nil || !ok {
+		return
+	}
+	if s.Withdrawn == nil {
+		s.Withdrawn = map[string]int{}
+	}
+	seen := map[string]bool{}
+	for _, af := range a.Affected {
+		if e := af.Ecosystem; familyMatches(e, wantEcosystem) && !seen[e] {
+			seen[e] = true
+			s.Withdrawn[e]++
+		}
+	}
+}
+
+// withdrawnSummary is Withdrawn as "Echo:Go 241, Go 12", largest first,
+// ties by name, or "none".
+func (s stats) withdrawnSummary() string {
+	if len(s.Withdrawn) == 0 {
+		return "none"
+	}
+	keys := make([]string, 0, len(s.Withdrawn))
+	for k := range s.Withdrawn {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if s.Withdrawn[keys[i]] != s.Withdrawn[keys[j]] {
+			return s.Withdrawn[keys[i]] > s.Withdrawn[keys[j]]
+		}
+		return keys[i] < keys[j]
+	})
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = fmt.Sprintf("%s %d", k, s.Withdrawn[k])
+	}
+	return strings.Join(parts, ", ")
 }
 
 func (s stats) String() string {
@@ -662,7 +735,8 @@ func (s stats) String() string {
 		"module streams (D82): %d module-tagged Rocky/AlmaLinux entr(y/ies) streamed from summary prose, "+
 			"%d record(s) left stream-less for no token, %d record(s) left stream-less for 2+ tokens; "+
 			"ubuntu fix state (D85): %d range(s) stamped wont-fix, %d range(s) stamped not-fixed; "+
-			"echo not-affected sentinel (D92): %d range(s) dropped for fixed:\"1\"",
+			"echo not-affected sentinel (D92): %d range(s) dropped for fixed:\"1\"; "+
+			"withdrawn (D16) by affected ecosystem: %s",
 		s.ModuleEntriesStreamed, s.ModuleRecordsZeroToken, s.ModuleRecordsMultiToken,
-		s.UbuntuStampedWontFix, s.UbuntuStampedNotFixed, s.EchoNotAffectedSentinel)
+		s.UbuntuStampedWontFix, s.UbuntuStampedNotFixed, s.EchoNotAffectedSentinel, s.withdrawnSummary())
 }

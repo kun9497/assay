@@ -152,6 +152,11 @@ All notable changes to this project are documented here. The format follows
   trap "rm -f $t" EXIT; ...'` step and a `printf` mentioning `t=$(mktemp)`, and let through a real
   `trap ... EXIT` on the line after a YAML comment ending in a backslash, which joined the two.
   The examples themselves are unchanged. (main QA of 4d823d1, 2026-11-16)
+- `db build`'s `osv:` progress line names the records D16 dropped as withdrawn, per affected
+  ecosystem (`withdrawn (D16) by affected ecosystem: Echo:Go 241, ...`). When Echo withdrew
+  most of its language advisories on 2026-11-12, three nightlies were refused by the push guard
+  (Echo:Go 285 to 2) and none of their logs said why; telling an upstream withdrawal from a
+  fetch or parse fault took re-downloading the archive afterwards.
 - `--fail-on-eol` reaches Debian slink and potato as their archive spells them (`2.1r5`, `2.2r7`):
   the spelling is read for the end-of-life cycle alone, since those releases have no advisory key,
   so it creates no key and no VEX alias. 4d823d1 (#326) had left both `EOL unknown` and exit 0,
