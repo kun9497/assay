@@ -138,9 +138,9 @@ func (d Distro) Ecosystem() (string, error) {
 			return "", fmt.Errorf("%w: distro %q has no VERSION_ID (testing or sid), "+
 				"and OSV publishes no ecosystem for it", ErrNoEcosystem, d.ID)
 		}
-		// Debian spelled a point release of these with an "r" before
-		// squeeze moved to a third number -- the archive's Release files
-		// say 3.0r6, 3.1r8, 4.0r9, 5.0r10 -- and an SBOM naming etch as the
+		// Debian spelled a point release of woody, sarge and etch with an
+		// "r" before lenny moved to a third number -- the archive's Release
+		// files say 3.0r6, 3.1r8, 4.0r9 -- and an SBOM naming etch as the
 		// archive does was refused here (main QA of 67e2cf6, 2026-11-13:
 		// --fail-on-eol fell silent on it, exit 0 where ef0bc1a had exit
 		// 1). The revision is a point of the release, as 6.0.10 is of 6.0,

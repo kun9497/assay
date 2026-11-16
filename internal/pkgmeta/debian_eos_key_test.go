@@ -35,7 +35,7 @@ func TestDistro_DebianEcosystemKeySpelling(t *testing.T) {
 }
 
 // Main QA of 67e2cf6 (2026-11-13): Debian's archive spells the point
-// releases before squeeze with an "r" (the etch Release file says 4.0r9),
+// releases before lenny with an "r" (the etch Release file says 4.0r9),
 // and a VERSION_ID or SBOM version of that shape names the release -- it
 // had been refused as "no two-part release", and --fail-on-eol fell silent
 // on it. A bare "3" (woody or sarge) and sid stay refused, and so do the
