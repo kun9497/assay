@@ -771,21 +771,26 @@ func (d Distro) Ecosystem() (string, error) {
 	return "Alpine:v" + major + "." + minor, nil
 }
 
-// debianRevisionPoint is the "rN" point-release spelling Debian used before
-// squeeze (4.0r9, the archive's own) as the three-number spelling it moved
-// to (4.0.9), or "" for any other string. Only a two-number release
-// followed by "r" and digits qualifies: "4.0r", "4.0rc1" and "4r9" are not
-// Debian spellings and stay as written, to be refused by the digit checks.
+// debianRevisionPoint is the "rN" point-release spelling Debian used for
+// woody, sarge and etch (3.0r6, 3.1r8, 4.0r9, the archive's own) as the
+// three-number spelling it moved to with lenny (4.0.9), or "" for any other
+// string. Only those three releases qualify: lenny's point releases are
+// 5.0.1 to 5.0.10 and squeeze's 6.0.1 to 6.0.10, so "5.0r10" or "6.0r10" is
+// no Debian spelling, and reading it as 6.0.10 had made it an alias a VEX
+// statement could exempt a squeeze install by (main QA of f554fb2,
+// 2026-11-13: DLA-53-1 suppressed, exit 1 to 0, on a 6.0r10 statement).
+// "4.0r", "4.0rc1" and "4r9" stay as written too, to be refused by the
+// digit checks.
 func debianRevisionPoint(v string) string {
 	release, rev, ok := strings.Cut(v, "r")
 	if !ok || !allDigits(rev) {
 		return ""
 	}
-	major, minor, ok := strings.Cut(release, ".")
-	if !ok || !allDigits(major) || !allDigits(minor) {
-		return ""
+	switch release {
+	case "3.0", "3.1", "4.0":
+		return release + "." + rev
 	}
-	return release + "." + rev
+	return ""
 }
 
 func allDigits(s string) bool {
