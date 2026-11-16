@@ -654,6 +654,16 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 	}
 
 	for _, p := range t.Packages {
+		if p.OSConflict != "" {
+			res.Skipped = append(res.Skipped, Skipped{Package: p, Cause: SkipTarget,
+				Reason: p.OSConflict})
+			continue
+		}
+		if p.AmbiguousOS && p.Ecosystem == "" {
+			res.Skipped = append(res.Skipped, Skipped{Package: p, Cause: SkipTarget,
+				Reason: fmt.Sprintf("the SBOM declares multiple OS families or releases in the context of %s %s, and its purl does not identify which release it belongs to", p.Name, p.Version)})
+			continue
+		}
 		cmp, ok := version.For(p.Ecosystem)
 		if !ok {
 			res.Skipped = append(res.Skipped, Skipped{

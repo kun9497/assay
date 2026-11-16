@@ -111,6 +111,9 @@ func TestRun_VEXUbuntuCodenameFromConflictingDeclarations(t *testing.T) {
 		// standard version its VERSION_ID refines.
 		{"versionID 22.04 twice", top22 + "," + apt + "," + branch(osc("", []prop{id, v("22.04"), v("22.04"), cn("jammy")})), true},
 		{"ordinary top-level 22.04 jammy", top22j + "," + apt, true},
+		{"standard vendor disagrees with the nonempty ID", top22 + "," + apt + "," + branch(strings.Replace(osc("22.04", []prop{id, {"syft:distro:id", ""}, cn("jammy")}), `"name":"ubuntu"`, `"name":"debian"`, 1)), false},
+		{"nameless Syft version blocks unbound codename", top22 + "," + apt + "," + branch(`{"type":"operating-system","properties":[{"name":"syft:distro:versionID","value":"24.04"}]}`, osc("", []prop{id, cn("jammy")})), false},
+		{"compatible repeated versions", top22 + "," + apt + "," + branch(osc("22.04", []prop{id, v("22.04.5"), v("22.04"), cn("jammy")})), true},
 		{"standard version 22.04.5, syft 22.04", osc("22.04.5", []prop{id, v("22.04"), cn("jammy")}) + "," + apt, true},
 		// Issue 2: a version-less declaration under a 24.04 parent, the parent
 		// in a branch as the QA built it (beside the top OS it would make the

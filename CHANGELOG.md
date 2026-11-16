@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- CycloneDX package assignment and Ubuntu VEX now read the same OS evidence. Repeated
+  compatible versions such as 22.04 and 22.04.5 agree. When an OS contradicts itself or multiple OS releases apply
+  and the package has no independent release, the scan reports why it was not evaluated
+  and exits 2 under `--fail-on-incomplete=target`. A package explicitly attributed to a
+  declared release outside database coverage, such as Debian sid, remains a separate
+  unevaluated installation alongside its Debian 12 counterpart. Merged Debian package listings with
+  different vendor namespaces cannot use a package VEX exemption for either vendor.
 - Debian releases before 7 are keyed the way OSV and the store spell them -- `Debian:3.0`, `3.1`,
   `4.0`, `5.0`, `6.0` -- from a purl's codename (`distro=etch`) or a `VERSION_ID` of that shape.
   An SBOM naming etch, lenny or squeeze had asked for `Debian:4`, `5`, `6`, which nothing holds,
@@ -154,7 +161,7 @@ All notable changes to this project are documented here. The format follows
   The examples themselves are unchanged. (main QA of 4d823d1, 2026-11-16)
 - VEX: an Ubuntu operating-system declaration in an SBOM gives codename evidence only when it is
   consistent with itself and attributable to the target's release, by one rule over the whole
-  document. One component with two different `syft:distro:versionID` or `syft:distro:id`
+  document. One component with incompatible `syft:distro:versionID` or `syft:distro:id`
   values, or whose standard `version` disagrees with syft's (24.04 against 22.04), contradicts
   itself and voids the evidence; a versioned declaration counts for its own release; a
   declaration with no version counts only when every OS the document declares is Ubuntu of the

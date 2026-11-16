@@ -24,6 +24,22 @@ type Package struct {
 	// DistroContext retains the local OS evidence separately from the (often
 	// coarser) advisory key. Only CycloneDX has nested OS declarations.
 	DistroContext DistroScope `json:"-"`
+	// OSConflict records why ambiguous or contradictory local OS evidence supplied
+	// no advisory key. Refreshing the database cannot resolve it.
+	OSConflict string `json:"-"`
+	// AmbiguousOS means this listing is beside several valid OS releases.
+	// Unlike a self-contradiction, a unique qualified twin can resolve it.
+	AmbiguousOS bool `json:"-"`
+	// UncoveredRelease identifies a known installation for which no advisory
+	// key exists. It cannot be a second listing of another, covered release.
+	UncoveredRelease string `json:"-"`
+	// MixedDebVendors marks a merged CycloneDX package whose listings name
+	// different Debian PURL namespaces. No single vendor PURL identifies it.
+	MixedDebVendors bool `json:"-"`
+	// VEXDebSource overrides Source for VEX after a Debian listing with
+	// an explicit vendor was merged with one that stated none. An empty
+	// override means the named vendor gave no source.
+	VEXDebSource *SourcePackage `json:"-"`
 	// Arch is the architecture the package database records (apk A:, dpkg
 	// Architecture:, rpm ARCH, pacman %ARCH%). Read only to spell the purl's
 	// "arch" qualifier (D121); never part of a lookup key.
@@ -96,6 +112,15 @@ type Package struct {
 	// judges nothing for it, rather than picking a side (D25: never by
 	// arrival order). Empty for every ordinary package.
 	Unevaluable string
+}
+
+// VEXSource returns the source whose identity and version can be attributed
+// to the vendor on the package's PURL.
+func (p *Package) VEXSource() *SourcePackage {
+	if p.VEXDebSource != nil {
+		return p.VEXDebSource
+	}
+	return p.Source
 }
 
 type SourcePackage struct {
