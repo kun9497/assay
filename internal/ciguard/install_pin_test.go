@@ -51,27 +51,6 @@ var (
 	// #315 review).
 	oneLinerShape = regexp.MustCompile(`(?m)^[ \t]*(?:- )?sh -c 't=\$\(mktemp\) && curl -sSfL -o "\$t" ` + pinnedScript + ` && (?:sudo )?sh "\$t" -b /usr/local/bin; s=\$\?; rm -f "\$t"; exit \$s'$`)
 	fixedName     = regexp.MustCompile(`-o +\.?/?assay-install\.sh`)
-	// Any variable holding a mktemp path, or a trap on EXIT (in any case,
-	// as sh reads signal names, or by its number 0, alone or among other
-	// signals, quoted or not -- sh reads `"EXIT"` and `'EXIT'` as EXIT, and
-	// main QA of f554fb2 (2026-11-13) found both let through) with a quoted
-	// or named handler, after `trap --` too -- either of them written as a
-	// line of its own or after another command on it (`set -e; trap ...`,
-	// `... && trap ...`, `x & trap ...`), in a group or a compound command's
-	// body (`{ trap ...; }`, `if ...; then trap ...`), as a YAML scalar quoted
-	// or not (PR #327 reviews). The separator is looked for only outside
-	// quotes: a trap inside `sh -c '...'` is the child shell's, and refusing
-	// it had been a false positive the second review found
-	// (optionally a YAML list item, `export`ed, quoted, commented) -- the
-	// shapes a reader rewriting the four-line form would produce. A trap on
-	// TERM or INT alone is a job's own business, not the installer's
-	// leftover (main QA of 67e2cf6, 2026-11-13: `trap 'echo stopping' TERM`
-	// in an independent GitLab job was refused as one). Read over the
-	// install jobs only (installJobs). Not matched, deliberately: a signal
-	// name quoted in part or escaped (`"EX"IT`, `E'XIT'`, `\EXIT`, `$'EXIT'`),
-	// which the shell also reads as EXIT -- no one writes those, and matching
-	// them would mean re-implementing quote removal here.
-	leakedIntoJob = regexp.MustCompile(`(?m)^[ \t]*(?:-[ \t]+)?["']?(?:[^\n'"]*?(?:;|&&|\|\||&)[ \t]*)?(?:(?:\{|\(|then|do|else)[ \t]+)*(?:export[ \t]+)?\w+="?\$\(mktemp\b|^[ \t]*(?:-[ \t]+)?["']?(?:[^\n'"]*?(?:;|&&|\|\||&)[ \t]*)?(?:(?:\{|\(|then|do|else)[ \t]+)*trap[ \t]+(?:--[ \t]+)?(?:'[^'\n]*'|"(?:[^"\\\n]|\\.)*"|[A-Za-z_]\w*)(?:[ \t]+["']?[A-Za-z0-9]+["']?)*?[ \t]+["']?(?i:EXIT|0)\b`)
 )
 
 // leakedInInstallJob is what the guard refuses in a document: the first
