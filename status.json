@@ -1,27 +1,27 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-16T07:05:11.512707377Z",
+  "generatedAt": "2026-11-16T14:36:06.59044896Z",
   "lastRun": {
     "workflow": "db-publish",
     "result": "success",
-    "finishedAt": "2026-11-16T07:05:11.512707377Z",
-    "url": "https://github.com/kun9497/assay/actions/runs/43812294488"
+    "finishedAt": "2026-11-16T14:36:06.59044896Z",
+    "url": "https://github.com/kun9497/assay/actions/runs/43877742669"
   },
   "lastSuccess": {
     "workflow": "db-publish",
     "result": "success",
-    "finishedAt": "2026-11-16T07:05:11.512707377Z",
-    "url": "https://github.com/kun9497/assay/actions/runs/43812294488"
+    "finishedAt": "2026-11-16T14:36:06.59044896Z",
+    "url": "https://github.com/kun9497/assay/actions/runs/43877742669"
   },
   "published": {
     "reference": "ghcr.io/kun9497/assay-db:v9",
-    "digest": "sha256:048bb6a05a54421727e48abd526ebdd77b60271e360fc210e313ca47a27e19e9",
+    "digest": "sha256:111cdcc5387c94a0807dc6568e9892e3675d55f85c0ad960cc25bf76413b88f0",
     "schemaVersion": 9,
-    "builtAt": "2026-11-16T05:48:04Z",
+    "builtAt": "2026-11-16T13:41:05Z",
     "dataAsOf": "2025-03-06T10:10:00Z",
     "dataAsOfSource": "Amazon Linux ALAS",
     "signed": true,
     "signedBy": "9b71ca8e11cf3bcf",
-    "observedAt": "2026-11-16T07:05:11.512707377Z"
+    "observedAt": "2026-11-16T14:36:06.59044896Z"
   }
 }
