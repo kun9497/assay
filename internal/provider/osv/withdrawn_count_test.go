@@ -57,9 +57,22 @@ func TestStats_WithdrawnSummaryNone(t *testing.T) {
 	if got := (stats{}).withdrawnSummary(); got != "none" {
 		t.Errorf("withdrawnSummary of nothing = %q, want none", got)
 	}
+	aff := func(ecos ...string) []rawAffected {
+		var out []rawAffected
+		for _, e := range ecos {
+			var a rawAffected
+			a.Package.Ecosystem = e
+			out = append(out, a)
+		}
+		return out
+	}
 	var st stats
-	st.countWithdrawn([]rawAffected{{}, {}})
-	if st.Withdrawn[""] != 1 {
-		t.Errorf("two affected entries of one ecosystem counted %d, want 1", st.Withdrawn[""])
+	// One record, three entries: two of npm count once; PyPI belongs to
+	// another archive; an Ubuntu lineage key is never indexed.
+	st.countWithdrawn(aff("npm", "npm", "PyPI", "Ubuntu:Pro:18.04:LTS"), "npm")
+	st.countWithdrawn(aff("npm", "npm", "PyPI", "Ubuntu:Pro:18.04:LTS"), "PyPI")
+	st.countWithdrawn(aff("Packagist:https://packages.drupal.org/8"), "Packagist")
+	if got := st.withdrawnSummary(); got != "Packagist 1, PyPI 1, npm 1" {
+		t.Errorf("withdrawnSummary = %q, want %q", got, "Packagist 1, PyPI 1, npm 1")
 	}
 }

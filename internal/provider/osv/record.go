@@ -313,7 +313,7 @@ func convert(data []byte, wantEcosystem string, st *stats, tracker *ubuntuTracke
 	// false positive. Dropped here rather than at query time so no lookup path
 	// can forget the check (D16).
 	if r.Withdrawn != nil {
-		st.countWithdrawn(r.Affected)
+		st.countWithdrawn(r.Affected, wantEcosystem)
 		return advisory.Advisory{}, false, nil
 	}
 
@@ -658,8 +658,12 @@ type stats struct {
 	// this count on an Echo fetch is a build whose upstream shape changed.
 	EchoNotAffectedSentinel int
 
-	// Withdrawn is D16's drop, counted per affected ecosystem as upstream
-	// names it (a record listing two counts under each). Without it a build
+	// Withdrawn is D16's drop, counted per store key a record would have
+	// filled: once per record under each affected ecosystem this archive is
+	// the family of (familyMatches), Packagist folded as it is stored, Ubuntu
+	// lineage keys -- never indexed -- left out. A record shipped in several
+	// archives is so counted once per key, not once per archive (review of
+	// the branch: npm+PyPI archives had each counted both). Without it a build
 	// whose key collapses says only that it collapsed: on 2026-11-15 Echo:Go
 	// went from 285 published advisories to 2 and the push guard refused,
 	// and telling an upstream withdrawal from a parse or fetch fault took a
@@ -667,7 +671,7 @@ type stats struct {
 	Withdrawn map[string]int
 }
 
-func (s *stats) countWithdrawn(affected []rawAffected) {
+func (s *stats) countWithdrawn(affected []rawAffected, wantEcosystem string) {
 	if s == nil {
 		return
 	}
@@ -676,7 +680,11 @@ func (s *stats) countWithdrawn(affected []rawAffected) {
 	}
 	seen := map[string]bool{}
 	for _, a := range affected {
-		if e := a.Package.Ecosystem; !seen[e] {
+		e := a.Package.Ecosystem
+		if ubuntuLineage(e) || !familyMatches(e, wantEcosystem) {
+			continue
+		}
+		if e = foldPackagistEcosystem(e); !seen[e] {
 			seen[e] = true
 			s.Withdrawn[e]++
 		}
