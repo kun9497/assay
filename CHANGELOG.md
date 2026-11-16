@@ -106,6 +106,20 @@ All notable changes to this project are documented here. The format follows
   `versionCodename=jammy` all along. A codename that contradicts the OS version, an OS with no
   codename, and an OS declared only in another branch of the document (D166) still exempt
   nothing. (main QA of 67e2cf6, 2026-11-13)
+- `internal/ciguard`'s guard on the CI examples reads the install job only and refuses a trap on
+  EXIT (or `0`), not every trap: 67e2cf6 refused `trap 'echo stopping' TERM` in an independent
+  GitLab job of the example as the installer's leftover. The four-line install form (`t=$(mktemp)`
+  and `trap 'rm -f "$t"' EXIT` in the calling shell) is still refused inside the install job;
+  the examples themselves are unchanged. (main QA of 67e2cf6, 2026-11-13)
+- VEX: the Ubuntu codename an SBOM gives as evidence is what every Ubuntu operating-system
+  declaration in it says -- versioned or not, at any depth, the subject's included -- and none
+  when two disagree; and it holds only for the release it names. A 22.04 OS saying `kinetic`
+  (22.10, which the build had not known and took at its word), two different codenames on one OS
+  component (CycloneDX lets a property repeat; the last had won), and a document whose branches,
+  parents or siblings name `jammy` and `noble` all exempt nothing now, in any order or nesting;
+  f554fb2 had let each turn exit 1 into 0 under a codename statement. A codename-only OS names the
+  release its codename does. An SBOM with no Ubuntu OS naming the target gives no codename
+  evidence, as before. (main QA of f554fb2, 2026-11-13)
 - Debian's archive spelling of a point release before lenny -- `4.0r9`, `3.1r8`, `3.0r6`, as
   the etch Release file says -- names its release (`Debian:4.0`, `3.1`, `3.0`) in a `VERSION_ID`,
   an SBOM's operating-system version or a purl's `distro=` qualifier, where 67e2cf6 had refused it
@@ -114,11 +128,6 @@ All notable changes to this project are documented here. The format follows
   exit 1. The revision is a point of the release (`debian-4.0` includes `debian-4.0r9`; a
   statement for `debian-4.0r9` is a point statement); a bare `3` and sid stay refused. (main QA
   of 67e2cf6, 2026-11-13)
-- `internal/ciguard`'s guard on the CI examples reads the install job only and refuses a trap on
-  EXIT (or `0`), not every trap: 67e2cf6 refused `trap 'echo stopping' TERM` in an independent
-  GitLab job of the example as the installer's leftover. The four-line install form (`t=$(mktemp)`
-  and `trap 'rm -f "$t"' EXIT` in the calling shell) is still refused inside the install job;
-  the examples themselves are unchanged. (main QA of 67e2cf6, 2026-11-13)
 - Debian's `rN` point-release spelling is read only for woody, sarge and etch (`3.0r6`, `3.1r8`,
   `4.0r9`), the keyed releases that used it (slink and potato used it too, and have no key).
   Lenny and squeeze spell their points with three numbers (`5.0.10`, `6.0.10`); f554fb2 had read `6.0r10` as `6.0.10`, so a VEX statement written with that

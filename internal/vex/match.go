@@ -442,7 +442,17 @@ func qualifierMatches(pkg pkgmeta.PURL, k, v, codename string, installed *pkgmet
 			}
 			v = "ubuntu-" + ubuntuReleases[cn]
 		} else if v == codename && codename != "" {
-			// A newly named Ubuntu release read from the image itself.
+			// A newly named Ubuntu release read from the image itself -- or
+			// a retired one the tracker table leaves out, which still names
+			// its own release and must match the package's key (PR #328
+			// review: kinetic, 22.10, had exempted a 22.04 install here). Defence in depth: since
+			// UbuntuCodenameOf gives no evidence for a retired codename without
+			// a version, no catalog reaches this with one that disagrees with the
+			// key, so through Run it is equivalent; TestQualifierMatchesHoldsARetiredCodenameToItsRelease
+			// holds it directly.
+			if r := pkgmeta.UbuntuCodenameRelease(v); r != "" && installed.Ecosystem != "" {
+				return installed.Ecosystem == "Ubuntu:"+r || strings.HasPrefix(installed.Ecosystem, "Ubuntu:"+r+":")
+			}
 			return installed.Ecosystem == "" || strings.HasPrefix(installed.Ecosystem, "Ubuntu:")
 		}
 	}

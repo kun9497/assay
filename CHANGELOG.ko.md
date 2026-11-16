@@ -79,16 +79,23 @@
   문서가 이미지에서는 advisory 2건을 억제하고 SBOM에서는 0건이었습니다(OS 컴포넌트에 `versionCodename=jammy`가
   있었는데도). OS 버전과 모순되는 코드네임, 코드네임 없는 OS, 문서의 다른 분기에만 선언된 OS(D166)는
   여전히 아무것도 면제하지 않습니다. (main 67e2cf6 QA, 2026-11-13)
+- `internal/ciguard`의 CI 예제 가드가 설치 잡만 읽고 EXIT(또는 `0`) trap만 거부합니다(모든 trap이 아니라):
+  67e2cf6는 예제의 독립된 GitLab 잡에 넣은 `trap 'echo stopping' TERM`을 설치기의 잔재로 거부했습니다.
+  네 줄 설치 형태(호출 셸의 `t=$(mktemp)`와 `trap 'rm -f "$t"' EXIT`)는 설치 잡 안에서 여전히 거부되며,
+  예제 자체는 바뀌지 않았습니다. (main 67e2cf6 QA, 2026-11-13)
+- VEX: SBOM이 증거로 주는 Ubuntu 코드네임은 그 안의 모든 Ubuntu operating-system 선언 -- 버전이 있든 없든, 어느 깊이든,
+  subject 포함 -- 이 말하는 값이며, 둘이 다르면 아무 증거도 아닙니다. 또 그것이 가리키는 릴리스에만 유효합니다. 22.04 OS의
+  `kinetic`(22.10 -- 빌드가 kinetic을 몰라 그대로 믿었습니다), 한 OS 컴포넌트의 서로 다른 두 코드네임(CycloneDX는 속성
+  이름 반복을 허용하며 마지막 값이 이겼습니다), 분기·부모·형제가 `jammy`와 `noble`을 함께 적은 문서는 이제 어떤 순서나
+  중첩이든 아무것도 면제하지 않습니다. f554fb2는 이들 각각에서 코드네임 문장으로 종료 1을 0으로 바꿨습니다. 코드네임만 있는
+  OS는 그 코드네임이 가리키는 릴리스입니다. 대상을 가리키는 Ubuntu OS가 없는 SBOM은 전과 같이 코드네임 증거를 주지
+  않습니다. (main f554fb2 QA, 2026-11-13)
 - lenny 이전 포인트 릴리스의 Debian 아카이브 표기 -- etch의 Release 파일이 적는 `4.0r9`, `3.1r8`,
   `3.0r6` -- 가 `VERSION_ID`, SBOM의 operating-system 버전, purl의 `distro=` 어디서든 해당 릴리스
   (`Debian:4.0`, `3.1`, `3.0`)를 가리킵니다. 67e2cf6는 이를 릴리스가 아니라고 거부해, 아카이브 표기대로
   etch를 적은 SBOM이 `--fail-on-eol`에서 `EOL unknown`·종료 0이 됐습니다(ef0bc1a는 2010-02-15 EOL·종료 1).
   리비전은 릴리스의 포인트입니다(`debian-4.0`이 `debian-4.0r9`를 포함하고, `debian-4.0r9` 문장은 포인트 문장).
   맨 `3`과 sid는 여전히 거부됩니다. (main 67e2cf6 QA, 2026-11-13)
-- `internal/ciguard`의 CI 예제 가드가 설치 잡만 읽고 EXIT(또는 `0`) trap만 거부합니다(모든 trap이 아니라):
-  67e2cf6는 예제의 독립된 GitLab 잡에 넣은 `trap 'echo stopping' TERM`을 설치기의 잔재로 거부했습니다.
-  네 줄 설치 형태(호출 셸의 `t=$(mktemp)`와 `trap 'rm -f "$t"' EXIT`)는 설치 잡 안에서 여전히 거부되며,
-  예제 자체는 바뀌지 않았습니다. (main 67e2cf6 QA, 2026-11-13)
 - Debian의 `rN` 포인트 릴리스 표기는 그것을 쓴 키 있는 릴리스인 woody·sarge·etch(`3.0r6`, `3.1r8`, `4.0r9`)에만
   읽습니다(slink·potato도 썼지만 키가 없습니다). lenny와 squeeze는 포인트를 세 숫자로 적습니다(`5.0.10`, `6.0.10`). f554fb2는 `6.0r10`을 `6.0.10`으로 읽어, 이 비공식 별칭으로
   쓴 VEX 문장이 squeeze 설치를 면제했고(DLA-53-1 억제, 종료 1 → 0) `5.0r10`은 lenny 설치를 면제했습니다. 이제 그런

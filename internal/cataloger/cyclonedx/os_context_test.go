@@ -3,6 +3,8 @@ package cyclonedx
 import (
 	"strings"
 	"testing"
+
+	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
 // D166: the Target's own distro -- what the report's EOL line and coverage
@@ -96,9 +98,11 @@ func TestParse_D166_TargetDistroCarriesTheCodename(t *testing.T) {
 		{"codename on the second of two declarations", start + `"components":[` + bare + `,` + jammy + `,` + apt + `]}`, wantOS, "jammy"},
 		{"codename on the first of two declarations", start + `"components":[` + jammy + `,` + bare + `,` + apt + `]}`, wantOS, "jammy"},
 		// Two declarations of 22.04 that disagree on the codename carry
-		// none, in either order (PR #323 review).
-		{"jammy then noble", start + `"components":[` + jammy + `,` + noble + `,` + apt + `]}`, wantOS, ""},
-		{"noble then jammy", start + `"components":[` + noble + `,` + jammy + `,` + apt + `]}`, wantOS, ""},
+		// a contradiction, in either order (PR #323 review; main QA of
+		// f554fb2: a contradiction, not none, so no later listing papers
+		// over it).
+		{"jammy then noble", start + `"components":[` + jammy + `,` + noble + `,` + apt + `]}`, wantOS, pkgmeta.ContradictedCodename},
+		{"noble then jammy", start + `"components":[` + noble + `,` + jammy + `,` + apt + `]}`, wantOS, pkgmeta.ContradictedCodename},
 		{"jammy, bare, JAMMY", start + `"components":[` + jammy + `,` + bare + `,` + jammyUpper + `,` + apt + `]}`, wantOS, "jammy"},
 		{"no codename property", start + `"components":[` + bare + `,` + apt + `]}`, wantOS, ""},
 		{"OS only in an unrelated branch", start + `"components":[{"type":"application","name":"a","components":[` + jammy + `]},` + apt + `]}`, noOS, ""},
