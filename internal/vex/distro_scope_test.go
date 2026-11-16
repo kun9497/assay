@@ -91,3 +91,23 @@ func TestDistroQualifierScope(t *testing.T) {
 		})
 	}
 }
+
+// The matcher's newly-named-release branch holds a codename the tracker
+// table leaves out, but the retired table names, to that release: kinetic
+// (22.10) is evidence for a 22.10 install and not for a 22.04 one, whatever
+// the scan's codename evidence says (PR #328 review).
+func TestQualifierMatchesHoldsARetiredCodenameToItsRelease(t *testing.T) {
+	p, err := pkgmeta.ParsePURL("pkg:deb/ubuntu/apt@2.4.14?arch=amd64&distro=ubuntu-22.04")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		key  string
+		want bool
+	}{{"Ubuntu:22.04:LTS", false}, {"Ubuntu:22.10", true}, {"Ubuntu:22.1", false}} {
+		pkg := pkgmeta.Package{Ecosystem: tc.key}
+		if got := qualifierMatches(p, "distro", "kinetic", "kinetic", &pkg); got != tc.want {
+			t.Errorf("kinetic statement, kinetic evidence, key %s: %v, want %v", tc.key, got, tc.want)
+		}
+	}
+}
