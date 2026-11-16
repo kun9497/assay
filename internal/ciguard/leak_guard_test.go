@@ -212,10 +212,6 @@ func closesSubstitution(s string, j int) bool {
 			open = append(open, k > 0 && s[k-1] == '$')
 		case c == ')' && len(open) > 0:
 			open = open[:len(open)-1]
-		case c == ')':
-			// Unpaired: the reading is lost, so no ) after it is trusted
-			// as a subshell's.
-			return true
 		}
 	}
 	// A ) that pairs with nothing -- a case pattern's inside $( ) has
