@@ -133,11 +133,8 @@ func shellCommands(s string) []string {
 			}
 			continue
 		case c == '(' && atStart:
-			// Equivalent to leaving the subshell in: a command that starts
-			// with ( is neither trap nor an assignment, so commandLeaks
-			// refuses it either way (a mutation dropping this survives).
-			// Kept so a separator inside the subshell does not split it
-			// into commands that would then be read.
+			// Skipped whole: a separator inside the subshell must not split
+			// off a command that is then read as the job shell's.
 			depth = 1
 			continue
 		case c == '#' && (i == 0 || s[i-1] == ' ' || s[i-1] == '\t' || s[i-1] == ';'):
@@ -270,6 +267,7 @@ func TestLeakGuardReadsLinesAsShDoes(t *testing.T) {
 	for _, line := range []string{
 		`    - ( trap 'rm -f "$t"' EXIT; make )`,
 		`    - (trap 'x' EXIT; make)`,
+		`    - ( make; trap 'x' EXIT )`, // the trap is the subshell's, after a separator inside it
 		`    # see note; trap 'x' EXIT`,
 		`    - make # then trap 'x' EXIT`,
 		`    - sh -c 'd=$(mktemp -d); trap "rm -rf $d" EXIT; make'`,
