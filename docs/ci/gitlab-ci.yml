@@ -1,47 +1,31 @@
-# Example: scan a container image with assay in GitLab CI, keep the report as
-# a job artifact, and fail the pipeline on a high-or-worse finding.
-#
-# Copy the `assay_scan` job into your own .gitlab-ci.yml and adjust IMAGE.
-#
-# GitLab has no built-in SARIF ingestion the way GitHub's Security tab does,
-# so this keeps the JSON report as a downloadable artifact (and a SARIF one
-# for tools that read it). The build verdict comes from assay's exit code.
+# Copy this job into .gitlab-ci.yml and set IMAGE and PLATFORM to your deployed image.
 assay_scan:
   image: alpine:3.20
   variables:
-    IMAGE: alpine:3.19 # <-- the image to scan
+    IMAGE: mirror.gcr.io/library/alpine@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1
+    PLATFORM: linux/amd64
   before_script:
-    # openssl is what install.sh verifies the release's checksums signature
-    # with (D137). The alpine image does not ship the binary, and without it
-    # the installer refuses to install rather than skip the check.
     - apk add --no-cache curl openssl
-    # The commit the latest release was built from, as in the README (the
-    # release job keeps it current) -- never a branch, which moves. One
-    # `sh -c` line: the temporary file, the download, the run and the
-    # clean-up live and die inside it, and the line's status is the
-    # install's. GitLab runs before_script and script in ONE shell, so a
-    # variable or an EXIT trap set here would reach the job's own steps:
-    # in the QA job that found this, a later step put report.txt in t and
-    # the installer's trap deleted it at exit (main QA of ef0bc1a,
-    # 2026-11-13).
     - sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/8766ae564f172fef7a67ccc0b1e9b0d66910c2bb/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=8766ae564f172fef7a67ccc0b1e9b0d66910c2bb") && sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
-    - assay --version
+    - assay version
   script:
-    # Pulls the published database from ghcr.io/kun9497/assay-db — a public
-    # artifact, no login needed. If your network cannot reach ghcr.io, run
-    # `assay db build` instead (slower, needs no external artifact).
     - assay db update
-    # Produce both reports; the exit code (captured) decides the verdict.
-    - assay scan "$IMAGE" --output json  > assay.json
+    - assay db status --output json
     - |
-      set +e
-      assay scan "$IMAGE" --output sarif --fail-on high > assay.sarif
-      code=$?
-      # exit 1 = finding at/above threshold, 2 = scan untrustworthy; both fail.
-      exit $code
+      report_dir="assay-reports-$CI_JOB_ID"
+      mkdir "$report_dir"
+      verdict=0
+      for format in json sarif; do
+        code=0
+        assay scan "$IMAGE" --platform "$PLATFORM" --config none --fail-on high --fail-on-incomplete --output "$format" > "$report_dir/current" || code=$?
+        if [ "$code" -gt "$verdict" ]; then verdict=$code; fi
+        if [ ! -s "$report_dir/current" ]; then break; fi
+        mv "$report_dir/current" "$report_dir/assay.$format"
+      done
+      exit "$verdict"
   artifacts:
-    when: always # keep the report even when the gate fails the job
+    when: always
     paths:
-      - assay.json
-      - assay.sarif
+      - assay-reports-$CI_JOB_ID/assay.json
+      - assay-reports-$CI_JOB_ID/assay.sarif
     expire_in: 30 days

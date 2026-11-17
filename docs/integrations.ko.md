@@ -17,44 +17,32 @@ finding이 모두 waive된 스캔(`summary.suppressed`)이나 컴포넌트가 �
 - **[GitLab CI](ci/gitlab-ci.yml)** — 잡에서 스캔, 리포트를 아티팩트로 보관, 종료 코드로
   파이프라인 실패 판정.
 
-두 예제 모두 README의 한 줄 설치와 같이 최신 릴리스를 빌드한 커밋에서 `assay`를 설치합니다(릴리스
-잡이 셋을 함께 최신으로 유지합니다). 브랜치 이름을 쓰면 아래에서 움직입니다. GitLab 잡은
-`openssl`도 설치하는데, `install.sh`가 릴리스 checksums 서명을 그것으로 검증하고(D137) `alpine`
-이미지에는 그 실행 파일이 없기 때문입니다 — 없으면 설치 스크립트는 검증을 건너뛰지 않고 설치를
-거부합니다.
+두 예제는 서명된 CLI를 설치하고 공개 DB를 내려받아 서명을 확인한 뒤 DB 상태를 출력합니다.
+`IMAGE`에는 배포할 이미지의 다이제스트를, `PLATFORM`에는 배포할 플랫폼을 지정하세요. 예제의
+`--config none`은 작업 디렉터리의 면제 규칙을 적용하지 않습니다. 팀에서 면제를 관리하면
+`--config <경로>`로 검토한 파일을 지정하세요.
 
-## 한 줄 패턴
+## 이미지 스캔 정책
 
-```bash
-assay scan <target> --fail-on high        # high 이상이면 exit 1, 신뢰 불가면 exit 2
+```sh
+assay scan "$IMAGE" --platform "$PLATFORM" --config none --fail-on high --fail-on-incomplete --output json > assay.json
 ```
 
-`<target>`은 레지스트리 이미지, `docker-archive:`/`oci-dir:` 경로, SBOM, 바이너리,
-디렉터리입니다. `--output sarif`(또는 `json`)를 붙이면 기계가 읽는 리포트를 stdout으로
-내보내니 파일로 리다이렉트하세요. `--fail-on` 외에 `--fail-on-kev`, `--fail-on-epss <n>`,
-`--fail-on-eol`, `--fail-on-unfixable[=wont-fix]`도 있으며, 게이트할 만큼 조합하면 됩니다.
+High 또는 Critical 경고가 있으면 종료 코드는 1입니다. 패키지나 권고를 평가하지 못했거나
+매니페스트를 읽지 못한 경우, 또는 실행 오류가 발생한 경우는 종료 2이며 이 판정이 우선합니다.
+불완전 평가 중 스캔 대상에서 비롯된 원인만 실패 처리하려면 `--fail-on-incomplete=target`을
+사용하세요. 추가로 `--fail-on-kev`, `--fail-on-epss <n>`, `--fail-on-eol`,
+`--fail-on-unfixable[=wont-fix]`를 정책에 포함할 수 있습니다.
 
-## findings 기록 먼저, 게이트는 그다음 — 순서가 중요
+## CI 보고서
 
-GitHub 예제는 스캔을 한 번 돌려 SARIF를 파일로 쓴 뒤, 종료 코드로 빌드를 실패시키기
-**전에** `if: always()`로 그 파일을 업로드합니다. 의도적입니다: 게이트에서 실패하는
-빌드라도 findings는 기록으로 남아야지, 버려져서는 안 됩니다. 실패한 스텝 뒤에 업로드하거나
-`--fail-on`이 업로드 전에 중단시키면, Security 탭이 존재하는 이유인 그 기록을 잃습니다.
+[GitHub Actions](ci/github-actions.yml)의 스캔 단계는 Assay의 종료 코드를 그대로 반환합니다. SARIF가 생성되면
+정책에 걸려도 다음 단계가 이를 업로드합니다. 이 단계를 사용하려면 저장소에서 코드 스캐닝이
+활성화되어 있어야 합니다. 보고서를 만들기 전 실패하면 작업 로그에서 오류를 확인하세요.
 
-```yaml
-- name: Scan
-  id: scan
-  run: |
-    set +e
-    assay scan "$IMAGE" --output sarif --fail-on high > assay.sarif
-    echo "exit_code=$?" >> "$GITHUB_OUTPUT"
-- name: Upload SARIF
-  if: always()
-  uses: github/codeql-action/upload-sarif@v3
-  with: { sarif_file: assay.sarif, category: assay }
-- name: Fail on findings
-  run: exit ${{ steps.scan.outputs.exit_code }}
-```
+[GitLab CI](ci/gitlab-ci.yml) 잡은 JSON과 SARIF를 다운로드할 수 있는 아티팩트로 보관합니다.
+두 형식에 같은 이미지 다이제스트·플랫폼·DB·정책을 적용하고 종료 코드 중 큰 값을 반환합니다.
+스캔이 보고서를 생성하기 전에 실패하면 그 시점에 반복을 끝냅니다.
 
 `$IMAGE`가 이 파이프라인이 온전히 신뢰하지 않는 타깃을 댈 수 있다면 — PR이 넘기는 태그,
 조직 바깥의 레지스트리 — `--timeout <duration>`을 추가하십시오(D112): 읽기는 이미 크기로

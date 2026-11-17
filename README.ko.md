@@ -39,15 +39,23 @@ sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$
 v0.18.1 또는 v0.18.2 태그의 설치 스크립트를 root로 실행한 경우, 위 명령을 다시 실행하면
 빌드 러너 소유 바이너리를 root 소유 파일로 교체합니다.
 
+sudo가 없는 러너에서는 설치 명령의 `sudo sh "$t" -b /usr/local/bin`을
+`sh "$t" -b "$HOME/.local/bin"`으로 바꾸고, 스캔 스텝에서 `export PATH="$HOME/.local/bin:$PATH"`를 실행하세요.
+
 Windows에서는(이 스크립트를 처음 싣는 v0.12.0부터) PowerShell 5.1이나 7에서:
 
 ```powershell
 & { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/8766ae564f172fef7a67ccc0b1e9b0d66910c2bb/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=8766ae564f172fef7a67ccc0b1e9b0d66910c2bb" }; & ([scriptblock]::Create($s)) }
 ```
 
-`install.ps1`은 같은 서명을 .NET으로 검증하므로 먼저 설치할 것이 없고, `assay.exe`를
-`%LOCALAPPDATA%\Programs\assay`에 설치합니다(`$env:ASSAY_INSTALL_DIR`로 바꾸고,
-`$env:ASSAY_VERSION`으로 다른 릴리스를 고릅니다). 그다음 PATH에 넣는 명령을 출력합니다.
+`install.ps1`은 .NET으로 서명을 검증하고 `%LOCALAPPDATA%\Programs\assay`에 설치합니다.
+`$env:ASSAY_INSTALL_DIR`로 디렉터리를, `$env:ASSAY_VERSION`으로 릴리스를 지정할 수 있습니다.
+빠른 시작을 실행하기 전에 현재 PowerShell 세션의 PATH에 설치 디렉터리를 추가하세요.
+설치 경로를 바꿨다면 아래 기본 경로 대신 그 디렉터리를 넣으세요.
+
+```powershell
+$env:Path = (Join-Path $env:LOCALAPPDATA 'Programs\assay') + ';' + $env:Path
+```
 
 **GitHub 다운로드 시간이 초과되면** Git·Python 3·curl을 사용해 아래 명령을 실행하세요. `assay-install`이 아직 없는 디렉터리에서 시작하고, 각 명령이 성공한 뒤 다음 명령을 실행합니다. Git 경로로 고정한 설치 스크립트를 가져오므로 raw 호스트와 공개 API에 연결할 수 없을 때도 사용할 수 있습니다.
 
@@ -75,26 +83,62 @@ git clone https://github.com/kun9497/assay.git && cd assay && make build   # -> 
 
 ## 빠른 시작
 
-```bash
-# 1. 취약점 데이터베이스 받기 (수 초 — 발행된 OCI 아티팩트를 당겨오고
-#    assay 에 내장된 키로 서명을 검증)
+위 설치 명령을 CI 러너에서 실행한 뒤, 아래 블록을 셸 스텝 하나로 실행하세요.
+GHCR에서 서명된 DB를 받고 공개 Alpine 이미지를 스캔합니다. Docker 데몬이나 로그인은 필요 없습니다.
+새 러너에는 DB를 저장할 디스크 공간을 수 GiB 확보하세요.
+실제 빌드에서는 `IMAGE`를 방금 레지스트리에 푸시한 이미지의 다이제스트 참조로, `--platform`을 배포할 플랫폼으로 바꾸세요.
+
+```sh
+set -e
+assay version
 assay db update
+assay db status --output json > assay-db.json
 
-# 2. 스캔
-assay scan alpine:3.19                    # 레지스트리 이미지
-assay scan --platform linux/arm64 alpine:3.19   # 멀티 플랫폼 이미지의 다른 플랫폼
-ASSAY_REGISTRY_AUTH_TOKEN=$TOKEN assay scan registry.example.com/team/app:1.0   # 프라이빗 레지스트리
-assay scan docker-archive:image.tar       # 로컬 tarball — 네트워크 없음
-assay scan sbom.cdx.json                  # CycloneDX 또는 SPDX SBOM
-assay scan ./my-service                   # Go 바이너리, 또는 lockfile이 있는 디렉터리
-
-# 3. CI 게이트 — 임계 이상이면 exit 1, 신뢰할 수 없으면 exit 2
-assay scan alpine:3.19 --fail-on high
+IMAGE='mirror.gcr.io/library/alpine@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1'
+assay scan "$IMAGE" --platform linux/amd64 --config none \
+  --fail-on high --fail-on-incomplete --output json > assay-report.json
 ```
 
-`assay scan`은 결과를 stdout, 진단을 stderr로 보내므로
-`assay scan … --output json | jq`가 깨끗하게 유지됩니다. `--output`은 `sarif`(GitHub 코드
-스캐닝용)와 `table`(기본값)도 지원하고, `--explain`은 한 finding의 전체 근거를 보여줍니다.
+`db update`는 DB를 설치하기 전에 서명을 검증합니다. `assay-db.json`의 `artifact.signature` 값은
+`verified`여야 합니다. `artifact.digest`와 `artifact.signedBy`에서 DB와 서명 키를 확인할 수 있습니다.
+`--config none`은 체크아웃의 `.assay.yaml`이 탐지 결과를 면제하는 일을 방지합니다.
+
+| 스캔 종료 코드 | 위 옵션을 적용한 CI 판정 |
+|---|---|
+| `0` | **통과.** 면제되지 않은 High·Critical 탐지와 불완전 평가가 없습니다. 더 낮은 등급의 취약점은 있을 수 있습니다. |
+| `1` | **실패.** 면제되지 않은 High·Critical 탐지가 있습니다. 보고서의 `findings`를 확인하세요. |
+| `2` | **실패.** 스캔을 끝낼 수 없었거나 평가가 불완전합니다. stderr와, 보고서가 있으면 `summary`와 `skipped`를 확인하세요. `1`보다 우선합니다. |
+
+스캔을 스텝의 마지막 명령으로 두세요. JSON을 읽거나 업로드하는 일은 실패 시에도 실행되는 별도 스텝에 두면 됩니다.
+`jq`에 파이프로 연결하면 스캔 종료 코드가 가려질 수 있고, 초기에 실패하면 보고서 파일이 비어 있을 수 있습니다.
+`summary.components`에서 인벤토리 크기를, `inventoryScope`에서 이미지 스캔 범위를 확인하세요.
+심각도 기준 없이 결과를 보려면 `assay scan "$IMAGE" --platform linux/amd64`를 실행하세요.
+이미지를 고정해도 DB가 갱신되면 탐지 결과가 달라질 수 있습니다.
+
+<details>
+<summary>PowerShell CI 스텝에서 실행하기</summary>
+
+앞선 스텝에서 설치했다면 위 설치 절의 PATH 추가 명령을 이 스텝에서도 실행하세요.
+
+```powershell
+$ErrorActionPreference = 'Stop'
+assay db update
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+assay db status
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$image = 'mirror.gcr.io/library/alpine@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1'
+assay scan $image --platform linux/amd64 --config none --fail-on high --fail-on-incomplete
+exit $LASTEXITCODE
+```
+
+</details>
+
+[GitHub Actions 워크플로](docs/ci/github-actions.yml)는 코드 스캔이 활성화된 저장소에 SARIF를 업로드합니다.
+[GitLab CI 잡](docs/ci/gitlab-ci.yml)은 보고서를 잡 아티팩트로 보관합니다. 두 예제 모두 설치 단계가 포함돼 있습니다.
+푸시 전에 로컬 Docker 빌드를 검사하려면 `docker save -o image.tar my-app:ci`로 저장하고
+위 스캔의 입력을 `docker-archive:image.tar`로 바꾸세요. CycloneDX·SPDX SBOM은 `assay scan sbom.cdx.json`,
+Go 바이너리나 lockfile이 있는 디렉터리는 `assay scan ./my-service`로 스캔할 수 있습니다.
+`--output sarif`는 코드 스캔용 보고서를 쓰고, `--explain`은 개별 탐지의 근거를 보여줍니다.
 
 **프라이빗 레지스트리.** 레지스트리 이미지를 스캔할 때 자격증명은 다음 순서로 시도합니다.
 `ASSAY_REGISTRY_AUTH_USERNAME` + `ASSAY_REGISTRY_AUTH_PASSWORD`(또는
@@ -103,8 +147,8 @@ assay scan alpine:3.19 --fail-on high
 `$XDG_RUNTIME_DIR/containers/auth.json`)입니다. 환경 변수 자격증명은
 `ASSAY_REGISTRY_AUTH_AUTHORITY`로 다른 레지스트리를 지정하지 않는 한 타깃 자신의 레지스트리에만
 제시되고, 반쪽만 설정되면 exit 2이며, 값은 출력되지 않습니다. `--platform os/arch[/variant]`로
-플랫폼을 고르며, 기본값은 컨테이너 런타임이 고르는 방식 그대로 이 호스트의 플랫폼입니다. 스캔한
-플랫폼과 digest는 stderr에 출력되고 JSON `image` 객체에 기록됩니다.
+플랫폼을 고릅니다. 기본값은 Linux와 Assay 실행 파일의 아키텍처를 조합한 값입니다(예: Windows x64에서도
+`linux/amd64`). 스캔한 플랫폼과 다이제스트는 stderr와 JSON `image` 객체에서 확인할 수 있습니다.
 
 **판정을 만든 것.** 모든 JSON·SARIF 리포트에는 `provenance` 객체가 들어갑니다. assay 빌드, 데이터베이스
 (그리고 `db update`가 받아 온 배포 아티팩트의 digest), 대상 내용의 해시, 모든 게이트 플래그, 각 ignore

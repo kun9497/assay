@@ -17,45 +17,33 @@ Two complete, copy-pasteable examples:
 - **[GitLab CI](ci/gitlab-ci.yml)** — scan in a job, keep the report as an artifact, fail
   the pipeline on the exit code.
 
-Both install `assay` from the commit the latest release was built from, as the README's
-one-liner does (the release job keeps all three current); a branch name there would move under
-you. The GitLab job also installs `openssl`, because `install.sh` verifies the release's
-checksums signature with it (D137) and the `alpine` image does not ship the binary — without
-it the installer refuses to install rather than skip the check.
+Both examples install the signed CLI, update the signed public DB and print its status. Set
+`IMAGE` to the digest you deploy and `PLATFORM` to its platform. The examples run
+`--config none` to ignore workspace waivers. If your team uses waivers, supply its reviewed
+file with `--config <path>`.
 
-## The pattern, in one line
+## Image scan policy
 
-```bash
-assay scan <target> --fail-on high        # exit 1 at or above high; exit 2 if untrustworthy
+```sh
+assay scan "$IMAGE" --platform "$PLATFORM" --config none --fail-on high --fail-on-incomplete --output json > assay.json
 ```
 
-`<target>` is a registry image, a `docker-archive:`/`oci-dir:` path, an SBOM, a binary, or
-a directory. Add `--output sarif` (or `json`) to write a machine-readable report to stdout
-— redirect it to a file. `--fail-on` also takes `--fail-on-kev`, `--fail-on-epss <n>`,
-`--fail-on-eol`, and `--fail-on-unfixable[=wont-fix]`; combine as many as you gate on.
+High or Critical findings give exit 1. An incomplete package evaluation or advisory check,
+an unread manifest, or an execution error gives exit 2 and takes precedence. Use
+`--fail-on-incomplete=target` if you want only target-side causes to trip the incomplete
+gate. Additional gates include `--fail-on-kev`, `--fail-on-epss <n>`, `--fail-on-eol` and
+`--fail-on-unfixable[=wont-fix]`.
 
-## Record findings, then gate — in that order
+## CI reports
 
-The GitHub example runs the scan once, writing SARIF to a file, then uploads that file with
-`if: always()` **before** letting the exit code fail the build. This is deliberate: a build
-that fails its gate should still leave the findings recorded, not throw them away. Uploading
-after a failed step, or letting `--fail-on` abort before the upload, loses the record the
-Security tab exists to keep.
+The [GitHub Actions](ci/github-actions.yml) scan step returns Assay's exit status. If the scan writes SARIF,
+the next step can upload it even when the policy fails. Code scanning must be enabled for
+the repository to use the upload step. A failure before report generation leaves the error
+in the job log.
 
-```yaml
-- name: Scan
-  id: scan
-  run: |
-    set +e
-    assay scan "$IMAGE" --output sarif --fail-on high > assay.sarif
-    echo "exit_code=$?" >> "$GITHUB_OUTPUT"
-- name: Upload SARIF
-  if: always()
-  uses: github/codeql-action/upload-sarif@v3
-  with: { sarif_file: assay.sarif, category: assay }
-- name: Fail on findings
-  run: exit ${{ steps.scan.outputs.exit_code }}
-```
+The [GitLab CI](ci/gitlab-ci.yml) job retains JSON and SARIF as downloadable artifacts. It scans the
+same image digest and platform with the same DB and policy for each format and keeps the
+higher exit status. A failure before either report is written ends the scan loop.
 
 If `$IMAGE` can name a target this pipeline does not fully trust — a tag a PR supplies, a
 registry outside the org — add `--timeout <duration>` (D112): reads are already size-bounded,
