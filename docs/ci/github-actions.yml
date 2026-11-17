@@ -8,6 +8,7 @@ on:
     - cron: "0 6 * * 1"
 
 permissions:
+  actions: read # upload-sarif reads workflow runs in private repositories
   contents: read
   security-events: write # required for SARIF upload to code scanning
 

@@ -138,9 +138,13 @@ exit $LASTEXITCODE
 
 </details>
 
-Copy the [GitHub Actions workflow](docs/ci/github-actions.yml) into `.github/workflows/` to upload
-SARIF to a repository with code scanning enabled, or add the [GitLab CI job](docs/ci/gitlab-ci.yml)
-to your `.gitlab-ci.yml` to save reports as job artifacts. Both include installation.
+Copy the [GitHub Actions workflow](docs/ci/github-actions.yml) into `.github/workflows/` to publish
+SARIF alerts to the Security tab. GitHub.com supports this for public repositories. For a private
+or internal organization repository, enable GitHub Code Security in the repository settings.
+[GitHub's SARIF upload requirements](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)
+
+On GitLab, add the [GitLab CI job](docs/ci/gitlab-ci.yml) to your `.gitlab-ci.yml` to save
+reports as job artifacts. Both examples include installation.
 To gate a local Docker build before pushing, save it with
 `docker save -o image.tar my-app:ci` and use `docker-archive:image.tar` as the scan target above.
 Use `assay scan sbom.cdx.json` for a CycloneDX/SPDX SBOM or `assay scan ./my-service`

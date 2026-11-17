@@ -134,8 +134,11 @@ exit $LASTEXITCODE
 
 </details>
 
-[GitHub Actions 워크플로](docs/ci/github-actions.yml)를 `.github/workflows/`에 복사하면 코드 스캔이 활성화된 저장소에 SARIF를 업로드합니다.
-[GitLab CI 잡](docs/ci/gitlab-ci.yml)을 `.gitlab-ci.yml`에 추가하면 보고서를 잡 아티팩트로 보관합니다. 두 예제 모두 설치 단계가 포함돼 있습니다.
+[GitHub Actions 워크플로](docs/ci/github-actions.yml)를 `.github/workflows/`에 복사하면 Security 탭에 SARIF 경보를 게시합니다.
+GitHub.com 공개 저장소에서 이 기능을 사용할 수 있습니다. 조직 소유 비공개 또는 내부 저장소에서는 저장소 설정에서 GitHub Code Security를 활성화하세요.
+[GitHub의 SARIF 업로드 요건](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)
+
+GitLab에서는 [GitLab CI 잡](docs/ci/gitlab-ci.yml)을 `.gitlab-ci.yml`에 추가하면 보고서를 잡 아티팩트로 보관합니다. 두 예제 모두 설치 단계가 포함돼 있습니다.
 푸시 전에 로컬 Docker 빌드를 검사하려면 `docker save -o image.tar my-app:ci`로 저장하고
 위 스캔의 입력을 `docker-archive:image.tar`로 바꾸세요. CycloneDX·SPDX SBOM은 `assay scan sbom.cdx.json`,
 Go 바이너리나 lockfile이 있는 디렉터리는 `assay scan ./my-service`로 스캔할 수 있습니다.

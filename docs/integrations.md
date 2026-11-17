@@ -37,9 +37,14 @@ gate. Additional gates include `--fail-on-kev`, `--fail-on-epss <n>`, `--fail-on
 ## CI reports
 
 The [GitHub Actions](ci/github-actions.yml) scan step returns Assay's exit status. If the scan writes SARIF,
-the next step can upload it even when the policy fails. Code scanning must be enabled for
-the repository to use the upload step. A failure before report generation leaves the error
-in the job log.
+the next step can upload it even when the policy fails. A failure before report generation
+leaves the error in the job log.
+
+GitHub.com accepts SARIF for public repositories. For a private or internal repository, the
+organization needs GitHub Team or Enterprise with GitHub Code Security enabled for the repository.
+Keep the example's `security-events: write` permission for the upload. Its `actions: read` and
+`contents: read` permissions allow the upload action to read the workflow run and repository
+contents in private repositories. [GitHub's SARIF upload requirements](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)
 
 The [GitLab CI](ci/gitlab-ci.yml) job retains JSON and SARIF as downloadable artifacts. It scans the
 same image digest and platform with the same DB and policy for each format and keeps the
@@ -66,8 +71,6 @@ directory (`assay scan dir:.`), its built binary or jar, or an SBOM of the image
 scan says this itself (D141): a `note:` line on stderr naming the paths it read and what it did
 not, and an `assay/inventory-scope` note in SARIF, so the code-scanning tab never shows an
 empty image scan without it.
-
-The `security-events: write` permission is what lets the workflow upload to code scanning.
 
 ## The database
 
