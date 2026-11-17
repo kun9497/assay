@@ -89,7 +89,8 @@ Prebuilt binaries and checksums for every platform are attached to each
 
 Install Assay on your CI runner using the instructions above. Run this as one shell step.
 It downloads the signed DB from GHCR and scans a public Alpine image without a Docker daemon or login.
-Allow several GiB of free disk space for the DB on a fresh runner.
+Allow disk space for the local DB (about 5–6 GiB in November 2026). Updating an existing DB
+temporarily needs room for the old and new copies together.
 For your build, replace `IMAGE` with the digest your build pushed and set `--platform` to its deployment platform.
 
 ```sh
@@ -115,8 +116,8 @@ the DB and signing key. `--config none` prevents a checkout's `.assay.yaml` from
 
 Keep the scan as the last command in the step. Inspect or upload the report in a separate step
 that also runs on failure. A pipe to `jq` can hide the scanner's exit code. An early error can
-leave an empty report file. Read `summary.components` for the inventory size and `inventoryScope`
-for what the image scan covered. To see findings without a severity gate, run
+leave an empty report file. Read `inventoryScope` for what the image scan covered.
+If `summary.components` is zero, no packages were inventoried. To see findings without a severity gate, run
 `assay scan "$IMAGE" --platform linux/amd64`. A pinned image's findings can change with the DB.
 
 <details>
@@ -137,9 +138,10 @@ exit $LASTEXITCODE
 
 </details>
 
-The [GitHub Actions workflow](docs/ci/github-actions.yml) uploads SARIF to a repository with
-code scanning enabled. The [GitLab CI job](docs/ci/gitlab-ci.yml) saves reports as job artifacts.
-Both include installation. To gate a local Docker build before pushing, save it with
+Copy the [GitHub Actions workflow](docs/ci/github-actions.yml) into `.github/workflows/` to upload
+SARIF to a repository with code scanning enabled, or add the [GitLab CI job](docs/ci/gitlab-ci.yml)
+to your `.gitlab-ci.yml` to save reports as job artifacts. Both include installation.
+To gate a local Docker build before pushing, save it with
 `docker save -o image.tar my-app:ci` and use `docker-archive:image.tar` as the scan target above.
 Use `assay scan sbom.cdx.json` for a CycloneDX/SPDX SBOM or `assay scan ./my-service`
 for a Go binary or directory with lockfiles. `--output sarif` writes a code-scanning report

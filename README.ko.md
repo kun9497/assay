@@ -85,7 +85,8 @@ git clone https://github.com/kun9497/assay.git && cd assay && make build   # -> 
 
 위 설치 명령을 CI 러너에서 실행한 뒤, 아래 블록을 셸 스텝 하나로 실행하세요.
 GHCR에서 서명된 DB를 받고 공개 Alpine 이미지를 스캔합니다. Docker 데몬이나 로그인은 필요 없습니다.
-새 러너에는 DB를 저장할 디스크 공간을 수 GiB 확보하세요.
+러너에는 로컬 DB를 저장할 공간이 필요합니다(2026년 11월 실측 약 5~6 GiB).
+기존 DB를 갱신하는 동안에는 이전 DB와 새 DB를 함께 보관할 여유 공간을 확보하세요.
 실제 빌드에서는 `IMAGE`를 방금 레지스트리에 푸시한 이미지의 다이제스트 참조로, `--platform`을 배포할 플랫폼으로 바꾸세요.
 
 ```sh
@@ -111,7 +112,7 @@ assay scan "$IMAGE" --platform linux/amd64 --config none \
 
 스캔을 스텝의 마지막 명령으로 두세요. JSON을 읽거나 업로드하는 일은 실패 시에도 실행되는 별도 스텝에 두면 됩니다.
 `jq`에 파이프로 연결하면 스캔 종료 코드가 가려질 수 있고, 초기에 실패하면 보고서 파일이 비어 있을 수 있습니다.
-`summary.components`에서 인벤토리 크기를, `inventoryScope`에서 이미지 스캔 범위를 확인하세요.
+`inventoryScope`에서 이미지 스캔 범위를 확인하세요. `summary.components`가 0이면 인벤토리에서 읽은 패키지가 없다는 뜻입니다.
 심각도 기준 없이 결과를 보려면 `assay scan "$IMAGE" --platform linux/amd64`를 실행하세요.
 이미지를 고정해도 DB가 갱신되면 탐지 결과가 달라질 수 있습니다.
 
@@ -133,8 +134,8 @@ exit $LASTEXITCODE
 
 </details>
 
-[GitHub Actions 워크플로](docs/ci/github-actions.yml)는 코드 스캔이 활성화된 저장소에 SARIF를 업로드합니다.
-[GitLab CI 잡](docs/ci/gitlab-ci.yml)은 보고서를 잡 아티팩트로 보관합니다. 두 예제 모두 설치 단계가 포함돼 있습니다.
+[GitHub Actions 워크플로](docs/ci/github-actions.yml)를 `.github/workflows/`에 복사하면 코드 스캔이 활성화된 저장소에 SARIF를 업로드합니다.
+[GitLab CI 잡](docs/ci/gitlab-ci.yml)을 `.gitlab-ci.yml`에 추가하면 보고서를 잡 아티팩트로 보관합니다. 두 예제 모두 설치 단계가 포함돼 있습니다.
 푸시 전에 로컬 Docker 빌드를 검사하려면 `docker save -o image.tar my-app:ci`로 저장하고
 위 스캔의 입력을 `docker-archive:image.tar`로 바꾸세요. CycloneDX·SPDX SBOM은 `assay scan sbom.cdx.json`,
 Go 바이너리나 lockfile이 있는 디렉터리는 `assay scan ./my-service`로 스캔할 수 있습니다.
