@@ -1120,8 +1120,8 @@ exited 0 while 24 findings went unmentioned.
       - an opens-first range keeps its single-version windows (revises D154);
       - an HTTP/2 stream reset mid-pull is retried (revises D140);
       - VEX naming an outer index applies (revises D121);
-      - builds are held to go.mod's toolchain floor, and each release binary is scanned by
-        govulncheck before publishing.
+      - go.mod's patch-level `go` directive sets the minimum for source installations and
+        release builds. Each release binary is scanned by govulncheck before publishing.
 - [x] A gem's platform is not part of its version (D155, audit A6) — Gemfile.lock by bundler's
       grammar, SBOM purls when Gem::Platform names an os or the purl's qualifier says so; the
       purl keeps the platform for VEX; rails/rails's Gemfile.lock: 130 incomplete checks → 0,

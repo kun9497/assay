@@ -27,6 +27,7 @@ stays out"), 두 크기 한도가 패키지 수준 변수인 것은 테스트가
 
 | 한도 | 값 | 적용 범위 | 넘으면 | 결정 |
 |---|---|---|---|---|
+| 이미지 인덱스 | 플랫폼 탐색 전체에서 **4단계**, **디스크립터 4,096개** | 서로 다른 인덱스마다 목록에 있는 디스크립터 수를 한 번 합산합니다. 목록의 중복 항목도 세며, 디스크립터를 처리할 때마다 타임아웃을 확인합니다 | 둘 중 한도 하나라도 넘으면 exit 2 | D112, D119 |
 | 파일당 | **512 MiB** 압축 해제 기준 (`MaxFileBytes`) | 이미지 레이어에서 읽는 모든 파일(`Files`, `FilesUnder`, `FilesNamed`, `FilesMatching`); SBOM 타깃(`internal/scancmd/scancmd.go`의 `decodeSBOM`); jar 아카이브의 디스크 크기와 거기서 풀리는 각 엔트리(`internal/cataloger/jar/jar.go`) | exit 2: `<path> exceeds the 512 MiB per-file limit (D112)` | D112 |
 | 스캔당 | **2 GiB** (`MaxScanBytes`) | 한 이미지의 모든 레이어 패스에 걸쳐 읽은 파일의 합; 별도로, jar 아카이브 하나가 중첩 아카이브까지 포함해 푸는 바이트의 합 | exit 2: `image reads exceeded the 2 GiB per-scan limit (D112) at <path>`; jar 는 `<archive> exceeds the 2 GiB per-archive decompression budget (D112) at <entry>` | D112 |
 | 이미지 config | 선언 크기 **16 MiB** (`MaxConfigBytes`) | 매니페스트가 선언한 `config.size`, blob 을 요청하기 전에 검사 | exit 2: `image config is declared at <n> bytes, past the 16 MiB per-config limit (D112)`; blob 은 받지 않음 | D112 (QA 2026-11-02) |

@@ -28,6 +28,7 @@ variables only so a test can lower them (`internal/source/limits.go`).
 
 | Bound | Value | Where it applies | What exceeding it does | Decision |
 |---|---|---|---|---|
+| Image index | **4 levels** and **4,096 descriptors** across the platform search | each distinct index contributes its listed descriptors once, including repeated references. The scan checks its timeout between descriptors | exit 2 if either limit is exceeded | D112, D119 |
 | Per file | **512 MiB** decompressed (`MaxFileBytes`) | every file read out of an image layer (`Files`, `FilesUnder`, `FilesNamed`, `FilesMatching`); an SBOM target (`decodeSBOM` in `internal/scancmd/scancmd.go`); a jar archive's size on disk and each entry inflated from it (`internal/cataloger/jar/jar.go`) | exit 2: `<path> exceeds the 512 MiB per-file limit (D112)` | D112 |
 | Per scan | **2 GiB** (`MaxScanBytes`) | the sum of every file read across every layer pass of one image; separately, the sum of everything one jar archive inflates, nested archives included | exit 2: `image reads exceeded the 2 GiB per-scan limit (D112) at <path>`; for a jar, `<archive> exceeds the 2 GiB per-archive decompression budget (D112) at <entry>` | D112 |
 | Image config | **16 MiB** declared size (`MaxConfigBytes`) | the `config.size` a manifest declares, checked before the blob is requested | exit 2: `image config is declared at <n> bytes, past the 16 MiB per-config limit (D112)`; the blob is never fetched | D112 (QA 2026-11-02) |

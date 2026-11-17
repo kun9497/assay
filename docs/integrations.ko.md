@@ -70,6 +70,30 @@ NVD/EPSS/KEV를 다루려면 `--db-max-rating-age`를 따로 넘기십시오 —
 `assay/inventory-scope` 노트가 있어, 코드 스캐닝 탭에 이 문장 없는 빈 이미지 스캔이 보이는
 일은 없습니다.
 
+## 호스팅 CI 예제 검증
+
+v0.18.3 공개 GitHub 실행에서 High 정책으로 스캔이 종료 코드 1을 반환했고 GitHub에 SARIF 경보가 등록됐습니다.
+2026-11-17 기준 아래 두 시험인 GitHub 비공개 저장소 업로드와 GitLab.com 호스팅 러너 검증은 미실행입니다.
+GitLab 예제의 셸 명령은 로컬에서 검증했습니다. [공개 GitHub 실행](https://github.com/kun9497/assay/actions/runs/44008452298)
+
+### GitHub 비공개 저장소
+
+1. 시험에 사용할 조직을 선택하세요. 개인 계정만 있다면 **GitHub.com Enterprise Cloud 체험**에서 개인 계정 방식을 선택하고 QA 조직을 만들 수 있습니다. 결제수단 없이 시작할 수 있고 Code Security와 표준 호스팅 러너 최대 3,000분이 포함되며, 구매하지 않으면 30일 뒤 만료됩니다. 이 한도 안에서 `ubuntu-latest`를 사용하세요. 개인 계정 방식의 체험에 Azure 구독을 연결하면 즉시 유료 사용이 시작됩니다. [체험 조건과 신청](https://docs.github.com/en/enterprise-cloud@latest/admin/overview/setting-up-a-trial-of-github-enterprise-cloud)
+2. 사용할 조직의 비공개 QA 저장소에서 **Settings → Advanced Security → Code Security**를 활성화하세요. 예제를 `.github/workflows/assay.yml`로 복사해 QA 저장소의 `main`에 푸시하세요. 예제의 권한, 다이제스트로 고정한 공개 테스트 이미지, High 정책을 그대로 사용합니다. 실행 커밋 SHA와 잡 로그에 표시된 서명 검증 DB 다이제스트를 기록하세요. [Assay 워크플로](ci/github-actions.yml) · [GitHub 저장소 설정](https://docs.github.com/en/code-security/reference/code-scanning/troubleshoot-analysis-errors/private-repository-enablement)
+3. High 탐지가 있는 실행에서 **Scan and apply policy**의 종료 코드 1, 잡 실패, **Upload report to code scanning** 단계 성공을 확인하세요. **Security → Code scanning**에서 스캔한 브랜치를 선택하고 해당 Assay 경보가 같은 커밋에서 탐지됐는지 확인하세요. 실행 URL과 경보 URL을 보관합니다. 현재 DB에서 High가 나오지 않으면 High 탐지가 확인된 이미지로 이 시험을 반복하세요.
+
+### GitLab.com 호스팅 러너
+
+CI/CD가 활성화되어 있고 실행 시간(compute minutes)이 남은 GitLab.com QA 프로젝트를 사용하세요. Free 플랜에서 본인 확인을 요청하면 GitLab 화면에서 완료하세요. `.gitlab-ci.yml`에 예제 잡을 서로 다른 이름으로 세 개 복사하세요. 각 잡에 `tags: [saas-linux-small-amd64]`를 지정하고 `exit "$verdict"` 바로 앞에 `echo "Assay exit $verdict"`를 추가하세요. [Assay 잡](ci/gitlab-ci.yml) · [GitLab 호스팅 Linux 러너](https://docs.gitlab.com/ci/runners/hosted_runners/linux/) · [GitLab 본인 확인](https://docs.gitlab.com/ci/debugging/#error-identity-verification-is-required-in-order-to-run-ci-jobs)
+
+| 잡 | 예제에서 변경할 값 | 예상 로그와 아티팩트 |
+|---|---|---|
+| 통과 | 예제 이미지를 유지하고 `--fail-on high`를 `--fail-on critical`로 변경합니다. | 평가가 완료되고 Critical이 없으면 종료 0. JSON과 SARIF를 모두 받을 수 있습니다. |
+| 정책 위반 | 예제 이미지와 High 임계값을 유지합니다. | High 또는 Critical 탐지 시 종료 1. 실패한 잡에서 두 보고서를 모두 받을 수 있습니다. |
+| 입력 오류 | `IMAGE`를 `docker-archive:missing-assay-qa.tar`로 지정하고 해당 파일을 만들지 않습니다. | 종료 2, 로그에 입력 오류가 표시됩니다. 스캔 보고서는 생성되지 않습니다. |
+
+각 잡에서 호스팅 러너 식별 정보, 종료 코드 출력, DB 다이제스트를 대조하세요. 입력 오류와 정책 위반으로 파이프라인이 실패하는 것이 이 시험의 기대 결과입니다. 파이프라인 URL과 잡별 URL을 기록하세요. 처음 두 잡의 DB 다이제스트가 다르거나 현재 이미지가 High 탐지 1건 이상·Critical 0건 조건을 충족하지 않으면 해당 조건에 맞는 이미지와 DB로 다시 실행하세요.
+
 ## 데이터베이스
 
 `assay db update`는 발행된 데이터베이스를 `ghcr.io/kun9497/assay-db`에서 당겨옵니다 — OCI

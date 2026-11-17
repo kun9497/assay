@@ -1,8 +1,6 @@
 module github.com/kun9497/assay
 
-go 1.26
-
-toolchain go1.26.11
+go 1.26.11
 
 require (
 	github.com/google/go-containerregistry v0.21.7

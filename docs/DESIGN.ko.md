@@ -1058,8 +1058,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       - open 이 먼저 나열된 범위도 단일 버전 window 를 유지함 (D154 개정);
       - pull 도중 HTTP/2 스트림 리셋을 재시도함 (D140 개정);
       - 바깥 인덱스를 지목한 VEX 가 적용됨 (D121 개정);
-      - 빌드는 go.mod 의 toolchain 하한을 지키고, 릴리스 바이너리마다 게시 전에 govulncheck 로
-        검사함.
+      - go.mod 의 `go` 지시자가 소스 설치와 릴리스 빌드에 필요한 최소 패치 버전을 지정함.
+        릴리스 바이너리마다 게시 전에 govulncheck 로 검사함.
 - [x] gem 의 플랫폼은 버전의 일부가 아님 (D155, 감사 A6) — Gemfile.lock 은 bundler 의 문법대로, SBOM
       purl 은 Gem::Platform 이 OS 를 읽어 내거나 purl 의 qualifier 가 말할 때; purl 은 VEX 를 위해 플랫폼을
       유지; rails/rails 의 Gemfile.lock: 불완전 검사 130 → 0, x86_64 빌드에서 놓치던 발견 26 건, 오탐 2 건
