@@ -128,9 +128,10 @@ here:
 - Finding rule ids are `<advisory id>-<package name>`.
 - The rules `assay/not-evaluated`, `assay/not-read`, `assay/frozen-data` and
   `assay/inventory-scope` keep their ids and meanings.
-- The `partialFingerprints` key `assay/pkg-advisory/v1` names the fingerprint scheme. A
-  change to how fingerprints are computed ships as a new key, so existing code-scanning
-  alerts are not silently re-identified.
+- The `partialFingerprints` key `assay/pkg-advisory/v1` identifies Assay’s fingerprint
+  scheme. A change to its calculation gets a new key. GitHub code scanning uses
+  `primaryLocationLineHash` for fingerprint matching. Its upload action can compute that
+  hash when the reported source line is available in the checkout. [GitHub SARIF support](https://docs.github.com/en/code-security/reference/code-scanning/sarif-files/sarif-support)
 
 ## What does not change without a major version
 

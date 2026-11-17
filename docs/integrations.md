@@ -213,9 +213,12 @@ with no stated reason is skipped with a warning rather than honoured. `affected`
 assay scan my-image.tar --vex vendor.openvex.json --fail-on high
 ```
 
-## Why not just `--output json | jq`
+## Reading the results
 
-You can — the JSON carries every source's rating, the per-source fixed versions, and the
-skip counts, and stream discipline keeps it clean for `jq`. SARIF is the extra step that
-puts findings in GitHub's Security tab as annotations a reviewer sees inline. Use whichever
-your platform reads; both come from the same scan.
+In a shell without `pipefail`, `assay scan … --output json | jq …` returns the exit code
+of `jq`, which can turn a failed scan into a passing job. Redirect the scan to `assay.json`
+in the gate step. If a report was written, a separate step can read it with `jq '.summary' assay.json`.
+
+After a SARIF upload, open GitHub’s **Security → Code scanning** alerts and select the scanned
+branch. An alert can point to a package database inside the image. GitHub shows an inline PR
+annotation only when the reported lines are in the pull request diff. [GitHub SARIF support](https://docs.github.com/en/code-security/reference/code-scanning/sarif-files/sarif-support)
