@@ -43,16 +43,23 @@ release, so anything older goes through `go install` or the release page.
 If you previously installed as root using the v0.18.1 or tagged v0.18.2 installer,
 rerun the command above to replace the build-runner-owned binary with one owned by root.
 
+On a runner without sudo, replace `sudo sh "$t" -b /usr/local/bin` in the install line with
+`sh "$t" -b "$HOME/.local/bin"`. Run `export PATH="$HOME/.local/bin:$PATH"` in the scan step.
+
 On Windows (from v0.12.0, the first release that ships it), in PowerShell 5.1 or 7:
 
 ```powershell
 & { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/8766ae564f172fef7a67ccc0b1e9b0d66910c2bb/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=8766ae564f172fef7a67ccc0b1e9b0d66910c2bb" }; & ([scriptblock]::Create($s)) }
 ```
 
-`install.ps1` verifies the same signature with .NET, so it needs nothing installed first, and
-installs `assay.exe` to `%LOCALAPPDATA%\Programs\assay` (`$env:ASSAY_INSTALL_DIR` changes
-it, `$env:ASSAY_VERSION` picks another release), then prints the command that puts it on
-your PATH.
+`install.ps1` verifies the signature with .NET and installs `assay.exe` to
+`%LOCALAPPDATA%\Programs\assay` (`$env:ASSAY_INSTALL_DIR` overrides the directory and
+`$env:ASSAY_VERSION` selects a release). Add the install directory to this PowerShell session
+before running the quick start. If you set `ASSAY_INSTALL_DIR`, use that directory instead.
+
+```powershell
+$env:Path = (Join-Path $env:LOCALAPPDATA 'Programs\assay') + ';' + $env:Path
+```
 
 **If GitHub downloads time out**, use Git, Python 3 and curl from a directory that does not yet contain `assay-install`. Run each command after the previous one succeeds. The Git checkout supplies the pinned installer even if the raw host and public API are unavailable.
 
@@ -80,26 +87,65 @@ Prebuilt binaries and checksums for every platform are attached to each
 
 ## Quick start
 
-```bash
-# 1. Get the vulnerability database (seconds — pulls the published OCI artifact and
-#    verifies its signature against the key built into assay)
+Install Assay on your CI runner using the instructions above. Run this as one shell step.
+It downloads the signed DB from GHCR and scans a public Alpine image without a Docker daemon or login.
+Allow disk space for the local DB (about 5–6 GiB in November 2026). Updating an existing DB
+temporarily needs room for the old and new copies together.
+For your build, replace `IMAGE` with the digest your build pushed and set `--platform` to its deployment platform.
+
+```sh
+set -e
+assay version
 assay db update
+assay db status --output json > assay-db.json
 
-# 2. Scan something
-assay scan alpine:3.19                    # a registry image
-assay scan --platform linux/arm64 alpine:3.19   # another platform of a multi-platform image
-ASSAY_REGISTRY_AUTH_TOKEN=$TOKEN assay scan registry.example.com/team/app:1.0   # a private registry
-assay scan docker-archive:image.tar       # a local tarball — no network
-assay scan sbom.cdx.json                  # a CycloneDX or SPDX SBOM
-assay scan ./my-service                   # a Go binary, or a directory with lockfiles
-
-# 3. Gate CI on it — exit 1 at or above the threshold, exit 2 if the scan can't be trusted
-assay scan alpine:3.19 --fail-on high
+IMAGE='mirror.gcr.io/library/alpine@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1'
+assay scan "$IMAGE" --platform linux/amd64 --config none \
+  --fail-on high --fail-on-incomplete --output json > assay-report.json
 ```
 
-`assay scan` writes results to stdout and diagnostics to stderr, so
-`assay scan … --output json | jq` stays clean. `--output` also does `sarif` (for GitHub
-code scanning) and `table` (the default). `--explain` shows one finding's full evidence.
+`db update` verifies the signature before installing the DB. In `assay-db.json`,
+`artifact.signature` should be `verified`. `artifact.digest` and `artifact.signedBy` identify
+the DB and signing key. `--config none` prevents a checkout's `.assay.yaml` from waiving findings.
+
+| Scan exit | CI verdict with these flags |
+|---|---|
+| `0` | **Pass.** No unsuppressed High or Critical finding and no reported incomplete check. Lower-severity findings can still appear. |
+| `1` | **Fail.** At least one unsuppressed High or Critical finding. Read `findings` in the report. |
+| `2` | **Fail.** The scan could not finish or an evaluation was incomplete. Check stderr and, if a report exists, its `summary` and `skipped` entries. This takes precedence over `1`. |
+
+Keep the scan as the last command in the step. Inspect or upload the report in a separate step
+that also runs on failure. A pipe to `jq` can hide the scanner's exit code. An early error can
+leave an empty report file. Read `inventoryScope` for what the image scan covered.
+If `summary.components` is zero, no packages were inventoried. To see findings without a severity gate, run
+`assay scan "$IMAGE" --platform linux/amd64`. A pinned image's findings can change with the DB.
+
+<details>
+<summary>Run the gate in a PowerShell CI step</summary>
+
+If the installer ran in an earlier step, add its directory to this step's PATH as shown under Install.
+
+```powershell
+$ErrorActionPreference = 'Stop'
+assay db update
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+assay db status
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+$image = 'mirror.gcr.io/library/alpine@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1'
+assay scan $image --platform linux/amd64 --config none --fail-on high --fail-on-incomplete
+exit $LASTEXITCODE
+```
+
+</details>
+
+Copy the [GitHub Actions workflow](docs/ci/github-actions.yml) into `.github/workflows/` to upload
+SARIF to a repository with code scanning enabled, or add the [GitLab CI job](docs/ci/gitlab-ci.yml)
+to your `.gitlab-ci.yml` to save reports as job artifacts. Both include installation.
+To gate a local Docker build before pushing, save it with
+`docker save -o image.tar my-app:ci` and use `docker-archive:image.tar` as the scan target above.
+Use `assay scan sbom.cdx.json` for a CycloneDX/SPDX SBOM or `assay scan ./my-service`
+for a Go binary or directory with lockfiles. `--output sarif` writes a code-scanning report
+and `--explain` shows the evidence for a finding.
 
 **Private registries.** Scanning a registry image tries, in order:
 `ASSAY_REGISTRY_AUTH_USERNAME` + `ASSAY_REGISTRY_AUTH_PASSWORD` (or
@@ -107,9 +153,9 @@ code scanning) and `table` (the default). `--explain` shows one finding's full e
 `~/.docker/config.json`, credential helpers included), then podman's (`REGISTRY_AUTH_FILE` or
 `$XDG_RUNTIME_DIR/containers/auth.json`). The environment credential is offered only to the
 target's own registry unless `ASSAY_REGISTRY_AUTH_AUTHORITY` names another; a half-set one is
-exit 2, and values are never printed. `--platform os/arch[/variant]` picks a platform; the default
-is this host's, chosen as the container runtime would, and the scanned platform and digest are
-printed on stderr and recorded in the JSON `image` object.
+exit 2, and values are never printed. `--platform os/arch[/variant]` selects the image platform.
+The default is Linux on the Assay binary's architecture (for example, `linux/amd64` on Windows x64).
+The scanned platform and digest appear on stderr and in the JSON `image` object.
 
 **What produced a verdict.** Every JSON and SARIF report carries a `provenance` object — the
 assay build, the database (and the published artifact digest `db update` pulled), the target's

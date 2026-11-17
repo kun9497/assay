@@ -1,69 +1,47 @@
-# Example: scan a container image with assay on every push, record the
-# findings in GitHub's Security tab (SARIF), and fail the build on a
-# high-or-worse finding.
-#
-# Copy this into .github/workflows/ in your own repo and adjust IMAGE. It is
-# an EXAMPLE, not an active workflow in the assay repo itself.
-#
-# The scan and the gate are ONE step run so the SARIF is always written and
-# always uploaded — even when the gate fails — so a failed build still leaves
-# the findings recorded in the Security tab, not lost.
+# Copy into .github/workflows/ and set IMAGE and PLATFORM to your deployed image.
 name: vulnerability scan
 
 on:
   push:
     branches: [main]
-  # A weekly re-scan catches vulnerabilities disclosed after the image was
-  # last built, without a code change.
   schedule:
     - cron: "0 6 * * 1"
 
 permissions:
   contents: read
-  security-events: write # upload the SARIF to code scanning
+  security-events: write # required for SARIF upload to code scanning
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     env:
-      IMAGE: alpine:3.19 # <-- the image to scan
+      IMAGE: mirror.gcr.io/library/alpine@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1
+      PLATFORM: linux/amd64
     steps:
-      # The commit the latest release was built from, as in the README (the
-      # release job keeps it current) -- never a branch, which moves. The
-      # installer verifies the release's checksums signature with openssl,
-      # which ubuntu-latest ships. One `sh -c` line, the READMEs' shape
-      # without sudo: the temporary file, the download, the run and the
-      # clean-up live and die inside it, nothing of it reaches the rest of
-      # the step, and the line's status is the install's.
       - name: Install assay
         run: |
-          sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/8766ae564f172fef7a67ccc0b1e9b0d66910c2bb/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=8766ae564f172fef7a67ccc0b1e9b0d66910c2bb") && sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
-          assay --version
+          sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/8766ae564f172fef7a67ccc0b1e9b0d66910c2bb/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=8766ae564f172fef7a67ccc0b1e9b0d66910c2bb") && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
+          assay version
 
-      # Pulls the published OCI database from ghcr.io/kun9497/assay-db — a
-      # public artifact, no login or packages permission needed. If your
-      # network cannot reach ghcr.io, run `assay db build` instead — slower,
-      # but it needs no external artifact.
-      - name: Update the vulnerability database
-        run: assay db update
+      - name: Update the signed vulnerability database
+        run: |
+          assay db update
+          assay db status --output json
 
-      - name: Scan
+      - name: Scan and apply policy
         id: scan
         run: |
-          set +e
-          assay scan "$IMAGE" --output sarif --fail-on high > assay.sarif
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          report=$(mktemp --suffix=.sarif "$RUNNER_TEMP/assay.XXXXXXXX")
+          code=0
+          assay scan "$IMAGE" --platform "$PLATFORM" --config none --fail-on high --fail-on-incomplete --output sarif > "$report" || code=$?
+          if [ -s "$report" ]; then
+            echo "sarif=$report" >> "$GITHUB_OUTPUT"
+          fi
+          exit "$code"
 
-      # Always upload, even when the gate below fails — the point of code
-      # scanning is to keep the record regardless of the build verdict.
-      - name: Upload SARIF to code scanning
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload report to code scanning
+        if: ${{ !cancelled() && steps.scan.outputs.sarif != '' }}
+        uses: github/codeql-action/upload-sarif@v4
         with:
-          sarif_file: assay.sarif
+          sarif_file: ${{ steps.scan.outputs.sarif }}
           category: assay
-
-      # Now let the exit code decide the build: 1 = a finding at or above the
-      # threshold, 2 = the scan could not run or its result cannot be trusted.
-      - name: Fail on findings
-        run: exit ${{ steps.scan.outputs.exit_code }}
