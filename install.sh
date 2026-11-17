@@ -115,7 +115,8 @@ sums="assay_${ver_noV}_checksums.txt"
 base="${RELEASE_BASE}/${VERSION}"
 
 tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
+staged=""
+trap 'rm -rf "$tmp"; [ -z "$staged" ] || rm -f "$staged"' EXIT
 
 echo "assay: installing ${archive} (${VERSION})" >&2
 fetch "${base}/${archive}" "${tmp}/${archive}"
@@ -216,10 +217,23 @@ if [ "$expected" != "$actual" ]; then
 fi
 
 # --- install -----------------------------------------------------------------
-tar -xzf "${tmp}/${archive}" -C "$tmp" assay
 mkdir -p "$BINDIR"
-mv "${tmp}/assay" "${BINDIR}/assay"
-chmod +x "${BINDIR}/assay"
+if [ -d "$BINDIR/assay" ]; then
+	echo "assay: $BINDIR/assay is a directory" >&2
+	exit 1
+fi
+# A root extraction restores the release builder's numeric UID from tar.
+# Stream only the bytes into our own file, on the destination filesystem,
+# so a failed extraction also leaves the existing executable intact.
+staged=$(mktemp "$BINDIR/.assay-install.XXXXXXXX")
+tar -xzOf "$tmp/$archive" assay >"$staged"
+if [ ! -s "$staged" ]; then
+	echo "assay: the release archive contained no executable data" >&2
+	exit 1
+fi
+chmod 0755 "$staged"
+mv -f "$staged" "$BINDIR/assay"
+staged=""
 
 echo "assay: installed ${VERSION} to ${BINDIR}/assay" >&2
 case ":$PATH:" in

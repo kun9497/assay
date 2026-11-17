@@ -8,6 +8,8 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Unix installation creates the executable as the installing user, with mode 0755.
+  An installation run as root previously restored the build runner's UID from tar.
 - The published install commands select v0.18.2. If a GitHub download edge times out,
   a pinned Git checkout can retrieve the release through another address returned by
   DNS, with the same TLS, signature and checksum verification.

@@ -50,7 +50,16 @@ release() {
 	mkdir -p "$work"
 	printf '#!/bin/sh\necho "assay %s (%s build)"\n' "$tag" "$label" >"$work/assay"
 	chmod +x "$work/assay"
-	(cd "$work" && tar -czf "$dir/$tag/assay_${ver}_${os}_${arch}.tar.gz" assay)
+	# Model the published tar's build-runner owner, even in a non-root CI.
+	"$PY" - "$work/assay" "$dir/$tag/assay_${ver}_${os}_${arch}.tar.gz" <<'PYTHON'
+import sys, tarfile
+with tarfile.open(sys.argv[2], "w:gz") as archive, open(sys.argv[1], "rb") as src:
+    info = archive.gettarinfo(sys.argv[1], "assay")
+    info.uid = info.gid = 59001
+    info.uname = info.gname = ""
+    info.mode = 0o6777
+    archive.addfile(info, src)
+PYTHON
 	printf '%s  %s\n' "$(sha256 "$dir/$tag/assay_${ver}_${os}_${arch}.tar.gz")" "assay_${ver}_${os}_${arch}.tar.gz" >"$dir/$tag/assay_${ver}_checksums.txt"
 	openssl dgst -sha256 -sign "$tmp/$key.pem" -out "$tmp/sig-$tag-$label.der" "$dir/$tag/assay_${ver}_checksums.txt"
 	base64 <"$tmp/sig-$tag-$label.der" | tr -d '\n' >"$dir/$tag/assay_${ver}_checksums.txt.sig"
@@ -112,6 +121,12 @@ run() {
 
 # C1 clean install
 run C1 "$tmp/install-k1.sh" 0 "installed v9.9.1"
+"$PY" - "$tmp/bin-C1/assay" <<'PYTHON'
+import os, stat, sys
+s = os.stat(sys.argv[1])
+assert s.st_uid == os.geteuid(), (s.st_uid, os.geteuid())
+assert stat.S_IMODE(s.st_mode) == 0o755, oct(s.st_mode)
+PYTHON
 (ASSAY_RELEASE_DIR="$root/v9.9.1" ASSAY_RELEASE_BASE=http://invalid.invalid run C1-local "$tmp/install-k1.sh" 0 "signature on")
 "$tmp/bin-C1/assay" | grep -q "v9.9.1 (genuine build)" || { echo "FAIL C1: wrong binary installed"; echo C1 >>"$fails"; }
 
