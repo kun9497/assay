@@ -31,7 +31,7 @@ variables only so a test can lower them (`internal/source/limits.go`).
 | Image index | **4 levels** and **4,096 descriptors** across the platform search | each distinct index contributes its listed descriptors once, including repeated references. The scan checks its timeout between descriptors | exit 2 if either limit is exceeded | D112, D119 |
 | Per file | **512 MiB** decompressed (`MaxFileBytes`) | every file read out of an image layer (`Files`, `FilesUnder`, `FilesNamed`, `FilesMatching`); an SBOM target (`decodeSBOM` in `internal/scancmd/scancmd.go`); a jar archive's size on disk and each entry inflated from it (`internal/cataloger/jar/jar.go`) | exit 2: `<path> exceeds the 512 MiB per-file limit (D112)` | D112 |
 | Per scan | **2 GiB** (`MaxScanBytes`) | the sum of every file read across every layer pass of one image; separately, the sum of everything one jar archive inflates, nested archives included | exit 2: `image reads exceeded the 2 GiB per-scan limit (D112) at <path>`; for a jar, `<archive> exceeds the 2 GiB per-archive decompression budget (D112) at <entry>` | D112 |
-| Image config | **16 MiB** declared size (`MaxConfigBytes`) | the `config.size` a manifest declares, checked before the blob is requested | exit 2: `image config is declared at <n> bytes, past the 16 MiB per-config limit (D112)`; the blob is never fetched | D112 (QA 2026-11-02) |
+| Image config | **16 MiB** (`MaxConfigBytes`) | registry and OCI layout config descriptors are checked before fetching the blob. A local layout read also stops at the first undeclared byte | exit 2 for an oversized declaration or a selected local config whose size differs | D112 |
 | Link hops | **40** links per wanted path (`maxSymlinks`, `internal/source/walk.go`) — Linux's `MAXSYMLINKS`; a cycle ends at its first repeat | symlinks and hardlinks met while resolving `/etc/os-release` and the package databases inside an image | not exit 2 by itself: the path is reported `not read: <path> (still a link after 40 symbolic links ...)` on stderr, in the JSON `unread[]` and as SARIF `assay/not-read`, and trips `--fail-on-incomplete` (either scope). It becomes exit 2 when the lost path was the package database, because the scan then finds none | D109, D130, audit 2026-10-22 |
 | Nested jars | **3** levels (`maxNestedDepth`, `internal/cataloger/jar/jar.go`) | archives inside a jar or war | an archive past the third level is a counted skip, never silent truncation | D70 |
 | Directory depth | **6** levels below the root (`maxDepth`, `internal/cataloger/dirscan/walk.go`) | `dir:` targets | deeper directories are pruned, deliberately without disclosure — not an error | D26 |
@@ -102,14 +102,17 @@ What a scan holds in memory, and what nobody has measured yet.
 **Buffered, bounded.** Every wanted file out of an image is read whole into memory under the
 per-file limit (`readEntry`, `internal/source/limits.go`), and the files kept across a scan
 are bounded by the per-scan limit — so an image scan holds at most 2 GiB of file content, plus
-the manifest (≤ 100 MiB, library) and the config (≤ 16 MiB). The rest of each layer is
+registry manifest (≤ 100 MiB, library) and config (≤ 16 MiB for registry and OCI layout reads). The rest of each layer is
 drained through a 32 KiB buffer and discarded (`drainLayer`); it costs time, not memory. An
 SBOM is streamed through its decoder under the same 512 MiB read limit; the decoded structure
 is the decoder's and is proportional to the document. A jar inflates at most 512 MiB per
 entry and 2 GiB per archive. A Go binary is read through `debug/buildinfo.ReadFile`
 (`internal/cataloger/gobinary/gobinary.go`), which reads sections, not the whole file.
 
-**Buffered, unbounded.** A `dir:` target's lockfiles are read whole with `os.ReadFile`
+**Buffered, unbounded.** For a `docker-archive:` input, go-containerregistry reads the tar config
+entry into memory before Assay can check its size (`pkg/v1/tarball/image.go`,
+`loadTarDescriptorAndConfig`). A runner processing untrusted Docker archives needs a memory limit.
+A `dir:` target's lockfiles are read whole with `os.ReadFile`
 (every cataloger under `internal/cataloger/*lock*`, `requirements`, `gomod`) with no size
 check — by decision, see section 1. Memory for a hostile checkout is the cgroup's to bound.
 
