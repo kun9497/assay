@@ -23,7 +23,7 @@ advisory data is the reason it exists rather than reusing grype.
 
 ```bash
 # Prebuilt binary (Linux/macOS, amd64/arm64) — onto your PATH; Windows below
-sh -c 't=$(mktemp) && curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.sh && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
+sh -c 't=$(mktemp) && curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/d0a71e71679df43c93679d847ddfc7d3e1f4ac4f/install.sh && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
 ```
 
 The script embeds the project's signing key and verifies the release's checksums
@@ -44,7 +44,7 @@ release, so anything older goes through `go install` or the release page.
 On Windows (from v0.12.0, the first release that ships it), in PowerShell 5.1 or 7:
 
 ```powershell
-irm https://raw.githubusercontent.com/kun9497/assay/7712a02ba7c103c238d7b7ec95fd63472bcf78d7/install.ps1 | iex
+irm https://raw.githubusercontent.com/kun9497/assay/d0a71e71679df43c93679d847ddfc7d3e1f4ac4f/install.ps1 | iex
 ```
 
 `install.ps1` verifies the same signature with .NET, so it needs nothing installed first, and
