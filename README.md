@@ -23,7 +23,7 @@ advisory data is the reason it exists rather than reusing grype.
 
 ```bash
 # Prebuilt binary (Linux/macOS, amd64/arm64) — onto your PATH; Windows below
-sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/a8a7e22238801ba3f2ab11b247adb3c80e224c3d/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=a8a7e22238801ba3f2ab11b247adb3c80e224c3d") && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
+sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/3e5f3907e39fb518e20f41df7bc3744fd4caf4f5/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=3e5f3907e39fb518e20f41df7bc3744fd4caf4f5") && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
 ```
 
 The script embeds the project's signing key and verifies the release's checksums
@@ -46,7 +46,7 @@ rerun the command above to replace the build-runner-owned binary with one owned 
 On Windows (from v0.12.0, the first release that ships it), in PowerShell 5.1 or 7:
 
 ```powershell
-& { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/a8a7e22238801ba3f2ab11b247adb3c80e224c3d/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=a8a7e22238801ba3f2ab11b247adb3c80e224c3d" }; & ([scriptblock]::Create($s)) }
+& { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/3e5f3907e39fb518e20f41df7bc3744fd4caf4f5/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=3e5f3907e39fb518e20f41df7bc3744fd4caf4f5" }; & ([scriptblock]::Create($s)) }
 ```
 
 `install.ps1` verifies the same signature with .NET, so it needs nothing installed first, and
@@ -58,7 +58,7 @@ your PATH.
 
 ```text
 git clone --no-checkout https://github.com/kun9497/assay.git assay-install
-git -C assay-install checkout --detach a8a7e22238801ba3f2ab11b247adb3c80e224c3d
+git -C assay-install checkout --detach 3e5f3907e39fb518e20f41df7bc3744fd4caf4f5
 ```
 
 On Linux or macOS run `python3 assay-install/scripts/recover-install.py -b "$HOME/.local/bin"`. On Windows run `py -3 assay-install/scripts/recover-install.py` (or use `python` if that starts Python 3). Windows recovery runs the checked-out script under the current PowerShell execution policy. On a connection failure, the helper retries the official HTTPS asset host at other addresses returned by your DNS resolver. The installer verifies the signed checksums before replacing the binary. A proxy that blocks every GitHub asset address still needs access to the release assets. GitHub's unauthenticated contents API also has a [per-IP rate limit](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api).
