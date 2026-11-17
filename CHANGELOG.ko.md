@@ -8,6 +8,13 @@
 ## [Unreleased]
 
 ### Fixed
+- 공개 설치 명령이 v0.18.2를 선택합니다. GitHub 다운로드 연결 시간이 초과되면
+  커밋을 고정한 Git 체크아웃에서 DNS가 반환한 다른 주소로 릴리스를 받을 수 있습니다.
+  같은 TLS·서명·체크섬 검증을 적용합니다.
+
+## [0.18.2] - 2026-11-17
+
+### Fixed
 - CycloneDX 패키지 분류와 Ubuntu VEX가 같은 OS 선언을 사용합니다. 22.04와 22.04.5처럼
   서로 양립하는 반복 버전은 같은 릴리스로 처리합니다. OS 선언이 모순되거나 같은 위치에 여러 릴리스가 있고 패키지의 릴리스도
   독립적으로 확인할 수 없으면 원인을 표시하고 `--fail-on-incomplete=target`에서 종료 2를 냅니다.
@@ -1119,7 +1126,8 @@
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.1...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.2...main
+[0.18.2]: https://github.com/kun9497/assay/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/kun9497/assay/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/kun9497/assay/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/kun9497/assay/compare/v0.16.0...v0.17.0

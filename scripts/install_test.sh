@@ -112,6 +112,7 @@ run() {
 
 # C1 clean install
 run C1 "$tmp/install-k1.sh" 0 "installed v9.9.1"
+(ASSAY_RELEASE_DIR="$root/v9.9.1" ASSAY_RELEASE_BASE=http://invalid.invalid run C1-local "$tmp/install-k1.sh" 0 "signature on")
 "$tmp/bin-C1/assay" | grep -q "v9.9.1 (genuine build)" || { echo "FAIL C1: wrong binary installed"; echo C1 >>"$fails"; }
 
 # C2 archive tampered, checksums + sig untouched
@@ -122,11 +123,13 @@ ASSAY_RELEASE_BASE="http://127.0.0.1:$port/../c2" true
 # http.server cannot escape its root, so serve each mutated tree under it.
 mv "$tmp/c2" "$root/c2"
 (ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c2" run C2 "$tmp/install-k1.sh" 1 "checksum mismatch")
+(ASSAY_RELEASE_DIR="$root/c2/v9.9.1" run C2-local "$tmp/install-k1.sh" 1 "checksum mismatch")
 
 # C3a release assets rewritten consistently, stale .sig left
 release v9.9.1 attacker "$root/c3a" EVIL
 cp "$root/v9.9.1/assay_9.9.1_checksums.txt.sig" "$root/c3a/v9.9.1/assay_9.9.1_checksums.txt.sig"
 (ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c3a" run C3a "$tmp/install-k1.sh" 1 "does not verify against any key embedded")
+(ASSAY_RELEASE_DIR="$root/c3a/v9.9.1" run C3a-local "$tmp/install-k1.sh" 1 "does not verify against any key embedded")
 
 # C3a-nosig: .sig deleted -- refused by the missing-signature guard itself,
 # not by a later one (ABSENT pins which guard fired).

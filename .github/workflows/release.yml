@@ -45,6 +45,11 @@ jobs:
       - name: Hold the toolchain to go.mod's floor
         run: sh scripts/check-go-toolchain.sh
 
+      - name: Check the tagged installers select this release
+        run: |
+          grep -Fx "VERSION=\"$GITHUB_REF_NAME\"" install.sh
+          grep -Fx "\$DefaultVersion = '$GITHUB_REF_NAME'" install.ps1
+
       - uses: ./.github/actions/setup-cosign
 
       # Pinned by commit (v6 is a moving major tag): this job signs the

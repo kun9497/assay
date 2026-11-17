@@ -11,8 +11,7 @@
 # exits clean (Linux QA of v0.18.1), and a fixed file name in the working
 # directory overwrote a file of that name (main QA of 672fe7a).
 #
-# The README names the commit each release was built from: pin that, not a
-# branch or a tag -- a branch moves, and so can a tag; the commit cannot.
+# The README pins the installer to an immutable Git commit.
 # This script installs the version it was published with (VERSION below);
 # a tag after the flags (`sh "$t" -b /usr/local/bin vX.Y.Z`) installs another release, still verified against the
 # keys embedded here, so an older script cannot install a release signed by
@@ -23,6 +22,8 @@
 #   <version>  a tag to install, e.g. v0.12.0 (default: VERSION below)
 #
 # Environment:
+#   ASSAY_RELEASE_DIR        local directory containing the archive, checksums
+#                            and signature downloaded from the release.
 #   ASSAY_ALLOW_UNSIGNED=1   if neither openssl nor cosign is available,
 #                            fall back to the SHA256 check alone (loudly).
 #                            Never needed on a stock Linux or macOS.
@@ -35,10 +36,10 @@ set -eu
 
 REPO="kun9497/assay"
 BINDIR="./bin"
-# Set by scripts/prepare-release.sh in the commit a release is cut from.
+# Set by scripts/prepare-release.sh when preparing a release.
 # Releases before the first signed one carry no checksums signature and are
 # refused by this script; the README says which release that is.
-VERSION="v0.18.1"
+VERSION="v0.18.2"
 RELEASE_BASE="${ASSAY_RELEASE_BASE:-https://github.com/${REPO}/releases/download}"
 
 # The public keys this installer trusts, PEM, one per release signing key.
@@ -94,7 +95,11 @@ aarch64 | arm64) arch="arm64" ;;
 esac
 
 # --- download helper ---------------------------------------------------------
-if command -v curl >/dev/null 2>&1; then
+if [ -n "${ASSAY_RELEASE_DIR:-}" ]; then
+	# The recovery downloader stages these three files together. Copy them
+	# into our private directory and run the normal signature and hash checks.
+	fetch() { cp "${ASSAY_RELEASE_DIR}/${1##*/}" "$2"; }
+elif command -v curl >/dev/null 2>&1; then
 	fetch() { curl -sSfL "$1" -o "$2"; }
 elif command -v wget >/dev/null 2>&1; then
 	fetch() { wget -qO "$2" "$1"; }
@@ -112,7 +117,7 @@ base="${RELEASE_BASE}/${VERSION}"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-echo "assay: downloading ${archive} (${VERSION})" >&2
+echo "assay: installing ${archive} (${VERSION})" >&2
 fetch "${base}/${archive}" "${tmp}/${archive}"
 fetch "${base}/${sums}" "${tmp}/${sums}"
 if ! fetch "${base}/${sums}.sig" "${tmp}/${sums}.sig" 2>/dev/null; then

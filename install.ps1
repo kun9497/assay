@@ -7,8 +7,7 @@
 #
 #   irm https://raw.githubusercontent.com/kun9497/assay/<commit>/install.ps1 | iex
 #
-# The README names the commit each release was built from: pin that, not a
-# branch or a tag -- a branch moves, and so can a tag; the commit cannot.
+# The README pins the installer to an immutable Git commit.
 # This script installs the version it was published with ($DefaultVersion
 # below); another release is still verified against the keys embedded here,
 # so an older script cannot install a release signed by a key it predates.
@@ -19,6 +18,7 @@
 #                                  (default: %LOCALAPPDATA%\Programs\assay)
 #   -Version / ASSAY_VERSION       a tag to install, e.g. v0.12.0
 #   ASSAY_ARCH                     override the detected architecture
+#   ASSAY_RELEASE_DIR              local directory containing the signed assets
 #
 # It never runs anything it downloads; it only extracts one binary. A
 # refusal is a terminating error, never `exit`, so a piped install that
@@ -39,8 +39,8 @@ param(
     [string]$Version = $env:ASSAY_VERSION
 )
 
-# Set by scripts/prepare-release.sh in the commit a release is cut from.
-$DefaultVersion = 'v0.18.1'
+# Set by scripts/prepare-release.sh when preparing a release.
+$DefaultVersion = 'v0.18.2'
 $Repo = 'kun9497/assay'
 
 # The public keys this installer trusts, PEM, one per release signing key.
@@ -153,11 +153,19 @@ function Install-Assay([string]$BinDir, [string]$Version) {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) ('assay-install-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $tmp | Out-Null
     try {
-        Write-AssayNote "downloading $archive ($Version)"
-        Invoke-WebRequest -UseBasicParsing -Uri "$base/$archive" -OutFile (Join-Path $tmp $archive)
-        Invoke-WebRequest -UseBasicParsing -Uri "$base/$sums" -OutFile (Join-Path $tmp $sums)
+        function Get-ReleaseFile([string]$Name) {
+            $out = Join-Path $tmp $Name
+            if ($env:ASSAY_RELEASE_DIR) {
+                Copy-Item -LiteralPath (Join-Path $env:ASSAY_RELEASE_DIR $Name) -Destination $out
+            } else {
+                Invoke-WebRequest -UseBasicParsing -Uri "$base/$Name" -OutFile $out
+            }
+        }
+        Write-AssayNote "installing $archive ($Version)"
+        Get-ReleaseFile $archive
+        Get-ReleaseFile $sums
         try {
-            Invoke-WebRequest -UseBasicParsing -Uri "$base/$sums.sig" -OutFile (Join-Path $tmp "$sums.sig")
+            Get-ReleaseFile "$sums.sig"
         } catch {
             # Refused, never warned about: every release from the first
             # signed one onward attaches the signature, so a missing one is
