@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Install assay
         run: |
-          sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/5ec3acb1c1a39fb193ae221442201826c2b6c0cf/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=5ec3acb1c1a39fb193ae221442201826c2b6c0cf") && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
+          sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/0aab1b4975aa09e5afe9a5843affb3690ed59f06/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=0aab1b4975aa09e5afe9a5843affb3690ed59f06") && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
           assay version
 
       - name: Update the signed vulnerability database
