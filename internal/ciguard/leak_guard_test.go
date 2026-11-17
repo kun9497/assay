@@ -102,9 +102,31 @@ var assignmentWord = regexp.MustCompile(`^\w+=`)
 
 // FindString is the first line of text that leaks, "" when none does.
 func (leakGuard) FindString(text string) string {
-	state := shellState{vars: map[string]string{}, evaluating: map[string]bool{}, evalBytesLeft: 1 << 20}
+	state := newShellState()
 	for _, line := range logicalLines(text) {
 		if state.lineLeaks(line) {
+			return line
+		}
+	}
+	return ""
+}
+
+func newShellState() shellState {
+	return shellState{vars: map[string]string{}, evaluating: map[string]bool{}, evalBytesLeft: 1 << 20}
+}
+
+// A decoded run scalar is already shell source. Retain indentation following
+// a continued shell line and leave YAML quoting and folding to the decoder.
+func firstShellLeak(script string) string {
+	state := newShellState()
+	lines := strings.Split(script, "\n")
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		for continues(line) && i+1 < len(lines) {
+			i++
+			line = line[:len(line)-1] + lines[i]
+		}
+		if state.shellLeaks(line) {
 			return line
 		}
 	}

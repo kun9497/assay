@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // installPinDocs are the documents whose install one-liners the release job
@@ -68,10 +70,45 @@ func leakedInInstallJob(text string) string {
 	return ""
 }
 
+// A GitHub Actions run step gets its own shell. Inspect the decoded script
+// of each step containing the install one-liner, with fresh state per step.
+func leakedInGitHubInstallRun(t *testing.T, text string) string {
+	t.Helper()
+	var workflow ghWorkflow
+	if err := yaml.Unmarshal([]byte(text), &workflow); err != nil {
+		t.Fatalf("parse GitHub Actions install example: %v", err)
+	}
+	found := false
+	for _, job := range workflow.Jobs {
+		for _, step := range job.Steps {
+			if !containsInstallDownload(step.Run) {
+				continue
+			}
+			found = true
+			if line := firstShellLeak(step.Run); line != "" {
+				return line
+			}
+		}
+	}
+	if !found {
+		t.Error("GitHub Actions install example has no run step containing the install one-liner")
+	}
+	return ""
+}
+
+func containsInstallDownload(script string) bool {
+	for _, line := range strings.Split(script, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "#") && strings.Contains(line, "/install.sh") && strings.Contains(line, "curl") {
+			return true
+		}
+	}
+	return false
+}
+
 // installJobs is the part of a document the install lines are steps of:
 // for each line that downloads install.sh, the block holding it -- the
-// top-level GitLab job whose before_script and script share one shell, the
-// job under a GitHub workflow's `jobs:`, the fenced example in a README.
+// top-level GitLab job whose before_script and script share one shell, or
+// the fenced example in a README.
 // What another block sets is that block's own (main QA of 67e2cf6,
 // 2026-11-13: a TERM trap in an independent GitLab job of the example was
 // refused as the installer's leftover); every block that installs is read
@@ -93,16 +130,16 @@ func installJobs(text string) []string {
 		}
 		boundary[i] = !inFence && line != "" && indent(line) == 0 && line[0] != '#'
 	}
-	blockOf := func(i int, isBoundary func(int) bool, lo, hi int) (int, int) {
-		start, end := lo, hi
-		for k := i; k >= lo; k-- {
-			if isBoundary(k) {
+	blockOf := func(i int) (int, int) {
+		start, end := 0, len(lines)
+		for k := i; k >= 0; k-- {
+			if boundary[k] {
 				start = k
 				break
 			}
 		}
-		for k := i + 1; k < hi; k++ {
-			if isBoundary(k) {
+		for k := i + 1; k < len(lines); k++ {
+			if boundary[k] {
 				end = k
 				break
 			}
@@ -115,23 +152,7 @@ func installJobs(text string) []string {
 		if !strings.Contains(line, "/install.sh") || !strings.Contains(line, "curl") {
 			continue
 		}
-		start, end := blockOf(i, func(k int) bool { return boundary[k] }, 0, len(lines))
-		if strings.TrimSpace(lines[start]) == "jobs:" {
-			// A GitHub workflow: the job is the key at its children's
-			// indentation, and no two jobs (nor two steps) share a shell.
-			child := -1
-			for k := start + 1; k < end; k++ {
-				if s := strings.TrimSpace(lines[k]); s != "" && !strings.HasPrefix(s, "#") {
-					child = indent(lines[k])
-					break
-				}
-			}
-			isJob := func(k int) bool {
-				s := strings.TrimSpace(lines[k])
-				return k == start || (s != "" && indent(lines[k]) == child && !strings.HasPrefix(s, "#") && !strings.HasPrefix(s, "-"))
-			}
-			start, end = blockOf(i, isJob, start, end)
-		}
+		start, end := blockOf(i)
 		if !seen[[2]int{start, end}] {
 			seen[[2]int{start, end}] = true
 			blocks = append(blocks, strings.Join(lines[start:end], "\n"))
@@ -236,8 +257,14 @@ func TestInstallOneLiners_RunTheScriptOnlyAfterItDownloaded(t *testing.T) {
 		if m := fixedName.FindString(text); m != "" {
 			t.Errorf("%s downloads the installer to a fixed name in the working directory, which overwrites a file of that name: %q", doc, m)
 		}
-		if m := leakedInInstallJob(text); m != "" {
-			t.Errorf("%s sets the installer's variable or trap in the calling shell, which GitLab shares with the job's own steps: %q", doc, strings.TrimSpace(m))
+		var leak string
+		if doc == "docs/ci/github-actions.yml" {
+			leak = leakedInGitHubInstallRun(t, text)
+		} else {
+			leak = leakedInInstallJob(text)
+		}
+		if leak != "" {
+			t.Errorf("%s sets the installer's variable or trap in the calling shell: %q", doc, strings.TrimSpace(leak))
 		}
 		downloads := 0
 		for _, line := range strings.Split(text, "\n") {
@@ -331,8 +358,7 @@ func TestInstallOneLiners_LeakGuardReadsTheInstallJobOnly(t *testing.T) {
 }
 
 // PR #325 review: every block that installs is read, a README's fenced
-// example is the block around its one-liner, and a GitHub workflow's job is
-// the job, not the whole `jobs:` tree. Each case is the shipped document
+// example is the block around its one-liner. Each case is the shipped document
 // with one addition; the guard refuses a leftover inside an install block
 // and lets one outside pass.
 func TestInstallOneLiners_LeakGuardBlocksPerDocumentShape(t *testing.T) {
@@ -343,7 +369,7 @@ func TestInstallOneLiners_LeakGuardBlocksPerDocumentShape(t *testing.T) {
 		}
 		return strings.ReplaceAll(string(b), "\r\n", "\n")
 	}
-	gitlab, github, readme := read("docs/ci/gitlab-ci.yml"), read("docs/ci/github-actions.yml"), read("README.md")
+	gitlab, readme := read("docs/ci/gitlab-ci.yml"), read("README.md")
 	oneLiner := ""
 	for _, line := range strings.Split(gitlab, "\n") {
 		if strings.Contains(line, "/install.sh") {
@@ -372,12 +398,42 @@ func TestInstallOneLiners_LeakGuardBlocksPerDocumentShape(t *testing.T) {
 		{"README: a trap beside the one-liner in its fence", strings.Replace(readme, readmeLine, readmeLine+"\ntrap 'rm -f \"$t\"' EXIT", 1), true},
 		{"README: a mktemp variable opening the fence", strings.Replace(readme, readmeLine, "t=$(mktemp)\n"+readmeLine, 1), true},
 		{"README: a trap in another fence", readme + "\n```sh\ntrap 'rm -f work.tmp' EXIT\n```\n", false},
-		{"GitHub: an EXIT trap in an independent job", github + "\n  report:\n    runs-on: ubuntu-latest\n    steps:\n      - run: |\n          trap 'rm -f report.tmp' EXIT\n          echo report > report.tmp\n", false},
-		{"GitHub: an EXIT trap in the install job", strings.Replace(github, "          sh -c 't=$(mktemp)", "          trap 'rm -f \"$t\"' EXIT\n          sh -c 't=$(mktemp)", 1), true},
 	} {
 		got := leakedInInstallJob(tc.doc)
 		if (got != "") != tc.refused {
 			t.Errorf("%s: guard found %q, want refused = %v", tc.name, strings.TrimSpace(got), tc.refused)
 		}
+	}
+}
+
+func TestInstallOneLiners_GitHubRunShellScope(t *testing.T) {
+	const install = "curl -fsSL https://example.test/install.sh -o install"
+	const trap = "trap 'echo cleanup' EXIT"
+	const assign = "cleanup='trap echo EXIT'"
+	const evaluate = "eval \"$cleanup\""
+	step := func(script string) string {
+		return "      - run: |\n          " + strings.ReplaceAll(script, "\n", "\n          ") + "\n"
+	}
+	job := "    runs-on: ubuntu-latest\n    steps:\n"
+	for _, tc := range []struct {
+		name, steps string
+		wantLeak    bool
+	}{
+		{"another job", step(install) + "  other:\n" + job + step(trap), false},
+		{"other run before", step(trap) + step(install), false},
+		{"other run after", step(install) + step(trap), false},
+		{"local variable from other run", step(assign) + step(install+"\n"+evaluate), false},
+		{"trap in install run", step(trap + "\n" + install), true},
+		{"trap in second install run", step(install) + step(install+"\n"+trap), true},
+		{"variable in install run", step(install + "\n" + assign + "\n" + evaluate), true},
+		{"folded install run", "      - run: >-\n          " + install + ";\n          " + trap + "\n", true},
+		{"continued signal", step(install + "\ntrap 'echo cleanup' \\\n  EXIT"), true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			workflow := "jobs:\n  install:\n" + job + tc.steps
+			if got := leakedInGitHubInstallRun(t, workflow); (got != "") != tc.wantLeak {
+				t.Errorf("found %q, want leak = %v", got, tc.wantLeak)
+			}
+		})
 	}
 }
