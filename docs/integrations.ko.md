@@ -207,9 +207,12 @@ waiver가 당신이 아니라 소프트웨어의 '생산자'로부터 온 것이
 assay scan my-image.tar --vex vendor.openvex.json --fail-on high
 ```
 
-## `--output json | jq`로 충분하지 않은 이유
+## 결과 확인
 
-충분합니다 — JSON은 각 소스의 등급, 소스별 수정 버전, skip 개수를 모두 담고, 스트림 규율
-덕에 `jq`용으로 깨끗합니다. SARIF는 findings를 GitHub Security 탭에 리뷰어가 인라인으로
-보는 주석으로 올려주는 추가 단계일 뿐입니다. 플랫폼이 읽는 쪽을 쓰세요 — 둘 다 같은
-스캔에서 나옵니다.
+`pipefail`이 꺼진 셸에서 `assay scan … --output json | jq …`의 종료 코드는 `jq`가 결정하므로
+스캔이 실패해도 잡이 통과할 수 있습니다. 판정 스텝에서는 스캔 출력을 `assay.json`으로 리디렉션하세요.
+보고서가 생성됐다면 별도 스텝에서 `jq '.summary' assay.json`으로 요약을 읽을 수 있습니다.
+
+SARIF를 업로드한 뒤 GitHub의 **Security → Code scanning** 경보 목록에서 스캔한 브랜치를 선택하세요.
+경보는 이미지 내부의 패키지 DB를 가리킬 수 있습니다. PR에 인라인 주석이 표시되려면 보고된 줄이
+해당 PR의 변경 내역에 포함돼야 합니다. [GitHub의 SARIF 지원 문서](https://docs.github.com/en/code-security/reference/code-scanning/sarif-files/sarif-support)

@@ -119,8 +119,10 @@
 - finding 규칙 id는 `<advisory id>-<package name>`입니다.
 - 규칙 `assay/not-evaluated`, `assay/not-read`, `assay/frozen-data`, `assay/inventory-scope`는 id와
   의미를 유지합니다.
-- `partialFingerprints` 키 `assay/pkg-advisory/v1`이 fingerprint 방식을 가리킵니다. fingerprint 계산
-  방식의 변경은 새 키로 나가므로, 기존 code-scanning 경보가 조용히 다른 것으로 식별되지 않습니다.
+- `partialFingerprints`의 `assay/pkg-advisory/v1`은 Assay의 지문 계산 방식입니다.
+  계산 방식이 바뀌면 새 키를 사용합니다. GitHub 코드 스캔은 지문을 대조할 때
+  `primaryLocationLineHash`를 사용합니다. 업로드 액션은 보고된 소스 줄이 체크아웃에 있으면
+  그 해시를 계산할 수 있습니다. [GitHub의 SARIF 지원 문서](https://docs.github.com/en/code-security/reference/code-scanning/sarif-files/sarif-support)
 
 ## 메이저 버전 없이는 바뀌지 않는 것
 
