@@ -24,7 +24,7 @@ assay_scan:
     # in the QA job that found this, a later step put report.txt in t and
     # the installer's trap deleted it at exit (main QA of ef0bc1a,
     # 2026-11-13).
-    - sh -c 't=$(mktemp) && curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/d0a71e71679df43c93679d847ddfc7d3e1f4ac4f/install.sh && sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
+    - sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/a8a7e22238801ba3f2ab11b247adb3c80e224c3d/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=a8a7e22238801ba3f2ab11b247adb3c80e224c3d") && sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
     - assay --version
   script:
     # Pulls the published database from ghcr.io/kun9497/assay-db — a public

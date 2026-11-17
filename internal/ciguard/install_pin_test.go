@@ -26,6 +26,7 @@ var installPinDocs = []string{
 var installRef = regexp.MustCompile(`raw\.githubusercontent\.com/kun9497/assay/([^/]+)/install\.(sh|ps1)`)
 
 var fullSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
+var recoveryRef = regexp.MustCompile(`(?:api\.github\.com/repos/kun9497/assay/contents/install\.(?:sh|ps1)\?ref=|git -C assay-install checkout --detach )([^"'\s]+)`)
 
 // pipedIntoSh is the one-liner shape the Linux QA of v0.18.1 (2026-11-13)
 // found returning 0 on a failed download: `curl ... | sh`'s exit status is
@@ -51,8 +52,11 @@ var (
 	// Anchored to the line, so nothing may follow the shape: a trailing
 	// `|| true` or `; exit 0` would hand the caller a success again (PR
 	// #315 review).
-	oneLinerShape = regexp.MustCompile(`(?m)^[ \t]*(?:- )?sh -c 't=\$\(mktemp\) && curl -sSfL -o "\$t" ` + pinnedScript + ` && (?:sudo )?sh "\$t" -b /usr/local/bin; s=\$\?; rm -f "\$t"; exit \$s'$`)
-	fixedName     = regexp.MustCompile(`-o +\.?/?assay-install\.sh`)
+	directDownload = `curl -sSfL -o "\$t" ` + pinnedScript
+	curlHTTPS      = `curl -sSfL --connect-timeout 5 --proto-redir =https `
+	withFallback   = `\(` + curlHTTPS + `-o "\$t" ` + pinnedScript + ` \|\| ` + curlHTTPS + `-H "Accept:application/vnd\.github\.raw\+json" -o "\$t" "https://api\.github\.com/repos/kun9497/assay/contents/install\.sh\?ref=[0-9a-f]{40}"\)`
+	oneLinerShape  = regexp.MustCompile(`(?m)^[ \t]*(?:- )?sh -c 't=\$\(mktemp\) && (?:` + directDownload + `|` + withFallback + `) && (?:sudo )?sh "\$t" -b /usr/local/bin; s=\$\?; rm -f "\$t"; exit \$s'$`)
+	fixedName      = regexp.MustCompile(`-o +\.?/?assay-install\.sh`)
 )
 
 // leakedInInstallJob is what the guard refuses in a document: the first
@@ -306,6 +310,12 @@ func TestInstallOneLiners_PinOneCommit(t *testing.T) {
 		if found == 0 {
 			t.Errorf("%s: no install one-liner found; the release job expects one to re-pin", doc)
 		}
+		for _, m := range recoveryRef.FindAllStringSubmatch(string(b), -1) {
+			if !fullSHA.MatchString(m[1]) {
+				t.Errorf("%s: recovery install ref %q is not a full commit SHA", doc, m[1])
+			}
+			refs[m[1]] = append(refs[m[1]], doc)
+		}
 		total += found
 	}
 	if len(refs) > 1 {
@@ -341,7 +351,7 @@ func TestInstallOneLiners_LeakGuardReadsTheInstallJobOnly(t *testing.T) {
 		}
 	}
 	fourLine := strings.Replace(current,
-		"    - sh -c 't=$(mktemp) && curl -sSfL -o \"$t\" ",
+		"    - sh -c 't=$(mktemp) && ",
 		"    - t=$(mktemp)\n    - trap 'rm -f \"$t\"' EXIT\n    - curl -sSfL -o \"$t\" ", 1)
 	if fourLine == current {
 		t.Fatalf("could not compose the four-line form from the current example")

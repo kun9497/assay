@@ -23,12 +23,11 @@
 
 ```bash
 # 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — PATH 위로 바로 설치; Windows는 아래
-sh -c 't=$(mktemp) && curl -sSfL -o "$t" https://raw.githubusercontent.com/kun9497/assay/d0a71e71679df43c93679d847ddfc7d3e1f4ac4f/install.sh && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
+sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/a8a7e22238801ba3f2ab11b247adb3c80e224c3d/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=a8a7e22238801ba3f2ab11b247adb3c80e224c3d") && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
 ```
 
 스크립트는 프로젝트 서명 키를 내장하고 릴리스 체크섬 파일의 서명을 `openssl`(또는 `cosign`)로
-먼저 검증한 뒤 체크섬을 확인하고 OS/arch에 맞는 에셋을 고릅니다. 위 줄은 최신 릴리스가 빌드된
-커밋을 가리킵니다 — 옮겨질 수 있는 브랜치나 태그가 아니라 — 그리고 릴리스 잡이 이 줄을 갱신합니다.
+먼저 검증한 뒤 체크섬을 확인하고 OS/arch에 맞는 에셋을 고릅니다. URL에는 설치 스크립트의 Git 커밋을 고정합니다. raw 호스트에 연결하지 못하면 같은 커밋의 같은 파일을 GitHub contents API에서 받습니다.
 스크립트는 임시 파일(`mktemp`)로 받아 다운로드가 성공했을 때만 실행하고, 설치가 성공하든 실패하든 그 파일을 지우며(중단된 실행은 `$TMPDIR`에 본인만 읽을 수 있는 파일을 남길 수 있습니다),
 줄의 종료 상태는 설치의 것입니다(`curl`을 `sh`로 파이프하면 다운로드가 실패해도 0을 반환했고, 작업 디렉터리의 고정
 파일명은 같은 이름의 파일을 덮어썼습니다). 현재 디렉터리의 파일은 건드리지 않습니다. `-b` 없이 실행하면 `./bin`에
@@ -37,15 +36,27 @@ sh -c 't=$(mktemp) && curl -sSfL -o "$t" https://raw.githubusercontent.com/kun94
 거부합니다: v0.10.0 이 첫 서명 릴리스이므로 그보다 오래된 것은 `go install` 이나 릴리스 페이지로
 설치하세요.
 
+v0.18.1 또는 v0.18.2 태그의 설치 스크립트를 root로 실행한 경우, 위 명령을 다시 실행하면
+빌드 러너 소유 바이너리를 root 소유 파일로 교체합니다.
+
 Windows에서는(이 스크립트를 처음 싣는 v0.12.0부터) PowerShell 5.1이나 7에서:
 
 ```powershell
-irm https://raw.githubusercontent.com/kun9497/assay/d0a71e71679df43c93679d847ddfc7d3e1f4ac4f/install.ps1 | iex
+& { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/a8a7e22238801ba3f2ab11b247adb3c80e224c3d/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=a8a7e22238801ba3f2ab11b247adb3c80e224c3d" }; & ([scriptblock]::Create($s)) }
 ```
 
 `install.ps1`은 같은 서명을 .NET으로 검증하므로 먼저 설치할 것이 없고, `assay.exe`를
 `%LOCALAPPDATA%\Programs\assay`에 설치합니다(`$env:ASSAY_INSTALL_DIR`로 바꾸고,
 `$env:ASSAY_VERSION`으로 다른 릴리스를 고릅니다). 그다음 PATH에 넣는 명령을 출력합니다.
+
+**GitHub 다운로드 시간이 초과되면** Git·Python 3·curl을 사용해 아래 명령을 실행하세요. `assay-install`이 아직 없는 디렉터리에서 시작하고, 각 명령이 성공한 뒤 다음 명령을 실행합니다. Git 경로로 고정한 설치 스크립트를 가져오므로 raw 호스트와 공개 API에 연결할 수 없을 때도 사용할 수 있습니다.
+
+```text
+git clone --no-checkout https://github.com/kun9497/assay.git assay-install
+git -C assay-install checkout --detach a8a7e22238801ba3f2ab11b247adb3c80e224c3d
+```
+
+Linux·macOS에서는 `python3 assay-install/scripts/recover-install.py -b "$HOME/.local/bin"`, Windows에서는 `py -3 assay-install/scripts/recover-install.py`를 실행합니다(Python 3 명령이 `python`이면 그 이름을 사용하세요). Windows 복구는 현재 PowerShell 실행 정책에 따라 체크아웃한 스크립트를 실행합니다. 연결 실패 시 도구가 DNS에서 받은 다른 주소로 공식 HTTPS 자산 호스트에 재시도합니다. 설치 스크립트가 서명과 체크섬을 확인한 뒤 바이너리를 교체합니다. 프록시가 GitHub의 모든 자산 주소를 차단하면 해당 주소에 대한 접근이 필요합니다. 비인증 GitHub contents API에는 [IP별 호출 제한](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)이 있습니다.
 
 <details>
 <summary>다른 설치 방법</summary>

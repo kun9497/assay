@@ -45,6 +45,12 @@ jobs:
       - name: Hold the toolchain to go.mod's floor
         run: sh scripts/check-go-toolchain.sh
 
+      - name: Report the tagged installer defaults
+        run: |
+          if ! grep -Fxq "VERSION=\"$GITHUB_REF_NAME\"" install.sh || ! grep -Fxq "\$DefaultVersion = '$GITHUB_REF_NAME'" install.ps1; then
+            echo "::warning::The tagged installers have a different default than $GITHUB_REF_NAME. Check the public install commands after publishing."
+          fi
+
       - uses: ./.github/actions/setup-cosign
 
       # Pinned by commit (v6 is a moving major tag): this job signs the
@@ -77,7 +83,10 @@ jobs:
           git fetch --depth=1 origin main
           git checkout -B main origin/main
           for f in README.md README.ko.md docs/ci/github-actions.yml docs/ci/gitlab-ci.yml; do
-            sed -i -E "s#raw\.githubusercontent\.com/kun9497/assay/[^/]+/install\.(sh|ps1)#raw.githubusercontent.com/kun9497/assay/${GITHUB_SHA}/install.\1#g" "$f"
+            sed -i -E \
+              -e "s#(raw\.githubusercontent\.com/kun9497/assay/)[^/]+(/install\.(sh|ps1))#\1$GITHUB_SHA\2#g" \
+              -e "s#(api\.github\.com/repos/kun9497/assay/contents/install\.(sh|ps1)\?ref=)[0-9a-f]{40}#\1$GITHUB_SHA#g" \
+              -e "s#(git -C assay-install checkout --detach )[0-9a-f]{40}#\1$GITHUB_SHA#g" "$f"
           done
           if git diff --quiet; then echo "install one-liners already pin ${GITHUB_SHA}"; exit 0; fi
           git config user.name "github-actions[bot]"

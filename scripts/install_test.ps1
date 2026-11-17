@@ -125,6 +125,7 @@ try {
 
     # C1 clean install
     Run-Case C1 $k1 0 'installed v9.9.1'
+    Run-Case C1-local $k1 0 'installed v9.9.1' -Env @{ ASSAY_RELEASE_DIR = (Join-Path $root 'v9.9.1'); ASSAY_RELEASE_BASE = 'http://invalid.invalid' }
     Assert-Installed C1 'assay v9.9.1 (genuine build)'
 
     # C2 archive tampered, checksums and signature untouched
@@ -133,11 +134,13 @@ try {
     [IO.File]::WriteAllText((Join-Path $evil 'assay.exe'), 'EVIL')
     Compress-Archive -Path (Join-Path $evil 'assay.exe') -DestinationPath (Join-Path $root "c2\v9.9.1\assay_9.9.1_windows_$arch.zip") -Force
     Run-Case C2 $k1 1 'checksum mismatch' -Env @{ ASSAY_RELEASE_BASE = "$base/c2" }
+    Run-Case C2-local $k1 1 'checksum mismatch' -Env @{ ASSAY_RELEASE_DIR = (Join-Path $root 'c2\v9.9.1') }
 
     # C3a assets rewritten consistently by an attacker, the genuine .sig left
     New-Release v9.9.1 attacker (Join-Path $root 'c3a') EVIL
     Copy-Item (Join-Path $root 'v9.9.1\assay_9.9.1_checksums.txt.sig') (Join-Path $root 'c3a\v9.9.1\') -Force
     Run-Case C3a $k1 1 'does not verify against any key embedded' -Env @{ ASSAY_RELEASE_BASE = "$base/c3a" }
+    Run-Case C3a-local $k1 1 'does not verify against any key embedded' -Env @{ ASSAY_RELEASE_DIR = (Join-Path $root 'c3a\v9.9.1') }
 
     # C3a-nosig: the .sig deleted -- refused by the missing-signature guard
     # itself, not by a later one.

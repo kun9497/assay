@@ -50,7 +50,16 @@ release() {
 	mkdir -p "$work"
 	printf '#!/bin/sh\necho "assay %s (%s build)"\n' "$tag" "$label" >"$work/assay"
 	chmod +x "$work/assay"
-	(cd "$work" && tar -czf "$dir/$tag/assay_${ver}_${os}_${arch}.tar.gz" assay)
+	# Model the published tar's build-runner owner, even in a non-root CI.
+	"$PY" - "$work/assay" "$dir/$tag/assay_${ver}_${os}_${arch}.tar.gz" <<'PYTHON'
+import sys, tarfile
+with tarfile.open(sys.argv[2], "w:gz") as archive, open(sys.argv[1], "rb") as src:
+    info = archive.gettarinfo(sys.argv[1], "assay")
+    info.uid = info.gid = 59001
+    info.uname = info.gname = ""
+    info.mode = 0o6777
+    archive.addfile(info, src)
+PYTHON
 	printf '%s  %s\n' "$(sha256 "$dir/$tag/assay_${ver}_${os}_${arch}.tar.gz")" "assay_${ver}_${os}_${arch}.tar.gz" >"$dir/$tag/assay_${ver}_checksums.txt"
 	openssl dgst -sha256 -sign "$tmp/$key.pem" -out "$tmp/sig-$tag-$label.der" "$dir/$tag/assay_${ver}_checksums.txt"
 	base64 <"$tmp/sig-$tag-$label.der" | tr -d '\n' >"$dir/$tag/assay_${ver}_checksums.txt.sig"
@@ -112,7 +121,34 @@ run() {
 
 # C1 clean install
 run C1 "$tmp/install-k1.sh" 0 "installed v9.9.1"
+"$PY" - "$tmp/bin-C1/assay" <<'PYTHON'
+import os, stat, sys
+s = os.stat(sys.argv[1])
+assert s.st_uid == os.geteuid(), (s.st_uid, os.geteuid())
+assert stat.S_IMODE(s.st_mode) == 0o755, oct(s.st_mode)
+PYTHON
+(ASSAY_RELEASE_DIR="$root/v9.9.1" ASSAY_RELEASE_BASE=http://invalid.invalid run C1-local "$tmp/install-k1.sh" 0 "signature on")
 "$tmp/bin-C1/assay" | grep -q "v9.9.1 (genuine build)" || { echo "FAIL C1: wrong binary installed"; echo C1 >>"$fails"; }
+
+# A signed archive can still lack an executable. Preserve the old binary
+# and remove the destination-local staging file on an extraction failure.
+broken="$tmp/broken-release"
+mkdir "$broken" "$tmp/existing-bin"
+archive="assay_9.9.1_${os}_${arch}.tar.gz"
+sums=assay_9.9.1_checksums.txt
+printf 'unrelated' >"$tmp/other-member"
+tar -czf "$broken/$archive" -C "$tmp" other-member
+printf '%s  %s\n' "$(sha256 "$broken/$archive")" "$archive" >"$broken/$sums"
+openssl dgst -sha256 -sign "$tmp/key1.pem" -out "$tmp/broken.der" "$broken/$sums"
+base64 <"$tmp/broken.der" | tr -d '\n' >"$broken/$sums.sig"
+printf 'keep-existing' >"$tmp/existing-bin/assay"
+if ASSAY_RELEASE_DIR="$broken" sh "$tmp/install-k1.sh" -b "$tmp/existing-bin" >"$tmp/broken.out" 2>"$tmp/broken.err"; then
+	echo "FAIL signed archive missing assay was installed"; exit 1
+fi
+[ "$(cat "$tmp/existing-bin/assay")" = keep-existing ]
+set -- "$tmp/existing-bin"/.assay-install.*
+[ ! -e "$1" ]
+echo "ok   failed extraction preserves existing executable and cleans staging"
 
 # C2 archive tampered, checksums + sig untouched
 cp -r "$root" "$tmp/c2"
@@ -122,11 +158,13 @@ ASSAY_RELEASE_BASE="http://127.0.0.1:$port/../c2" true
 # http.server cannot escape its root, so serve each mutated tree under it.
 mv "$tmp/c2" "$root/c2"
 (ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c2" run C2 "$tmp/install-k1.sh" 1 "checksum mismatch")
+(ASSAY_RELEASE_DIR="$root/c2/v9.9.1" run C2-local "$tmp/install-k1.sh" 1 "checksum mismatch")
 
 # C3a release assets rewritten consistently, stale .sig left
 release v9.9.1 attacker "$root/c3a" EVIL
 cp "$root/v9.9.1/assay_9.9.1_checksums.txt.sig" "$root/c3a/v9.9.1/assay_9.9.1_checksums.txt.sig"
 (ASSAY_RELEASE_BASE="http://127.0.0.1:$port/c3a" run C3a "$tmp/install-k1.sh" 1 "does not verify against any key embedded")
+(ASSAY_RELEASE_DIR="$root/c3a/v9.9.1" run C3a-local "$tmp/install-k1.sh" 1 "does not verify against any key embedded")
 
 # C3a-nosig: .sig deleted -- refused by the missing-signature guard itself,
 # not by a later one (ABSENT pins which guard fired).
