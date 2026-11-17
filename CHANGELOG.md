@@ -7,14 +7,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-11-17
+
 ### Fixed
 - The CI documentation check treats each GitHub Actions `run` step as a separate
   shell when checking for installer variables and cleanup traps.
 - Unix installation creates the executable as the installing user, with mode 0755.
   An installation run as root previously restored the build runner's UID from tar.
-- The published install commands select v0.18.2. If a GitHub download edge times out,
-  a pinned Git checkout can retrieve the release through another address returned by
-  DNS, with the same TLS, signature and checksum verification.
+- Both tagged installers default to v0.18.3. The published install commands can
+  fetch the same pinned script through GitHub's contents API if the raw host is unavailable.
+  If a release asset connection times out, a pinned Git checkout can retrieve the release
+  through another address returned by DNS, with the same TLS, signature and checksum verification.
 
 ## [0.18.2] - 2026-11-17
 
@@ -1349,7 +1352,8 @@ All notable changes to this project are documented here. The format follows
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.2...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.3...main
+[0.18.3]: https://github.com/kun9497/assay/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/kun9497/assay/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/kun9497/assay/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/kun9497/assay/compare/v0.17.0...v0.18.0

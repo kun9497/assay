@@ -23,7 +23,7 @@
 
 ```bash
 # 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — PATH 위로 바로 설치; Windows는 아래
-sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/a8a7e22238801ba3f2ab11b247adb3c80e224c3d/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=a8a7e22238801ba3f2ab11b247adb3c80e224c3d") && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
+sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/3e5f3907e39fb518e20f41df7bc3744fd4caf4f5/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=3e5f3907e39fb518e20f41df7bc3744fd4caf4f5") && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
 ```
 
 스크립트는 프로젝트 서명 키를 내장하고 릴리스 체크섬 파일의 서명을 `openssl`(또는 `cosign`)로
@@ -42,7 +42,7 @@ v0.18.1 또는 v0.18.2 태그의 설치 스크립트를 root로 실행한 경우
 Windows에서는(이 스크립트를 처음 싣는 v0.12.0부터) PowerShell 5.1이나 7에서:
 
 ```powershell
-& { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/a8a7e22238801ba3f2ab11b247adb3c80e224c3d/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=a8a7e22238801ba3f2ab11b247adb3c80e224c3d" }; & ([scriptblock]::Create($s)) }
+& { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/3e5f3907e39fb518e20f41df7bc3744fd4caf4f5/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=3e5f3907e39fb518e20f41df7bc3744fd4caf4f5" }; & ([scriptblock]::Create($s)) }
 ```
 
 `install.ps1`은 같은 서명을 .NET으로 검증하므로 먼저 설치할 것이 없고, `assay.exe`를
@@ -53,7 +53,7 @@ Windows에서는(이 스크립트를 처음 싣는 v0.12.0부터) PowerShell 5.1
 
 ```text
 git clone --no-checkout https://github.com/kun9497/assay.git assay-install
-git -C assay-install checkout --detach a8a7e22238801ba3f2ab11b247adb3c80e224c3d
+git -C assay-install checkout --detach 3e5f3907e39fb518e20f41df7bc3744fd4caf4f5
 ```
 
 Linux·macOS에서는 `python3 assay-install/scripts/recover-install.py -b "$HOME/.local/bin"`, Windows에서는 `py -3 assay-install/scripts/recover-install.py`를 실행합니다(Python 3 명령이 `python`이면 그 이름을 사용하세요). Windows 복구는 현재 PowerShell 실행 정책에 따라 체크아웃한 스크립트를 실행합니다. 연결 실패 시 도구가 DNS에서 받은 다른 주소로 공식 HTTPS 자산 호스트에 재시도합니다. 설치 스크립트가 서명과 체크섬을 확인한 뒤 바이너리를 교체합니다. 프록시가 GitHub의 모든 자산 주소를 차단하면 해당 주소에 대한 접근이 필요합니다. 비인증 GitHub contents API에는 [IP별 호출 제한](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)이 있습니다.
