@@ -37,8 +37,12 @@ High 또는 Critical 경고가 있으면 종료 코드는 1입니다. 패키지�
 ## CI 보고서
 
 [GitHub Actions](ci/github-actions.yml)의 스캔 단계는 Assay의 종료 코드를 그대로 반환합니다. SARIF가 생성되면
-정책에 걸려도 다음 단계가 이를 업로드합니다. 이 단계를 사용하려면 저장소에서 코드 스캐닝이
-활성화되어 있어야 합니다. 보고서를 만들기 전 실패하면 작업 로그에서 오류를 확인하세요.
+정책에 걸려도 다음 단계가 이를 업로드합니다. 보고서를 만들기 전 실패하면 작업 로그에서 오류를 확인하세요.
+
+GitHub.com은 공개 저장소에서 SARIF 업로드를 지원합니다. 조직 소유 비공개 또는 내부 저장소에서는
+GitHub Team 또는 Enterprise 플랜을 사용하고 해당 저장소에서 GitHub Code Security를 활성화해야 합니다.
+예제의 `security-events: write` 권한은 SARIF 업로드에 필요합니다. `actions: read`와 `contents: read` 권한은
+비공개 저장소에서 업로드 액션이 워크플로 실행 정보와 저장소 내용을 읽을 수 있게 합니다. [GitHub의 SARIF 업로드 요건](https://docs.github.com/en/code-security/how-tos/find-and-fix-code-vulnerabilities/integrate-with-existing-tools/upload-sarif-file)
 
 [GitLab CI](ci/gitlab-ci.yml) 잡은 JSON과 SARIF를 다운로드할 수 있는 아티팩트로 보관합니다.
 두 형식에 같은 이미지 다이제스트·플랫폼·DB·정책을 적용하고 종료 코드 중 큰 값을 반환합니다.
@@ -65,8 +69,6 @@ NVD/EPSS/KEV를 다루려면 `--db-max-rating-age`를 따로 넘기십시오 —
 밝힙니다(D141): 읽은 경로와 읽지 않은 것을 적는 stderr 의 `note:` 줄과 SARIF 의
 `assay/inventory-scope` 노트가 있어, 코드 스캐닝 탭에 이 문장 없는 빈 이미지 스캔이 보이는
 일은 없습니다.
-
-코드 스캐닝 업로드를 가능하게 하는 것은 `security-events: write` 권한입니다.
 
 ## 데이터베이스
 
