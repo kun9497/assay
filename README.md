@@ -40,6 +40,9 @@ vX.Y.Z; s=$?; …`), verified against the same keys. A release whose checksums f
 signature is refused, never installed on the checksum alone: v0.10.0 is the first signed
 release, so anything older goes through `go install` or the release page.
 
+If you previously installed as root using the v0.18.1 or tagged v0.18.2 installer,
+rerun the command above to replace the build-runner-owned binary with one owned by root.
+
 On Windows (from v0.12.0, the first release that ships it), in PowerShell 5.1 or 7:
 
 ```powershell

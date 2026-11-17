@@ -36,6 +36,9 @@ sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$
 거부합니다: v0.10.0 이 첫 서명 릴리스이므로 그보다 오래된 것은 `go install` 이나 릴리스 페이지로
 설치하세요.
 
+v0.18.1 또는 v0.18.2 태그의 설치 스크립트를 root로 실행한 경우, 위 명령을 다시 실행하면
+빌드 러너 소유 바이너리를 root 소유 파일로 교체합니다.
+
 Windows에서는(이 스크립트를 처음 싣는 v0.12.0부터) PowerShell 5.1이나 7에서:
 
 ```powershell

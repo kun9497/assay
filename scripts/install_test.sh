@@ -130,6 +130,26 @@ PYTHON
 (ASSAY_RELEASE_DIR="$root/v9.9.1" ASSAY_RELEASE_BASE=http://invalid.invalid run C1-local "$tmp/install-k1.sh" 0 "signature on")
 "$tmp/bin-C1/assay" | grep -q "v9.9.1 (genuine build)" || { echo "FAIL C1: wrong binary installed"; echo C1 >>"$fails"; }
 
+# A signed archive can still lack an executable. Preserve the old binary
+# and remove the destination-local staging file on an extraction failure.
+broken="$tmp/broken-release"
+mkdir "$broken" "$tmp/existing-bin"
+archive="assay_9.9.1_${os}_${arch}.tar.gz"
+sums=assay_9.9.1_checksums.txt
+printf 'unrelated' >"$tmp/other-member"
+tar -czf "$broken/$archive" -C "$tmp" other-member
+printf '%s  %s\n' "$(sha256 "$broken/$archive")" "$archive" >"$broken/$sums"
+openssl dgst -sha256 -sign "$tmp/key1.pem" -out "$tmp/broken.der" "$broken/$sums"
+base64 <"$tmp/broken.der" | tr -d '\n' >"$broken/$sums.sig"
+printf 'keep-existing' >"$tmp/existing-bin/assay"
+if ASSAY_RELEASE_DIR="$broken" sh "$tmp/install-k1.sh" -b "$tmp/existing-bin" >"$tmp/broken.out" 2>"$tmp/broken.err"; then
+	echo "FAIL signed archive missing assay was installed"; exit 1
+fi
+[ "$(cat "$tmp/existing-bin/assay")" = keep-existing ]
+set -- "$tmp/existing-bin"/.assay-install.*
+[ ! -e "$1" ]
+echo "ok   failed extraction preserves existing executable and cleans staging"
+
 # C2 archive tampered, checksums + sig untouched
 cp -r "$root" "$tmp/c2"
 printf '#!/bin/sh\necho EVIL\n' >"$tmp/evil"
