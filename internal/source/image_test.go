@@ -239,6 +239,6 @@ func TestImageFromIndex_ConfigPlatformIsStillChecked(t *testing.T) {
 // pickHost selects the host default out of idx, the way a scan without
 // --platform does.
 func pickHost(idx indexReader, what string) (v1.Image, error) {
-	img, _, err := imageFromIndex(idx, what, v1.Hash{}, DefaultPlatform(), false)
+	img, _, err := imageFromIndex(context.Background(), idx, what, v1.Hash{}, DefaultPlatform(), false)
 	return img, err
 }

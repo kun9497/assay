@@ -19,10 +19,12 @@ jobs:
           go-version: '1.26'
           cache: true
 
-      # QA 2026-10-30: the same floor the release holds, so a PR that lowers
-      # go.mod's toolchain line, or a runner below it, fails here first.
+      # Check the same minimum Go version that the release build requires.
       - name: Hold the toolchain to go.mod's floor
         run: sh scripts/check-go-toolchain.sh
+
+      - name: Test the release CI gate
+        run: python3 scripts/test-release-ci.py
 
       - name: Verify formatting
         run: |

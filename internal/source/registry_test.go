@@ -314,11 +314,11 @@ func TestConfigSize_IsCheckedAtEveryConfigRead(t *testing.T) {
 			noPlatform: []string{hex},
 			images:     map[string]v1.Image{hex: configImage{os: "linux", arch: runtime.GOARCH, configSize: MaxConfigBytes + 1}},
 		}
-		var cands []candidate
-		var skipped []unreadable
-		if err := collectCandidates(idx, "index", v1.Hash{}, nil, 0, &cands, &skipped); err != nil {
+		walk := indexWalk{expanded: make(map[v1.Hash]bool)}
+		if err := walk.collectCandidates(t.Context(), idx, "index", v1.Hash{}, nil, 0); err != nil {
 			t.Fatalf("collectCandidates: %v", err)
 		}
+		cands, skipped := walk.candidates, walk.skipped
 		if len(cands) != 0 {
 			t.Errorf("candidates = %+v, want none: the entry's config was declared past the limit", cands)
 		}

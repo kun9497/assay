@@ -72,6 +72,30 @@ scan says this itself (D141): a `note:` line on stderr naming the paths it read 
 not, and an `assay/inventory-scope` note in SARIF, so the code-scanning tab never shows an
 empty image scan without it.
 
+## Verify the hosted CI examples
+
+In the v0.18.3 public GitHub run, the High gate returned 1 and GitHub registered the SARIF alerts.
+As of 2026-11-17, the private GitHub upload and GitLab.com hosted runner cases below have not been run.
+The GitLab example's shell commands have been checked locally. [Public GitHub run](https://github.com/kun9497/assay/actions/runs/44008452298)
+
+### GitHub private repository
+
+1. Choose an organization for the test. If you only have a personal account, you can create a QA organization in a **GitHub.com Enterprise Cloud trial** with personal accounts. The trial includes Code Security and up to 3,000 standard hosted runner minutes, requires no payment method and expires after 30 days unless purchased. Use `ubuntu-latest` within that allowance. Linking an Azure subscription to this type of trial starts paid usage immediately. [Trial terms and signup](https://docs.github.com/en/enterprise-cloud@latest/admin/overview/setting-up-a-trial-of-github-enterprise-cloud)
+2. In the chosen organization, enable **Settings → Advanced Security → Code Security** on a private QA repository. Copy the example to `.github/workflows/assay.yml` and push it to the QA repository's `main` branch. Keep its permissions, pinned public test image and High gate. Record the commit SHA and the verified DB digest from the run. [Assay workflow](ci/github-actions.yml) · [GitHub repository settings](https://docs.github.com/en/code-security/reference/code-scanning/troubleshoot-analysis-errors/private-repository-enablement)
+3. For a scan with a High finding, confirm exit 1 in **Scan and apply policy**, a failed job and a successful **Upload report to code scanning** step. In **Security → Code scanning**, select the scanned branch, open the matching Assay alert and verify that its instance belongs to the same commit. Save the run and alert URLs. If the current DB yields no High finding, use an image with a confirmed High finding and repeat the test.
+
+### GitLab.com hosted runner
+
+Use a GitLab.com QA project with CI/CD enabled and compute minutes available. On the Free plan, complete identity verification if GitLab prompts for it. In `.gitlab-ci.yml`, place three copies of the example job under distinct names and give each job `tags: [saas-linux-small-amd64]`. In each copy, add `echo "Assay exit $verdict"` immediately before `exit "$verdict"`. [Assay job](ci/gitlab-ci.yml) · [GitLab Linux hosted runners](https://docs.gitlab.com/ci/runners/hosted_runners/linux/) · [GitLab identity verification](https://docs.gitlab.com/ci/debugging/#error-identity-verification-is-required-in-order-to-run-ci-jobs)
+
+| Job | Change to the example | Expected job log and artifacts |
+|---|---|---|
+| Pass | Change `--fail-on high` to `--fail-on critical` on the example image. | Exit 0 when evaluation completes with no Critical findings. Both JSON and SARIF are downloadable. |
+| Policy failure | Keep the example image and High threshold. | Exit 1 for a High or Critical finding. Both reports are downloadable from the failed job. |
+| Input error | Set `IMAGE` to `docker-archive:missing-assay-qa.tar` and leave that file absent. | Exit 2 with the input error in the log. No scan report is produced. |
+
+Check the runner identity, exit line and DB digest in each job. The error and policy jobs are expected to fail the pipeline. Record the pipeline URL and each job URL. If the first two jobs do not see the same DB digest or the image no longer has a High finding and zero Critical findings, repeat with a matching image and DB.
+
 ## The database
 
 `assay db update` pulls the published database from `ghcr.io/kun9497/assay-db` — an OCI

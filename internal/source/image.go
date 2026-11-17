@@ -205,7 +205,8 @@ func load(ctx context.Context, ref string, want v1.Platform, explicit bool) (v1.
 		if err != nil {
 			return nil, loaded{}, fmt.Errorf("read oci layout %s: %w", ref, err)
 		}
-		m, err := idx.IndexManifest()
+		layoutIndex := v1Index{idx: idx, openConfigBlob: layout.Path(p).Blob}
+		m, err := layoutIndex.IndexManifest()
 		if err != nil {
 			return nil, loaded{}, fmt.Errorf("read oci layout %s: %w", ref, err)
 		}
@@ -214,7 +215,7 @@ func load(ctx context.Context, ref string, want v1.Platform, explicit bool) (v1.
 		// judged the way a docker archive is.
 		if len(m.Manifests) == 1 && !m.Manifests[0].MediaType.IsIndex() {
 			d := m.Manifests[0]
-			img, err := idx.Image(d.Digest)
+			img, err := layoutIndex.Image(d.Digest)
 			if err != nil {
 				return nil, loaded{}, fmt.Errorf("read oci layout %s: %w", ref, err)
 			}
@@ -226,7 +227,7 @@ func load(ctx context.Context, ref string, want v1.Platform, explicit bool) (v1.
 		}
 		// The layout's own index.json has no digest anyone pushed, so it is
 		// not recorded as the index: the zero parent.
-		img, choice, err := imageFromIndex(v1Index{idx}, ref, v1.Hash{}, want, explicit)
+		img, choice, err := imageFromIndex(ctx, layoutIndex, ref, v1.Hash{}, want, explicit)
 		return img, loaded{choice: choice}, err
 
 	default:
@@ -278,7 +279,7 @@ func load(ctx context.Context, ref string, want v1.Platform, explicit bool) (v1.
 			if err != nil {
 				return fail(err)
 			}
-			img, choice, err := imageFromIndex(v1Index{idx}, ref, desc.Digest, want, explicit)
+			img, choice, err := imageFromIndex(ctx, v1Index{idx: idx}, ref, desc.Digest, want, explicit)
 			if err != nil {
 				return fail(err)
 			}
@@ -365,10 +366,19 @@ type indexReader interface {
 
 // v1Index adapts go-containerregistry's index to indexReader, narrowing the
 // recursive method's return type as it goes.
-type v1Index struct{ idx v1.ImageIndex }
+type v1Index struct {
+	idx            v1.ImageIndex
+	openConfigBlob func(v1.Hash) (io.ReadCloser, error)
+}
 
 func (w v1Index) IndexManifest() (*v1.IndexManifest, error) { return w.idx.IndexManifest() }
-func (w v1Index) Image(h v1.Hash) (v1.Image, error)         { return w.idx.Image(h) }
+func (w v1Index) Image(h v1.Hash) (v1.Image, error) {
+	img, err := w.idx.Image(h)
+	if err != nil || w.openConfigBlob == nil {
+		return img, err
+	}
+	return layoutImage{img, w.openConfigBlob}, nil
+}
 func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
 	c, err := w.idx.ImageIndex(h)
 	if err != nil {
@@ -384,7 +394,7 @@ func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
 	if err := checkManifestDigest(raw, h); err != nil {
 		return nil, err
 	}
-	return v1Index{c}, nil
+	return v1Index{idx: c, openConfigBlob: w.openConfigBlob}, nil
 }
 
 // imageFromIndex picks want out of a multi-platform index, nested ones
@@ -395,12 +405,12 @@ func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
 // right one — it produces a full package list, just not the one that is
 // running — so a miss is an error naming what was on offer, never a fallback
 // to the first entry.
-func imageFromIndex(idx indexReader, what string, parent v1.Hash, want v1.Platform, explicit bool) (v1.Image, PlatformChoice, error) {
-	var cands []candidate
-	var skipped []unreadable
-	if err := collectCandidates(idx, what, parent, nil, 0, &cands, &skipped); err != nil {
+func imageFromIndex(ctx context.Context, idx indexReader, what string, parent v1.Hash, want v1.Platform, explicit bool) (v1.Image, PlatformChoice, error) {
+	walk := indexWalk{expanded: make(map[v1.Hash]bool)}
+	if err := walk.collectCandidates(ctx, idx, what, parent, nil, 0); err != nil {
 		return nil, PlatformChoice{}, err
 	}
+	cands, skipped := walk.candidates, walk.skipped
 	plats := make([]v1.Platform, len(cands))
 	for i, c := range cands {
 		plats[i] = c.plat
@@ -486,9 +496,17 @@ func skippedNote(skipped []unreadable) string {
 		len(skipped), skipped[0].digest, skipped[0].err)
 }
 
-// maxIndexDepth bounds nesting. `skopeo copy --all` writes an index whose
-// children are themselves indexes, and a malformed one could cycle.
+// A depth bound alone permits a wide index to cause unbounded image and
+// config reads. Count every descriptor listed by each distinct index once.
 const maxIndexDepth = 4
+const maxIndexDescriptors = 4096
+
+type indexWalk struct {
+	expanded    map[v1.Hash]bool
+	descriptors int
+	candidates  []candidate
+	skipped     []unreadable
+}
 
 // collectCandidates walks an index, descending into nested ones, and appends
 // every image it offers in walk order. The WHOLE tree is collected before
@@ -500,7 +518,10 @@ const maxIndexDepth = 4
 // whose descriptor carries only a ref-name annotation. The first is walked;
 // the second is judged by its image's config. Both used to fail with "it
 // offers " and an empty list — an error naming nothing.
-func collectCandidates(idx indexReader, what string, parent v1.Hash, outer []v1.Hash, depth int, out *[]candidate, skipped *[]unreadable) error {
+func (w *indexWalk) collectCandidates(ctx context.Context, idx indexReader, what string, parent v1.Hash, outer []v1.Hash, depth int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if depth >= maxIndexDepth {
 		return fmt.Errorf("%s nests indexes more than %d deep", what, maxIndexDepth)
 	}
@@ -508,19 +529,32 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, outer []v1.
 	if err != nil {
 		return err
 	}
+	if len(m.Manifests) > maxIndexDescriptors-w.descriptors {
+		return fmt.Errorf("%s exceeds the %d-descriptor image index limit", what, maxIndexDescriptors)
+	}
+	w.descriptors += len(m.Manifests)
 	for _, d := range m.Manifests {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if d.MediaType.IsIndex() {
+			// A digest identifies the entire subtree. Its first occurrence
+			// wins any platform tie and supplies the VEX ancestry.
+			if w.expanded[d.Digest] {
+				continue
+			}
 			child, err := idx.ImageIndex(d.Digest)
 			if err != nil {
 				return err
 			}
+			w.expanded[d.Digest] = true
 			// The child's chain is this one plus this index, copied so two
 			// siblings never share a backing array.
 			chain := append([]v1.Hash(nil), outer...)
 			if parent.Hex != "" {
 				chain = append(chain, parent)
 			}
-			if err := collectCandidates(child, what, d.Digest, chain, depth+1, out, skipped); err != nil {
+			if err := w.collectCandidates(ctx, child, what, d.Digest, chain, depth+1); err != nil {
 				return err
 			}
 			continue
@@ -545,14 +579,14 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, outer []v1.
 				if refusal(err) != nil {
 					return err
 				}
-				*skipped = append(*skipped, unreadable{d.Digest, err})
+				w.skipped = append(w.skipped, unreadable{d.Digest, err})
 				continue
 			}
 			// A config declared past the limit is skipped like any other
 			// unreadable entry -- recorded, so a miss still says so -- and
 			// never fetched (QA 2026-11-02).
 			if err := checkConfigSize(img); err != nil {
-				*skipped = append(*skipped, unreadable{d.Digest, err})
+				w.skipped = append(w.skipped, unreadable{d.Digest, err})
 				continue
 			}
 			cf, err := img.ConfigFile()
@@ -560,13 +594,13 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, outer []v1.
 				if refusal(err) != nil {
 					return err
 				}
-				*skipped = append(*skipped, unreadable{d.Digest, err})
+				w.skipped = append(w.skipped, unreadable{d.Digest, err})
 				continue
 			}
 			if cf.OS == "" || cf.Architecture == "" || cf.OS == "unknown" || cf.Architecture == "unknown" {
 				continue
 			}
-			*out = append(*out, candidate{
+			w.candidates = append(w.candidates, candidate{
 				plat:   normalizePlatform(v1.Platform{OS: cf.OS, Architecture: cf.Architecture, Variant: cf.Variant}),
 				digest: d.Digest, parent: parent, outer: outer, idx: idx, img: img,
 			})
@@ -579,12 +613,12 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, outer []v1.
 		if p.OS == "unknown" || p.Architecture == "unknown" {
 			continue
 		}
-		*out = append(*out, candidate{
+		w.candidates = append(w.candidates, candidate{
 			plat:   normalizePlatform(*p),
 			digest: d.Digest, parent: parent, outer: outer, idx: idx,
 		})
 	}
-	return nil
+	return ctx.Err()
 }
 
 // checkConfigSize refuses an image whose manifest declares its config larger
@@ -595,9 +629,8 @@ func collectCandidates(idx indexReader, what string, parent v1.Hash, outer []v1.
 // first wanted, so the declaration costs nothing to consult. Every site that
 // reads the config consults it: checkSingle and collectCandidates, which
 // read it to judge a platform, and configDiffIDs, which reads it for every
-// image path's diff ids -- so a tarball or layout whose manifest declares an
-// absurd size is refused the same way, though on those paths the library
-// derives the size from the bytes it already has.
+// image path's diff ids. For an OCI layout the declaration is also checked
+// against the blob itself by layoutImage.RawConfigFile.
 func checkConfigSize(img v1.Image) error {
 	m, err := img.Manifest()
 	if err != nil {

@@ -23,7 +23,7 @@
 
 ```bash
 # 사전 빌드 바이너리 (Linux/macOS, amd64/arm64) — PATH 위로 바로 설치; Windows는 아래
-sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/8766ae564f172fef7a67ccc0b1e9b0d66910c2bb/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=8766ae564f172fef7a67ccc0b1e9b0d66910c2bb") && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
+sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/5ec3acb1c1a39fb193ae221442201826c2b6c0cf/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=5ec3acb1c1a39fb193ae221442201826c2b6c0cf") && sudo sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
 ```
 
 스크립트는 프로젝트 서명 키를 내장하고 릴리스 체크섬 파일의 서명을 `openssl`(또는 `cosign`)로
@@ -45,7 +45,7 @@ sudo가 없는 러너에서는 설치 명령의 `sudo sh "$t" -b /usr/local/bin`
 Windows에서는(이 스크립트를 처음 싣는 v0.12.0부터) PowerShell 5.1이나 7에서:
 
 ```powershell
-& { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/8766ae564f172fef7a67ccc0b1e9b0d66910c2bb/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=8766ae564f172fef7a67ccc0b1e9b0d66910c2bb" }; & ([scriptblock]::Create($s)) }
+& { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/5ec3acb1c1a39fb193ae221442201826c2b6c0cf/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=5ec3acb1c1a39fb193ae221442201826c2b6c0cf" }; & ([scriptblock]::Create($s)) }
 ```
 
 `install.ps1`은 .NET으로 서명을 검증하고 `%LOCALAPPDATA%\Programs\assay`에 설치합니다.
@@ -61,7 +61,7 @@ $env:Path = (Join-Path $env:LOCALAPPDATA 'Programs\assay') + ';' + $env:Path
 
 ```text
 git clone --no-checkout https://github.com/kun9497/assay.git assay-install
-git -C assay-install checkout --detach 8766ae564f172fef7a67ccc0b1e9b0d66910c2bb
+git -C assay-install checkout --detach 5ec3acb1c1a39fb193ae221442201826c2b6c0cf
 ```
 
 Linux·macOS에서는 `python3 assay-install/scripts/recover-install.py -b "$HOME/.local/bin"`, Windows에서는 `py -3 assay-install/scripts/recover-install.py`를 실행합니다(Python 3 명령이 `python`이면 그 이름을 사용하세요). Windows 복구는 현재 PowerShell 실행 정책에 따라 체크아웃한 스크립트를 실행합니다. 연결 실패 시 도구가 DNS에서 받은 다른 주소로 공식 HTTPS 자산 호스트에 재시도합니다. 설치 스크립트가 서명과 체크섬을 확인한 뒤 바이너리를 교체합니다. 프록시가 GitHub의 모든 자산 주소를 차단하면 해당 주소에 대한 접근이 필요합니다. 비인증 GitHub contents API에는 [IP별 호출 제한](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api)이 있습니다.
@@ -76,6 +76,11 @@ go install github.com/kun9497/assay/cmd/assay@latest
 # 소스에서
 git clone https://github.com/kun9497/assay.git && cd assay && make build   # -> bin/assay
 ```
+
+소스에서 설치할 때는 CVE-2026-97054가 수정된 Go를 사용하세요.
+1.26 계열은 1.26.11부터, 1.27 계열은 1.27.4부터 수정됐습니다.
+설치한 실행 파일의 빌드 버전은 `go version -m <assay 실행 파일 경로>`로 확인할 수 있습니다.
+[Go 취약점 공지](https://pkg.go.dev/vuln/GO-2026-6859)
 
 모든 플랫폼용 사전 빌드 바이너리와 체크섬은 각
 [릴리스](https://github.com/kun9497/assay/releases/latest)에 첨부됩니다.

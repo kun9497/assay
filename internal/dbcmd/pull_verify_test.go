@@ -161,7 +161,9 @@ func TestPull_TransportFailureOnTheSigTagIsNotNotSigned(t *testing.T) {
 	wrap := func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if block.Load() && strings.Contains(r.URL.Path, ".sig") {
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusForbidden)
+				_, _ = w.Write([]byte(`{"errors":[{"code":"MANIFEST_UNKNOWN","message":"tag unavailable"}]}`))
 				return
 			}
 			h.ServeHTTP(w, r)

@@ -25,6 +25,92 @@ import (
 // descriptor fallback. The callers are held in internal/scancmd's
 // platform_test.go; these reach the branches directly.
 
+// listedIndex exposes descriptors in fixture order and lets a test observe
+// every attempt to load a nested index.
+type listedIndex struct {
+	fakeIndex
+	entries []v1.Descriptor
+	child   func(v1.Hash) (indexReader, error)
+}
+
+func (idx listedIndex) IndexManifest() (*v1.IndexManifest, error) {
+	return &v1.IndexManifest{Manifests: idx.entries}, nil
+}
+
+func (idx listedIndex) ImageIndex(h v1.Hash) (indexReader, error) { return idx.child(h) }
+
+func nestedDescriptor(hex string) v1.Descriptor {
+	return v1.Descriptor{MediaType: types.OCIImageIndex, Digest: v1.Hash{Algorithm: "sha256", Hex: strings.Repeat(hex, 64)}}
+}
+
+func TestImageFromIndex_SharedSubtreeUsesFirstMatchingAncestry(t *testing.T) {
+	root, left, right, shared := nestedDescriptor("a"), nestedDescriptor("b"), nestedDescriptor("c"), nestedDescriptor("d")
+	compatible, exact := plat("linux/arm/v6"), plat("linux/arm/v7")
+	opened := 0
+	branch := listedIndex{
+		entries: []v1.Descriptor{shared, shared},
+		child: func(h v1.Hash) (indexReader, error) {
+			if h != shared.Digest {
+				t.Fatalf("unexpected nested digest %s", h)
+			}
+			opened++
+			return listedIndex{entries: []v1.Descriptor{{Platform: &exact}}}, nil
+		},
+	}
+	idx := listedIndex{
+		entries: []v1.Descriptor{{Platform: &compatible}, left, right},
+		child:   func(v1.Hash) (indexReader, error) { return branch, nil },
+	}
+	_, choice, err := imageFromIndex(t.Context(), idx, "index", root.Digest, exact, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened != 1 || choice.Match != MatchExact || choice.IndexDigest != shared.Digest.String() ||
+		len(choice.OuterIndexDigests) != 2 || choice.OuterIndexDigests[0] != root.Digest.String() ||
+		choice.OuterIndexDigests[1] != left.Digest.String() {
+		t.Errorf("shared index opened %d times; selected %+v", opened, choice)
+	}
+}
+
+func TestImageFromIndex_CancelDuringWalk(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	opened := 0
+	idx := listedIndex{
+		entries: []v1.Descriptor{nestedDescriptor("a"), nestedDescriptor("b")},
+		child: func(v1.Hash) (indexReader, error) {
+			opened++
+			cancel()
+			return fakeIndex{}, nil
+		},
+	}
+	_, _, err := imageFromIndex(ctx, idx, "index", v1.Hash{}, plat("linux/amd64"), true)
+	if opened != 1 || !errors.Is(err, context.Canceled) {
+		t.Errorf("opened %d children, error %v; want one child and context.Canceled", opened, err)
+	}
+}
+
+func TestImageFromIndex_DescriptorLimitAcrossIndexes(t *testing.T) {
+	want := plat("linux/amd64")
+	unknown := plat("unknown/unknown")
+	childEntries := make([]v1.Descriptor, maxIndexDescriptors-1)
+	for i := range childEntries {
+		childEntries[i].Platform = &unknown
+	}
+	idx := listedIndex{
+		entries: []v1.Descriptor{{Platform: &want}, nestedDescriptor("a")},
+		child:   func(v1.Hash) (indexReader, error) { return listedIndex{entries: childEntries}, nil },
+	}
+	_, _, err := imageFromIndex(t.Context(), idx, "index", v1.Hash{}, want, true)
+	if err == nil || !strings.Contains(err.Error(), "descriptor image index limit") {
+		t.Fatalf("over-budget walk with an exact match returned %v", err)
+	}
+	childEntries = childEntries[:len(childEntries)-1]
+	if _, _, err := imageFromIndex(t.Context(), idx, "index", v1.Hash{}, want, true); err != nil {
+		t.Errorf("walk at the limit: %v", err)
+	}
+}
+
 // A platform-less entry whose image or config cannot be read is skipped, as it
 // was before D119. The walk now reads the whole tree before choosing, so
 // returning the error let one broken entry sink an index that holds the exact
@@ -43,7 +129,7 @@ func TestImageFromIndex_UnreadablePlatformlessEntryIsSkipped(t *testing.T) {
 			idx := tc.idx
 			idx.platforms = []string{"linux/amd64", "linux/riscv64"}
 			idx.noPlatform = []string{bad}
-			_, choice, err := imageFromIndex(idx, "layout", v1.Hash{}, plat("linux/riscv64"), true)
+			_, choice, err := imageFromIndex(t.Context(), idx, "layout", v1.Hash{}, plat("linux/riscv64"), true)
 			if err != nil {
 				t.Fatalf("imageFromIndex: %v — one unreadable entry refused an index holding the exact match", err)
 			}
@@ -77,7 +163,7 @@ func TestImageFromIndex_PlatformlessRefusalIsReturned(t *testing.T) {
 			idx := tc.build(fmt.Errorf("fetch child: %w", te))
 			idx.platforms = []string{"linux/riscv64"}
 			idx.noPlatform = []string{bad}
-			_, _, err := imageFromIndex(idx, "registry", v1.Hash{}, plat("linux/riscv64"), true)
+			_, _, err := imageFromIndex(t.Context(), idx, "registry", v1.Hash{}, plat("linux/riscv64"), true)
 			if !errors.Is(err, te) {
 				t.Fatalf("err = %v, want the %d refusal returned", err, tc.status)
 			}
@@ -91,7 +177,7 @@ func TestImageFromIndex_NothingReadableNamesTheReadError(t *testing.T) {
 	bad := strings.Repeat("f", 64)
 	readErr := errors.New("blob not found")
 	idx := fakeIndex{noPlatform: []string{bad}, imageErrs: map[string]error{bad: readErr}}
-	_, _, err := imageFromIndex(idx, "layout", v1.Hash{}, plat("linux/riscv64"), true)
+	_, _, err := imageFromIndex(t.Context(), idx, "layout", v1.Hash{}, plat("linux/riscv64"), true)
 	if !errors.Is(err, readErr) {
 		t.Fatalf("err = %v, want the read error", err)
 	}
@@ -113,7 +199,7 @@ func TestImageFromIndex_MissNotesSkippedEntries(t *testing.T) {
 		noPlatform: []string{bad},
 		imageErrs:  map[string]error{bad: errors.New("blob not found")},
 	}
-	_, _, err := imageFromIndex(idx, "layout", v1.Hash{}, plat("linux/riscv64"), true)
+	_, _, err := imageFromIndex(t.Context(), idx, "layout", v1.Hash{}, plat("linux/riscv64"), true)
 	want := "layout has no linux/riscv64 image; it offers linux/amd64 (entry sha256:" + bad +
 		" could not be read: blob not found)"
 	if err == nil || err.Error() != want {

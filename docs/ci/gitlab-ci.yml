@@ -6,7 +6,7 @@ assay_scan:
     PLATFORM: linux/amd64
   before_script:
     - apk add --no-cache curl openssl
-    - sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/8766ae564f172fef7a67ccc0b1e9b0d66910c2bb/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=8766ae564f172fef7a67ccc0b1e9b0d66910c2bb") && sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
+    - sh -c 't=$(mktemp) && (curl -sSfL --connect-timeout 5 --proto-redir =https -o "$t" https://raw.githubusercontent.com/kun9497/assay/5ec3acb1c1a39fb193ae221442201826c2b6c0cf/install.sh || curl -sSfL --connect-timeout 5 --proto-redir =https -H "Accept:application/vnd.github.raw+json" -o "$t" "https://api.github.com/repos/kun9497/assay/contents/install.sh?ref=5ec3acb1c1a39fb193ae221442201826c2b6c0cf") && sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'
     - assay version
   script:
     - assay db update

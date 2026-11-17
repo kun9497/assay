@@ -7,6 +7,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.4] - 2026-11-17
+
+### Security
+
+- Source installations now require Go 1.26.11 or later. Previously, `go install` could
+  build Assay with Go 1.26.10 and link the `net/http` symbols affected by CVE-2026-97054.
+  On Go 1.27, the fix is in 1.27.4. The published v0.18.3 binaries use Go 1.26.11.
+
+### Fixed
+
+- Local OCI layouts now verify the config blob's actual size and digest before using its platform.
+- Platform selection in nested OCI indexes honors cancellation, visits each index digest once
+  and stops after 4,096 descriptors.
+- DB updates now reject registry authorization errors even with `--allow-unsigned`.
+  Only a missing signature manifest at its own tag can qualify for that exception.
+- Release publication requires successful main CI for the tagged commit and matching
+  default versions in both installers.
+
 ## [0.18.3] - 2026-11-17
 
 ### Fixed

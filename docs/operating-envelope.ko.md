@@ -27,9 +27,10 @@ stays out"), 두 크기 한도가 패키지 수준 변수인 것은 테스트가
 
 | 한도 | 값 | 적용 범위 | 넘으면 | 결정 |
 |---|---|---|---|---|
+| 이미지 인덱스 | 플랫폼 탐색 전체에서 **4단계**, **디스크립터 4,096개** | 서로 다른 인덱스마다 목록에 있는 디스크립터 수를 한 번 합산합니다. 목록의 중복 항목도 세며, 디스크립터를 처리할 때마다 타임아웃을 확인합니다 | 둘 중 한도 하나라도 넘으면 exit 2 | D112, D119 |
 | 파일당 | **512 MiB** 압축 해제 기준 (`MaxFileBytes`) | 이미지 레이어에서 읽는 모든 파일(`Files`, `FilesUnder`, `FilesNamed`, `FilesMatching`); SBOM 타깃(`internal/scancmd/scancmd.go`의 `decodeSBOM`); jar 아카이브의 디스크 크기와 거기서 풀리는 각 엔트리(`internal/cataloger/jar/jar.go`) | exit 2: `<path> exceeds the 512 MiB per-file limit (D112)` | D112 |
 | 스캔당 | **2 GiB** (`MaxScanBytes`) | 한 이미지의 모든 레이어 패스에 걸쳐 읽은 파일의 합; 별도로, jar 아카이브 하나가 중첩 아카이브까지 포함해 푸는 바이트의 합 | exit 2: `image reads exceeded the 2 GiB per-scan limit (D112) at <path>`; jar 는 `<archive> exceeds the 2 GiB per-archive decompression budget (D112) at <entry>` | D112 |
-| 이미지 config | 선언 크기 **16 MiB** (`MaxConfigBytes`) | 매니페스트가 선언한 `config.size`, blob 을 요청하기 전에 검사 | exit 2: `image config is declared at <n> bytes, past the 16 MiB per-config limit (D112)`; blob 은 받지 않음 | D112 (QA 2026-11-02) |
+| 이미지 config | **16 MiB** (`MaxConfigBytes`) | 레지스트리와 OCI 레이아웃은 blob을 요청하기 전에 선언 크기를 검사합니다. 로컬 레이아웃은 선언 크기를 한 바이트라도 넘으면 읽기를 중단합니다 | 선언이 한도를 넘거나 선택한 로컬 config의 실제 크기가 다르면 exit 2 | D112 |
 | 링크 홉 | 원하는 경로당 **40** 링크(`maxSymlinks`, `internal/source/walk.go`) — Linux의 `MAXSYMLINKS`; 순환은 첫 반복에서 끝남 | 이미지 안에서 `/etc/os-release`와 패키지 데이터베이스를 찾아가며 만나는 심볼릭 링크와 하드링크 | 그 자체로 exit 2는 아님: 그 경로를 stderr 에 `not read: <path> (still a link after 40 symbolic links ...)`로, JSON `unread[]`와 SARIF `assay/not-read`로 보고하고 `--fail-on-incomplete`(두 범위 모두)를 트립함. 잃은 경로가 패키지 데이터베이스였으면 스캔이 아무것도 찾지 못하므로 exit 2가 됨 | D109, D130, 2026-10-22 감사 |
 | 중첩 jar | **3** 단계 (`maxNestedDepth`, `internal/cataloger/jar/jar.go`) | jar 나 war 안의 아카이브 | 세 번째 단계를 넘는 아카이브는 집계되는 skip 이지 조용한 절단이 아님 | D70 |
 | 디렉터리 깊이 | 루트 아래 **6** 단계 (`maxDepth`, `internal/cataloger/dirscan/walk.go`) | `dir:` 타깃 | 더 깊은 디렉터리는 가지치기되며, 의도적으로 공개하지 않음 — 오류 아님 | D26 |
@@ -99,14 +100,17 @@ update`와 `db build --seed`에만 있고(D140), 스캔의 레이어 읽기에�
 **버퍼링되고 한정됨.** 이미지에서 원하는 모든 파일은 파일당 한도 아래서 통째로 메모리에
 읽히고(`internal/source/limits.go`의 `readEntry`), 한 스캔에 걸쳐 보관되는 파일은 스캔당
 한도로 한정됩니다 — 그래서 이미지 스캔은 파일 내용을 최대 2 GiB 들고, 거기에
-매니페스트(≤ 100 MiB, 라이브러리)와 config(≤ 16 MiB)가 더해집니다. 각 레이어의 나머지는
+레지스트리 매니페스트(≤ 100 MiB, 라이브러리)와 config(레지스트리와 OCI 레이아웃에서는 ≤ 16 MiB)가 더해집니다. 각 레이어의 나머지는
 32 KiB 버퍼로 drain 되어 버려집니다(`drainLayer`); 시간이 들지 메모리는 들지 않습니다. SBOM 은
 같은 512 MiB 읽기 한도 아래서 디코더로 스트리밍되며, 디코드된 구조체는 디코더의 것이고 문서
 크기에 비례합니다. jar 는 엔트리당 최대 512 MiB, 아카이브당 2 GiB 를 풉니다. Go 바이너리는
 `debug/buildinfo.ReadFile`(`internal/cataloger/gobinary/gobinary.go`)로 읽히는데, 파일 전체가
 아니라 섹션을 읽습니다.
 
-**버퍼링되고 한정되지 않음.** `dir:` 타깃의 락파일은 `os.ReadFile`로 통째로 읽히며
+**버퍼링되고 한정되지 않음.** `docker-archive:`에서는 go-containerregistry가 tar의 config 항목을
+먼저 메모리에 읽고 나서 Assay가 크기를 검사합니다(`pkg/v1/tarball/image.go`의
+`loadTarDescriptorAndConfig`). 신뢰할 수 없는 Docker 아카이브를 처리하는 러너에는 메모리 제한이 필요합니다.
+`dir:` 타깃의 락파일은 `os.ReadFile`로 통째로 읽히며
 (`internal/cataloger/*lock*`, `requirements`, `gomod` 아래 모든 cataloger) 크기 검사가
 없습니다 — 결정에 따른 것으로, 1절을 보세요. 적대적 체크아웃의 메모리는 cgroup 이 한정할
 몫입니다.

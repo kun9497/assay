@@ -1,6 +1,7 @@
 package source
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"crypto/sha512"
@@ -126,9 +127,9 @@ func (e *ConfigDigestError) Error() string {
 		e.Want, e.Got)
 }
 
-// configDiffIDs returns the diff ids the image config lists, after checking
-// the config's bytes against the digest the manifest gives it.
-func configDiffIDs(img v1.Image, layers int) ([]v1.Hash, error) {
+// verifiedConfig parses the same bytes that were held to the manifest's
+// digest. Reopening a local config after checking it would break that chain.
+func verifiedConfig(img v1.Image) (*v1.ConfigFile, error) {
 	m, err := img.Manifest()
 	if err != nil {
 		return nil, fmt.Errorf("read manifest: %w", err)
@@ -148,9 +149,18 @@ func configDiffIDs(img v1.Image, layers int) ([]v1.Hash, error) {
 	if got := fmt.Sprintf("sha256:%x", sha256.Sum256(raw)); got != m.Config.Digest.String() {
 		return nil, &ConfigDigestError{Want: m.Config.Digest.String(), Got: got}
 	}
-	cf, err := img.ConfigFile()
+	cf, err := v1.ParseConfigFile(bytes.NewReader(raw))
 	if err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
+	}
+	return cf, nil
+}
+
+// configDiffIDs returns the diff ids the verified image config lists.
+func configDiffIDs(img v1.Image, layers int) ([]v1.Hash, error) {
+	cf, err := verifiedConfig(img)
+	if err != nil {
+		return nil, err
 	}
 	ids := cf.RootFS.DiffIDs
 	if len(ids) != layers {
