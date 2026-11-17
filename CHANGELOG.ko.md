@@ -7,14 +7,17 @@
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-11-17
+
 ### Fixed
 - CI 문서 검사에서 GitHub Actions의 각 `run` 단계를 별도 셸로 처리해 설치 변수와
   정리 트랩이 같은 셸에 남는지 검사합니다.
 - Unix 설치 시 실행 파일을 설치 사용자 소유, 권한 0755로 생성합니다. 이전에는 root로 설치하면
   tar에 기록된 빌드 러너 UID가 실행 파일의 소유자가 됐습니다.
-- 공개 설치 명령이 v0.18.2를 선택합니다. GitHub 다운로드 연결 시간이 초과되면
-  커밋을 고정한 Git 체크아웃에서 DNS가 반환한 다른 주소로 릴리스를 받을 수 있습니다.
-  같은 TLS·서명·체크섬 검증을 적용합니다.
+- 태그의 Unix·Windows 설치 스크립트는 기본으로 v0.18.3을 설치합니다. 공개 설치 명령은
+  raw 호스트에 연결할 수 없으면 GitHub contents API에서 같은 커밋의 스크립트를 받습니다.
+  릴리스 파일의 다운로드 연결 시간이 초과되면 커밋을 고정한 Git 체크아웃에서 DNS가 반환한
+  다른 주소로 재시도합니다. 같은 TLS·서명·체크섬 검증을 적용합니다.
 
 ## [0.18.2] - 2026-11-17
 
@@ -1130,7 +1133,8 @@
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.2...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.3...main
+[0.18.3]: https://github.com/kun9497/assay/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/kun9497/assay/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/kun9497/assay/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/kun9497/assay/compare/v0.17.0...v0.18.0
