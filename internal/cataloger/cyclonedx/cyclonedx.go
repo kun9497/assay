@@ -1824,7 +1824,10 @@ func readOS(c component) osRead {
 		pkgmeta.UbuntuCodenameOf(r.distro) != pkgmeta.ContradictedCodename {
 		// With no version there is nothing here to hold the codename to,
 		// and the contradiction it may carry is with ANOTHER declaration's:
-		// set aside for the document-wide merge rather than dropped.
+		// set aside for the document-wide merge rather than dropped. The
+		// version check is for the reader: documentCodename reads the
+		// set-aside value only for a version-less declaration, so removing
+		// the check changes nothing (a mutation that does so survives).
 		if r.distro.VersionID == "" {
 			r.unlentCodename = r.distro.VersionCodename
 		}
