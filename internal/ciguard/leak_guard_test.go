@@ -11,28 +11,34 @@ import (
 // own steps -- the four-line form's `trap 'rm -f "$t"' EXIT` deleted a
 // report.txt a later step had put in t (main QA of ef0bc1a, 2026-11-13).
 //
-// It does not follow the shell. It refuses a line on sight when the line,
-// outside single quotes and outside a $( ) (a subshell), holds
+// It does not follow the shell. A line is refused on sight when it holds
 //
-//  1. the word eval, in any quoting and at any position;
+//  1. the word eval, at any position;
 //  2. the word trap, unless it resets (`trap - SIG...`, `trap SIG`) or every
-//     signal is written out and is neither EXIT nor 0 (EXIT in any case, with
-//     or without SIG; any number but 1-99 counts as 0) and the handler is
-//     literal text that passes this same rule -- a job's own
+//     signal is written out and is not EXIT -- in any case, with or without
+//     SIG, and any number but 1-99 is taken for 0 -- and the handler is
+//     literal text that passes this same rule: a job's own
 //     `trap 'echo stopping' TERM` is its business (main QA of 67e2cf6
 //     refused it once), but `trap 'trap : EXIT' DEBUG` is an EXIT trap;
 //  3. a command word that holds an expansion ($x, "$x", ${x}, $(...), "$@",
 //     tr$x, $'...') and no literal / outside it, or an unquoted { (bash
-//     expands {trap,:,EXIT}); `"$bin/assay" version` names a file, which is
+//     expands {trap,:,EXIT}): `"$bin/assay" version` names a file, which is
 //     never a builtin, so it passes, and `$SUDO make` does not;
-//  4. NAME=$(mktemp) in the spellings mktempAssign knows.
+//  4. NAME=$(mktemp), in the spellings mktempAssign knows.
 //
-// and, because the rule cannot pair what it does not read, a line with a
-// backtick, a quote inside ${ }, a ${ cmd; } substitution, a case inside a
-// $( ), or a quote, ${ or double-quoted $( still open at its end. No state passes from one command to the next: no variable table, no
-// reading of what eval would run, no conditional, function or pipeline
-// scopes. "Command word" is the first word after an operator or a keyword,
-// past assignments, redirections and command/builtin/time/!.
+// A word is read after quote removal, so e\val and 'trap' are those words,
+// and a quoted string is one word: the script of `sh -c '...'` and the text
+// of `echo "a; trap x EXIT"` are not this shell's commands and are not read.
+// Nor is the text of a $( ), which runs in a subshell. "Command word" is the
+// first word after an operator or a keyword, past assignments, redirections
+// and command/builtin/time/!.
+//
+// What the rule cannot pair it refuses rather than guesses at: a backtick, a
+// quote inside ${ }, a ${ cmd; } substitution, a case inside a $( ), a $( )
+// nested past maxSubstitutionDepth, and a quote or ${ still open at the end
+// of the line. No state passes from one command to the next: no variable
+// table, no reading of what eval would run, no conditional, function or
+// pipeline scopes.
 //
 // It over-refuses on purpose: `c='echo ok'; eval "$c"`, `( trap : EXIT )`,
 // `echo trap x EXIT`, `$SUDO make`, a string that spans lines. A refusal is
@@ -56,7 +62,7 @@ import (
 //   - a glob as the command word, when the working directory holds a file
 //     named trap or eval (tra? : EXIT);
 //   - a mktemp path that reaches a variable some other way than
-//     NAME=$(mktemp): `read -r t < <(mktemp)`, t=$(sudo mktemp).
+//     NAME=$(mktemp): `read -r t < <(mktemp)`, t=$(env mktemp).
 type leakGuard struct{}
 
 // leakedIntoJob is the guard, read over the install jobs only (installJobs).
@@ -101,11 +107,11 @@ func firstShellLeak(script string) string {
 // before quote removal: NAME=$(mktemp), NAME="$( mktemp )", NAME=`mktemp`,
 // NAME=$(TMPDIR=x mktemp), NAME=${X:-$(mktemp)} -- at the line's start or
 // after a blank, an operator or a double quote (export "t=$(mktemp)"). It is
-// read over the line with its
-// single-quoted text blanked (blankSingleQuoted), so it refuses every line
-// 4d823d1 refused except those whose mktemp is quoted text that never runs
-// in this shell -- the script of sh -c '...', the string printf '...' prints
-// (main QA of 4d823d1, 2026-11-16).
+// read over the line with its single-quoted text blanked
+// (blankSingleQuoted), so it refuses every line 4d823d1 refused except those
+// whose mktemp is quoted text that never runs in this shell -- the script of
+// sh -c '...', the string printf '...' prints (main QA of 4d823d1,
+// 2026-11-16).
 var mktempAssign = regexp.MustCompile("(?:^|[ \\t;&|(){\"])\\w+=[\"']*(?:\\$\\{\\w+:?[-=+]\\s*)?(?:\\$\\(\\s*(?:\\w+=\\S*\\s+)*(?:command\\s+)?|`\\s*)mktemp\\b")
 
 // blankSingleQuoted is cmd with the text of every single-quoted string --
@@ -241,7 +247,7 @@ scan:
 		case c == ')' && depth > 0 && parens == 0:
 			flush()
 			return toks, i, true
-		case strings.IndexByte(";&|()\n", c) >= 0:
+		case strings.IndexByte(";&|()", c) >= 0:
 			// A ( ) is not skipped: what a subshell holds is read as this
 			// shell's, and a case pattern's ) has no ( to pair with.
 			if c == '(' {
@@ -371,8 +377,8 @@ var fenceLine = regexp.MustCompile("^```[\\w-]*$")
 
 // documentLineRefused is refusedOnSight for a line of a document: a YAML
 // item or mapping value (`- ...`, `script: ...`, `run: ...`, a flow sequence
-// `[a, b]`) is unquoted as YAML does first. A README fence line is sh, not
-// YAML: its quotes are sh's.
+// `[a, b]`) is unquoted as YAML does first. A line inside a README's fence
+// is sh, not YAML: its quotes are sh's.
 func documentLineRefused(line string) bool {
 	s := strings.TrimSpace(line)
 	if fenceLine.MatchString(s) {

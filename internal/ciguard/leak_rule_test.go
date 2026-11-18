@@ -48,7 +48,7 @@ var leakRows = []struct {
 	{"trap", "handler-from-a-variable", `h='trap : EXIT'; trap "echo; $h" DEBUG; true`, true, true},
 	{"trap", "handler-from-a-variable-harmless", `trap "echo $HOME" TERM`, false, true},
 	{"trap", "after-an-escaped-dollar-and-quote", `echo \$'a\' ; trap : EXIT ; echo \'`, true, true},
-	{"trap", "after-an-ansi-c-string", `echo $'a\'b' ; trap : EXIT ; echo $'c\'d'`, true, true},
+	{"trap", "after-an-ansi-c-string", `echo $'a\'' ; trap : EXIT ; echo 'b' "'" #"`, true, true},
 	{"trap", "after-a-hash-inside-a-word", `echo a#b; trap : EXIT`, true, true},
 	{"trap", "after-a-parenthesis-inside-braces", `echo $(echo ${x:-(}) ; trap : EXIT`, true, true},
 	{"trap", "in-a-subshell", `( trap : EXIT )`, false, true},
@@ -75,6 +75,7 @@ var leakRows = []struct {
 	{"command word", "after-builtin", `c=trap; builtin $c : EXIT`, true, true},
 	{"command word", "after-command-options", `c=trap; command -p -- $c : EXIT`, true, true},
 	{"command word", "after-array-assignments", `c=trap; a[0]=1 b+=x $c : EXIT`, true, true},
+	{"command word", "after-a-semicolon", `c=trap; true; $c : EXIT`, true, true},
 	{"command word", "after-and", `c=trap; true && $c : EXIT`, true, true},
 	{"command word", "after-or", `c=trap; false || $c : EXIT`, true, true},
 	{"command word", "in-a-case-arm", `c=trap; case x in x) $c : EXIT;; esac`, true, true},
@@ -104,6 +105,7 @@ var leakRows = []struct {
 	{"unpaired", "quote-inside-braces", `echo "${x#'"'}" ; trap : EXIT ; echo "'" #"`, true, true},
 	{"unpaired", "case-inside-a-substitution", `echo $(case a in a) echo y;; esac)#x; trap : EXIT`, true, true},
 	{"unpaired", "quote-inside-braces-harmless", `echo "${1:-"default"}"`, false, true},
+	{"unpaired", "quote-inside-braces-inside-a-substitution", `echo $(echo ${x:-"a"})`, false, true},
 	{"unpaired", "backtick-harmless", "echo \"`date`\"", false, true},
 	// bash 5.3 runs this in the calling shell; Git Bash 5.2 rejects it.
 	{"unpaired", "substitution-in-this-shell", `x=${ trap : EXIT; }`, false, true},
@@ -116,6 +118,7 @@ var leakRows = []struct {
 	{"accepted", "reset-posix", `trap EXIT`, false, false},
 	{"accepted", "term-trap", `trap 'echo stopping' TERM`, false, false},
 	{"accepted", "int-term-trap", `trap 'cleanup' INT TERM`, false, false},
+	{"accepted", "term-trap-redirected", `trap 'echo stopping' TERM 2>/dev/null`, false, false},
 	{"accepted", "quoted-numbered-and-lowercase-signals", `trap -- 'echo' "TERM" '10' int`, false, false},
 	{"accepted", "listing", `trap`, false, false},
 	{"accepted", "path-from-a-variable", `"$bin/assay" version`, false, false},
@@ -126,6 +129,7 @@ var leakRows = []struct {
 	{"accepted", "install-one-liner", `sh -c 't=$(mktemp) && curl -sSfL -o "$t" https://example.invalid/install.sh && sh "$t" -b /usr/local/bin; s=$?; rm -f "$t"; exit $s'`, false, false},
 	{"accepted", "printed-text", `printf '%s' 'No install - run t=$(mktemp) first'`, false, false},
 	{"accepted", "double-quoted-text", `echo "a; trap 'x' EXIT"`, false, false},
+	{"accepted", "apostrophe-in-double-quotes", `echo "it's done"`, false, false},
 	{"accepted", "single-quoted-text", `echo 'no trap here; eval nothing'`, false, false},
 	{"accepted", "stored-but-never-run", `cleanup='trap echo EXIT'`, false, false},
 	{"accepted", "trap-in-a-substitution", `x=$(trap : EXIT; echo y)`, false, false},
@@ -233,7 +237,7 @@ func TestLeakGuard_ReadsTheDocument(t *testing.T) {
 		}
 	}
 	// The decoded run scalar joins sh's continuation too.
-	if firstShellLeak("echo ok\ntrap 'echo cleanup' \\\n  EXIT") == "" {
+	if firstShellLeak("echo ok\ntrap 'echo cleanup' TERM \\\n  EXIT") == "" {
 		t.Error("a signal continued onto the next line of a run scalar is not read")
 	}
 	if got := firstShellLeak("make # note \\\ntrap 'echo stopping' TERM"); got != "" {
