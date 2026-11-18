@@ -389,7 +389,9 @@ func TestOpen_LayoutNestedIndexNotMatchingItsDigestFails(t *testing.T) {
 		Add: img, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: runtime.GOARCH}},
 	})
 	other := mutate.AppendManifests(empty.Index, mutate.IndexAddendum{
-		Add: img, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: runtime.GOARCH, Variant: "x"}},
+		// Keep the replacement's length: an oversized blob is now refused
+		// before hashing, whereas this test holds the digest check itself.
+		Add: img, Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "zinux", Architecture: runtime.GOARCH}},
 	})
 
 	dir := filepath.Join(t.TempDir(), "layout")

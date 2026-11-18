@@ -9,7 +9,6 @@ import (
 
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
-	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
@@ -98,8 +97,8 @@ func IsRegistryReference(ref string) bool { return classify(ref) == kindRegistry
 // requested platform, are errors; a single image that is not the host's
 // default is scanned and reported as MatchMismatch for the caller to warn on.
 //
-// The context is honoured on the registry path, so a caller that sets a
-// deadline gets one; `assay scan --timeout` is what sets it (D112), and the
+// The context is honoured on registry requests and local metadata reads, so
+// a caller that sets a deadline gets one; `assay scan --timeout` sets it (D112), and the
 // layer walks check the same context between tar entries, so it bounds a
 // local archive's decompression as well as a registry's fetch. Without the
 // flag there is still no deadline — go-containerregistry's default transport
@@ -200,11 +199,10 @@ func load(ctx context.Context, ref string, want v1.Platform, explicit bool) (v1.
 
 	case kindLayout:
 		p := strings.TrimPrefix(ref, schemeLayout)
-		idx, err := layout.ImageIndexFromPath(p)
+		layoutIndex, err := openLayoutIndex(ctx, p)
 		if err != nil {
 			return nil, loaded{}, fmt.Errorf("read oci layout %s: %w", ref, err)
 		}
-		layoutIndex := v1Index{idx: idx, openConfigBlob: layout.Path(p).Blob}
 		m, err := layoutIndex.IndexManifest()
 		if err != nil {
 			return nil, loaded{}, fmt.Errorf("read oci layout %s: %w", ref, err)
@@ -363,20 +361,15 @@ type indexReader interface {
 	ImageIndex(v1.Hash) (indexReader, error)
 }
 
-// v1Index adapts go-containerregistry's index to indexReader, narrowing the
+// v1Index adapts the registry's index to indexReader, narrowing the
 // recursive method's return type as it goes.
 type v1Index struct {
-	idx            v1.ImageIndex
-	openConfigBlob func(v1.Hash) (io.ReadCloser, error)
+	idx v1.ImageIndex
 }
 
 func (w v1Index) IndexManifest() (*v1.IndexManifest, error) { return w.idx.IndexManifest() }
 func (w v1Index) Image(h v1.Hash) (v1.Image, error) {
-	img, err := w.idx.Image(h)
-	if err != nil || w.openConfigBlob == nil {
-		return img, err
-	}
-	return layoutImage{img, w.openConfigBlob}, nil
+	return w.idx.Image(h)
 }
 func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
 	c, err := w.idx.ImageIndex(h)
@@ -384,8 +377,7 @@ func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
 		return nil, err
 	}
 	// A nested index chooses among manifests, so it is held to the digest it
-	// was listed under before its choices count (D123); a layout reads it
-	// from blobs/ without hashing it.
+	// was listed under before its choices count (D123).
 	raw, err := c.RawManifest()
 	if err != nil {
 		return nil, err
@@ -393,7 +385,7 @@ func (w v1Index) ImageIndex(h v1.Hash) (indexReader, error) {
 	if err := checkManifestDigest(raw, h); err != nil {
 		return nil, err
 	}
-	return v1Index{idx: c, openConfigBlob: w.openConfigBlob}, nil
+	return v1Index{idx: c}, nil
 }
 
 // imageFromIndex picks want out of a multi-platform index, nested ones
