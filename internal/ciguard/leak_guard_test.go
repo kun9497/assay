@@ -273,6 +273,7 @@ type shellState struct {
 	pendingConditional bool
 	conditionalEval    bool
 	evalScope          bool
+	evalClosers        []string
 }
 
 func (state *shellState) lineLeaks(line string) bool {
@@ -292,6 +293,7 @@ func (state *shellState) lineLeaks(line string) bool {
 			state.pendingConditional = false
 			state.conditionalEval = false
 			state.evalScope = false
+			state.evalClosers = nil
 		}
 		s = strings.TrimSpace(s[len(m):])
 		yamlValue = true
@@ -596,6 +598,18 @@ func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 		defer markUnknown()
 	}
 	if len(words) > 0 {
+		if state.evalScope {
+			switch raws[0] {
+			case "for", "select":
+				state.evalClosers = append(state.evalClosers, "done")
+			case "fi", "done", "}":
+				n := len(state.evalClosers)
+				if n == 0 || state.evalClosers[n-1] != raws[0] {
+					return true
+				}
+				state.evalClosers = state.evalClosers[:n-1]
+			}
+		}
 		switch raws[0] {
 		case "for", "select":
 			state.conditionalDepth++
@@ -623,9 +637,19 @@ func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 	for len(words) > 0 && (prefixWords[words[0]] || assigns(raws[0])) {
 		switch words[0] {
 		case "if", "while", "until":
+			if state.evalScope {
+				closer := "done"
+				if words[0] == "if" {
+					closer = "fi"
+				}
+				state.evalClosers = append(state.evalClosers, closer)
+			}
 			state.conditionalDepth++
 			conditional = true
 		case "{":
+			if state.evalScope {
+				state.evalClosers = append(state.evalClosers, "}")
+			}
 			state.conditionalBraces = append(state.conditionalBraces, conditional)
 			if conditional {
 				state.conditionalDepth++
@@ -722,9 +746,10 @@ func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 		nested.pendingConditional = false
 		nested.conditionalEval = conditional
 		nested.evalScope = true
+		nested.evalClosers = nil
 		leaks := nested.shellLeaks(script)
 		state.evalBytesLeft = nested.evalBytesLeft
-		return leaks || nested.conditionalDepth != 0 || len(nested.conditionalBraces) != 0 || nested.pendingConditional
+		return leaks || len(nested.evalClosers) != 0 || nested.conditionalDepth != 0 || len(nested.conditionalBraces) != 0 || nested.pendingConditional
 	}
 	if words[0] != "trap" {
 		return false
