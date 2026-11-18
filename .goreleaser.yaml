@@ -30,7 +30,8 @@ builds:
       - -X main.version={{.Version}}
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
-    goos: [linux, darwin, windows]
+    # Windows customers stay on v0.18.4 while the x64 candidate is under review.
+    goos: [linux, darwin]
     goarch: [amd64, arm64]
     # QA 2026-10-30: every binary is scanned for known Go vulnerabilities as
     # it is built, before anything is archived, signed or published. A
@@ -98,3 +99,7 @@ release:
     name: assay
   draft: false
   prerelease: auto
+  header: |
+    {{ if eq .Tag "v0.18.5" }}This release includes Linux and macOS binaries for amd64 and arm64. For Windows, use [v0.18.4](https://github.com/kun9497/assay/releases/tag/v0.18.4).
+
+    Linux와 macOS의 amd64 및 arm64 바이너리를 제공합니다. Windows에서는 [v0.18.4](https://github.com/kun9497/assay/releases/tag/v0.18.4)를 사용하세요.{{ end }}

@@ -48,7 +48,7 @@ installer creates the executable as the installing user.
 On a runner without sudo, replace `sudo sh "$t" -b /usr/local/bin` in the install line with
 `sh "$t" -b "$HOME/.local/bin"`. Run `export PATH="$HOME/.local/bin:$PATH"` in the scan step.
 
-On Windows (from v0.12.0, the first release that ships it), in PowerShell 5.1 or 7:
+The v0.18.5 release ships Linux and macOS binaries. Its Windows installer defaults to the signed v0.18.4 Windows release. Run the following command in PowerShell 5.1 or 7.
 
 ```powershell
 & { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/0aab1b4975aa09e5afe9a5843affb3690ed59f06/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=0aab1b4975aa09e5afe9a5843affb3690ed59f06" }; & ([scriptblock]::Create($s)) }
@@ -88,8 +88,7 @@ When building from source, use a Go version patched for CVE-2026-97054
 Run `go version -m <path-to-assay>` to check which Go version built your executable.
 [Go vulnerability report](https://pkg.go.dev/vuln/GO-2026-6859)
 
-Prebuilt binaries and checksums for every platform are attached to each
-[release](https://github.com/kun9497/assay/releases/latest).
+The [release page](https://github.com/kun9497/assay/releases) lists the prebuilt binaries and signed checksums available for each version.
 </details>
 
 ## Quick start

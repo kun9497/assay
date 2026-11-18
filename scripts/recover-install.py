@@ -59,10 +59,15 @@ def main():
             "aarch64": "arm64"}.get(platform.machine().lower())
     if os_name not in {"linux", "darwin", "windows"} or not arch:
         raise SystemExit("No prebuilt release for this operating system and architecture")
-    default = re.search(r'^VERSION="(v[0-9]+\.[0-9]+\.[0-9]+)"$',
-                        (ROOT / "install.sh").read_text(encoding="utf-8"), re.MULTILINE)
+    if os_name == "windows":
+        installer = ROOT / "install.ps1"
+        version_line = r"^\$DefaultVersion = '(v[0-9]+\.[0-9]+\.[0-9]+)'$"
+    else:
+        installer = ROOT / "install.sh"
+        version_line = r'^VERSION="(v[0-9]+\.[0-9]+\.[0-9]+)"$'
+    default = re.search(version_line, installer.read_text(encoding="utf-8"), re.MULTILINE)
     if not default:
-        raise SystemExit("The pinned install.sh has no release version")
+        raise SystemExit(f"The pinned {installer.name} has no release version")
     version = default.group(1)
     curl = shutil.which("curl.exe" if os_name == "windows" else "curl")
     if not curl:
@@ -77,12 +82,12 @@ def main():
         env.pop("ASSAY_ALLOW_UNSIGNED", None)
         if os_name == "windows":
             shell = shutil.which("pwsh") or "powershell.exe"
-            cmd = [shell, "-NoProfile", "-File", str(ROOT / "install.ps1"), "-Version", version]
+            cmd = [shell, "-NoProfile", "-File", str(installer), "-Version", version]
             if opts.bin_dir:
                 cmd += ["-BinDir", opts.bin_dir]
         else:
             env["ASSAY_OS"] = os_name
-            cmd = ["sh", str(ROOT / "install.sh")]
+            cmd = ["sh", str(installer)]
             if opts.bin_dir:
                 cmd += ["-b", opts.bin_dir]
             cmd.append(version)

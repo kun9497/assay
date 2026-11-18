@@ -43,7 +43,7 @@ v0.18.0 릴리스 자산에서 이를 확인했습니다. 현재 설치기는 �
 sudo가 없는 러너에서는 설치 명령의 `sudo sh "$t" -b /usr/local/bin`을
 `sh "$t" -b "$HOME/.local/bin"`으로 바꾸고, 스캔 스텝에서 `export PATH="$HOME/.local/bin:$PATH"`를 실행하세요.
 
-Windows에서는(이 스크립트를 처음 싣는 v0.12.0부터) PowerShell 5.1이나 7에서:
+v0.18.5는 Linux와 macOS용 바이너리를 제공합니다. 이 버전의 Windows 설치기는 서명된 Windows 릴리스 v0.18.4를 기본으로 설치합니다. PowerShell 5.1 또는 7에서 다음 명령을 실행하세요.
 
 ```powershell
 & { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/0aab1b4975aa09e5afe9a5843affb3690ed59f06/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=0aab1b4975aa09e5afe9a5843affb3690ed59f06" }; & ([scriptblock]::Create($s)) }
@@ -83,8 +83,7 @@ git clone https://github.com/kun9497/assay.git && cd assay && make build   # -> 
 설치한 실행 파일의 빌드 버전은 `go version -m <assay 실행 파일 경로>`로 확인할 수 있습니다.
 [Go 취약점 공지](https://pkg.go.dev/vuln/GO-2026-6859)
 
-모든 플랫폼용 사전 빌드 바이너리와 체크섬은 각
-[릴리스](https://github.com/kun9497/assay/releases/latest)에 첨부됩니다.
+[릴리스 페이지](https://github.com/kun9497/assay/releases)에서 버전별로 배포한 바이너리와 서명된 체크섬을 확인할 수 있습니다.
 </details>
 
 ## 빠른 시작
