@@ -295,6 +295,7 @@ var leakShapes = []struct {
 	{"nameref-reads-its-target", `declare -n ref=cleanup; cleanup='trap : EXIT'; eval "$ref"`, true, true},
 	{"nameref-writes-its-target-after-reassign", `declare -n ref=cleanup; cleanup='echo ok'; ref='trap : EXIT'; eval "$cleanup"`, true, true},
 	{"nameref-reads-its-target-after-reassign", `declare -n ref=cleanup; ref='echo ok'; cleanup='trap : EXIT'; eval "$ref"`, true, true},
+	{"nameref-option-in-expansion", `opts=n; declare -$opts ref=cleanup; ref='trap : EXIT'; eval "$cleanup"`, true, true},
 	{"nameref-target-given-later", `declare -n ref; ref=cleanup; ref='trap : EXIT'; eval "$cleanup"`, true, true},
 	{"nameref-without-eval", `declare -n ref=out; ref=hi; echo "$out"`, false, false},
 	{"export-quoted-equals", `export cleanup"=trap : EXIT"; eval "$cleanup"`, true, true},

@@ -405,10 +405,6 @@ func (state *shellState) reset() {
 
 func (state *shellState) lineLeaks(line string) bool {
 	s := strings.TrimSpace(line)
-	if strings.HasPrefix(s, "```") {
-		// A README fence's own line is not a line of sh.
-		return false
-	}
 	yamlValue := false
 	if strings.HasPrefix(s, "- ") || s == "-" {
 		s = strings.TrimSpace(strings.TrimPrefix(s, "-"))
@@ -1168,6 +1164,11 @@ var namerefOption = regexp.MustCompile(`^-[A-Za-z]*n[A-Za-z]*$`)
 // after its options and plain names too: export PATH t=$(mktemp), local -r
 // t=$(mktemp) (review of the guard branch: the loop had stopped at PATH and
 // -r).
+//
+// That the caller returns what this returns, rather than reading the operands
+// on as a command, is held by no row and cannot be: an operand with a $ in it
+// is refused here, and one without reads nothing as a command word. It is
+// written that way so the first stays the reason for the second.
 func (state *shellState) declarationLeaks(words, raws []string, conditional bool) bool {
 	nameref := false
 	for i, raw := range raws[1:] {
@@ -1177,14 +1178,14 @@ func (state *shellState) declarationLeaks(words, raws []string, conditional bool
 		if mktempValue.MatchString(shView(raw)) {
 			return true
 		}
+		if written, _, _ := strings.Cut(raw, "="); strings.Contains(blankSingleQuoted(written), "$") {
+			// export "$x=...", export $(cat .env), declare -$opts: which
+			// name it writes, or what it makes of one, is in the expansion.
+			return true
+		}
 		if strings.HasPrefix(word, "-") && !strings.Contains(word, "=") {
 			nameref = nameref || (words[0] != "export" && words[0] != "readonly" && namerefOption.MatchString(word))
 			continue
-		}
-		if written, _, _ := strings.Cut(raw, "="); strings.Contains(blankSingleQuoted(written), "$") {
-			// export "$x=...", export $(cat .env): which name it writes is
-			// in the expansion.
-			return true
 		}
 		switch {
 		case nameref:
