@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Docker archives now enforce the 16 MiB config and 100 MiB manifest limits before
+  reading their bodies. Bounded metadata snapshots prevent later archive opens from
+  replacing the checked contents. Metadata traversal honors cancellation and limits links to 40 hops.
+
+### Fixed
+
+- Docker archives with different layer and config diff-ID counts now fail with a
+  descriptive error before the library can panic or omit layers from the scan.
+
 ## [0.18.4] - 2026-11-17
 
 ### Security

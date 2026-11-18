@@ -11,7 +11,6 @@ import (
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/layout"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
-	"github.com/google/go-containerregistry/pkg/v1/tarball"
 )
 
 // TargetKind says what a scan argument names. It exists because `assay scan X`
@@ -183,7 +182,7 @@ func load(ctx context.Context, ref string, want v1.Platform, explicit bool) (v1.
 	switch classify(ref) {
 	case kindTarball:
 		p := strings.TrimPrefix(ref, schemeTarball)
-		img, err := tarball.ImageFromPath(p, nil)
+		img, err := openDockerArchive(ctx, p)
 		if err != nil {
 			return nil, loaded{}, fmt.Errorf("read docker archive %s: %w", ref, err)
 		}
