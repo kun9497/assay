@@ -134,6 +134,13 @@ func TestOpen_LayoutChosenImageRefusalNamesTheLayout(t *testing.T) {
 	if err == nil || err.Error() != want {
 		t.Fatalf("Open = %v\nwant   %s", err, want)
 	}
+	// The other half of the same rule: a walk error that named the target
+	// itself is passed through as it came. Wrapping it too would print the
+	// layout twice, and a substring check could not tell.
+	_, err = Open(t.Context(), "oci-dir:"+dir, "linux/riscv64")
+	if err == nil || strings.HasPrefix(err.Error(), "read oci layout ") || strings.Count(err.Error(), "oci-dir:"+dir) != 1 {
+		t.Fatalf("platform miss = %v\nwant the target named once, by the walk", err)
+	}
 }
 
 func TestOpen_LayoutRootIndexIsBounded(t *testing.T) {
