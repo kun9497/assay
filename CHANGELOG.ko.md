@@ -7,6 +7,30 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- CycloneDX: 버전이 없고 이름이 일반적인(예: `syft:distro:id`는 `ubuntu`인데 이름은 `linux`)
+  Ubuntu OS 선언이 문서의 코드네임과 모순되는 코드네임을 더 이상 잃지 않습니다. 이 경우
+  `distro=JAMMY` 같은 코드네임 범위의 VEX statement는 적용되지 않고 취약점이 보고됩니다. 같은
+  선언의 이름이 `ubuntu`일 때는 이미 그렇게 동작했습니다. 이런 선언이 자기 코드네임을
+  빌려주지 않는 것은 그대로입니다.
+- CycloneDX: OS 컴포넌트가 없을 때, 릴리스 없이 한 번, `debian-sid` 같은 미지원 `distro=`
+  한정자와 함께 한 번 나열된 패키지를 다시 하나의 설치로 읽습니다. v0.18.5는 컴포넌트 둘,
+  미평가 둘로 셌습니다. `debian-sid`와 `debian-12`가 나란히 있으면 계속 둘입니다.
+- `oci-dir:`가 일반 파일을 가리키는 심볼릭 링크인 `index.json`을 다시 읽습니다. v0.18.5는
+  blob은 링크를 따라가면서 이것은 "not a regular file"로 거부했습니다. 일반 파일 요건과
+  100 MiB 한도는 링크의 대상에 적용됩니다. 디렉터리나 장치를 가리키는 링크, 끊어진 링크는
+  거부하고 무엇인지 알려 줍니다.
+
+### Changed
+
+- `oci-dir:` 거부 메시지가 무엇이 잘못됐는지 말합니다. 디스크립터가 선언한 크기(0이거나
+  생략된 경우 포함)보다 긴 매니페스트나 중첩 인덱스는, 존재하지 않는 "0 bytes limit" 대신
+  "is longer than its descriptor declares (size N)"로 보고합니다. 한 다이제스트에 대해 서로
+  다른 디스크립터는 그 다이제스트와 두 선언을 모두 적습니다. 중첩 인덱스나 선택된 이미지에서
+  나온 거부도 다른 것들처럼 `read oci layout oci-dir:<dir>: `로 시작합니다. 종료 코드는
+  바뀌지 않습니다.
+
 ## [0.18.5] - 2026-11-18
 
 아래 변경 사항은 Linux와 macOS의 amd64·arm64 바이너리에 반영했습니다. Windows 설치기는 기본으로 [Windows 릴리스 v0.18.4](https://github.com/kun9497/assay/releases/tag/v0.18.4)를 설치합니다.

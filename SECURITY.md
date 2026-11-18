@@ -51,6 +51,15 @@ Fixes go into the next release; there are no backport branches. Use the
 [latest release](https://github.com/kun9497/assay/releases/latest). The published database
 is rebuilt nightly for the schema the latest release reads.
 
+**Windows is one release behind.** v0.18.5 ships Linux and macOS binaries only, and
+`install.ps1` installs the signed v0.18.4 Windows binary. That binary does not carry the
+v0.18.5 fixes listed under `Security` and `Fixed` in [CHANGELOG.md](CHANGELOG.md): the
+Docker-archive and local OCI-layout metadata limits, and the CycloneDX fix that stops a VEX
+waiver from hiding a finding behind contradictory Ubuntu evidence. Until a Windows binary is
+published again, a Windows user who scans `docker-archive:` or `oci-dir:` targets, or SBOMs,
+they did not produce should run the scan on Linux or macOS (WSL and a container both work),
+or build v0.18.5 from source with Go 1.26.
+
 ## Verifying what you download
 
 - **Release binaries**: each release's `assay_<version>_checksums.txt` is signed (the

@@ -49,6 +49,15 @@ stderr로 알려 줍니다. 자기가 만들지 않은 타깃에 `assay`를 돌�
 [최신 릴리스](https://github.com/kun9497/assay/releases/latest)를 사용하십시오. 배포되는 데이터베이스는
 최신 릴리스가 읽는 스키마에 맞춰 매일 밤 다시 빌드됩니다.
 
+**Windows는 한 릴리스 뒤에 있습니다.** v0.18.5는 Linux와 macOS 바이너리만 제공하고,
+`install.ps1`은 서명된 v0.18.4 Windows 바이너리를 설치합니다. 그 바이너리에는
+[CHANGELOG.ko.md](CHANGELOG.ko.md)의 v0.18.5 `Security`와 `Fixed` 항목이 들어 있지 않습니다.
+Docker 아카이브와 로컬 OCI 레이아웃의 메타데이터 한도, 그리고 모순되는 Ubuntu 증거 뒤에서
+VEX 면제가 취약점을 숨기던 CycloneDX 수정이 그것입니다. Windows 바이너리가 다시 배포될 때까지,
+직접 만들지 않은 `docker-archive:`·`oci-dir:` 타깃이나 SBOM을 스캔하는 Windows 사용자는
+Linux나 macOS에서 스캔하거나(WSL과 컨테이너 모두 가능) Go 1.26으로 v0.18.5를 소스에서
+빌드하십시오.
+
 ## 내려받는 것 검증하기
 
 - **릴리스 바이너리**: 각 릴리스의 `assay_<version>_checksums.txt`는 서명되어 있고(옆의 `.sig`),
