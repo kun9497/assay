@@ -3,6 +3,7 @@ package source
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -35,12 +36,23 @@ func openLayoutIndex(ctx context.Context, dir string) (*boundedLayoutIndex, erro
 		return nil, err
 	}
 	filename := filepath.Join(dir, "index.json")
-	info, err := os.Lstat(filename)
+	// A link is followed, as the library's own read of this file did and as
+	// blob reads still do: a layout in a symlink tree is a layout. Every rule
+	// below is then held against what the link reaches. Lstat is consulted
+	// only to say what was refused.
+	link := ""
+	if own, err := os.Lstat(filename); err == nil && own.Mode()&os.ModeSymlink != 0 {
+		link = "a symbolic link to "
+	}
+	info, err := os.Stat(filename)
 	if err != nil {
+		if link != "" {
+			return nil, fmt.Errorf("layout index.json is a symbolic link whose target cannot be read: %w", err)
+		}
 		return nil, err
 	}
 	if !info.Mode().IsRegular() {
-		return nil, fmt.Errorf("layout index.json is not a regular file")
+		return nil, fmt.Errorf("layout index.json is %s%s, not a regular file", link, layoutFileKind(info.Mode()))
 	}
 	f, err := os.Open(filename)
 	if err != nil {
@@ -57,7 +69,11 @@ func openLayoutIndex(ctx context.Context, dir string) (*boundedLayoutIndex, erro
 	if opened.Size() > maxArchiveManifestBytes {
 		return nil, fmt.Errorf("layout index.json exceeds the %s limit (D112)", formatBytes(maxArchiveManifestBytes))
 	}
-	raw, err := readLayoutMetadata(ctx, f, "index.json", maxArchiveManifestBytes)
+	raw, err := readLayoutMetadata(ctx, f, maxArchiveManifestBytes)
+	if errors.Is(err, errLayoutMetadataTooLong) {
+		// The file grew past the stat above while it was being read.
+		return nil, fmt.Errorf("layout index.json exceeds the %s limit (D112)", formatBytes(maxArchiveManifestBytes))
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +92,9 @@ func openLayoutIndex(ctx context.Context, dir string) (*boundedLayoutIndex, erro
 // declarations refer to it. Validate the whole index before first-match
 // lookup or visit-once can hide a contradictory later declaration. The map
 // is shared with nested indexes so another branch cannot repeat the bypass.
+//
+// The refusal names the digest and both declarations: an index may list
+// thousands of descriptors, and the pair can sit in two different files.
 func (idx *boundedLayoutIndex) rememberDescriptors() error {
 	if len(idx.manifest.Manifests) > maxIndexDescriptors {
 		return fmt.Errorf("layout exceeds the %d-descriptor image index limit", maxIndexDescriptors)
@@ -86,11 +105,28 @@ func (idx *boundedLayoutIndex) rememberDescriptors() error {
 	for _, d := range idx.manifest.Manifests {
 		value := layoutDescriptor{size: d.Size, mediaType: d.MediaType}
 		if old, ok := idx.descriptors[d.Digest]; ok && old != value {
-			return fmt.Errorf("layout indexes give %s conflicting size or media type declarations", d.Digest)
+			return fmt.Errorf("layout indexes declare %s twice and disagree: size %d, media type %q against size %d, media type %q",
+				d.Digest, old.size, old.mediaType, value.size, value.mediaType)
 		}
 		idx.descriptors[d.Digest] = value
 	}
 	return nil
+}
+
+// layoutFileKind says what a path that is not a regular file is, so the
+// refusal does not leave the reader to find out.
+func layoutFileKind(m os.FileMode) string {
+	switch {
+	case m.IsDir():
+		return "a directory"
+	case m&os.ModeDevice != 0:
+		return "a device"
+	case m&os.ModeNamedPipe != 0:
+		return "a named pipe"
+	case m&os.ModeSocket != 0:
+		return "a socket"
+	}
+	return "an irregular file (" + m.Type().String() + ")"
 }
 
 func (idx *boundedLayoutIndex) IndexManifest() (*v1.IndexManifest, error) {
@@ -118,7 +154,13 @@ func (idx *boundedLayoutIndex) metadata(d v1.Descriptor) ([]byte, error) {
 		return nil, err
 	}
 	defer r.Close()
-	raw, err := readLayoutMetadata(idx.ctx, r, d.Digest.String(), d.Size)
+	raw, err := readLayoutMetadata(idx.ctx, r, d.Size)
+	if errors.Is(err, errLayoutMetadataTooLong) {
+		// A mismatch, not a limit: the bound here is the descriptor's own
+		// size, which the image spec requires, and an omitted one decodes to
+		// 0. Calling that a "0 bytes limit" named a limit nobody set.
+		return nil, fmt.Errorf("layout metadata %s is longer than its descriptor declares (size %d)", d.Digest, d.Size)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -131,10 +173,15 @@ func (idx *boundedLayoutIndex) metadata(d v1.Descriptor) ([]byte, error) {
 	return raw, nil
 }
 
+// errLayoutMetadataTooLong is readLayoutMetadata's over-read. Each caller
+// words it, because only the caller knows whether its bound was the 100 MiB
+// limit or a descriptor's declared size.
+var errLayoutMetadataTooLong = errors.New("layout metadata is longer than its bound")
+
 // The extra byte distinguishes an exact-size blob from an understated one.
 // Stat is only an early refusal for index.json; this read is the memory bound
 // even if the same open file grows after its stat, or an opener has no Stat.
-func readLayoutMetadata(ctx context.Context, r io.Reader, name string, limit int64) ([]byte, error) {
+func readLayoutMetadata(ctx context.Context, r io.Reader, limit int64) ([]byte, error) {
 	raw, err := io.ReadAll(io.LimitReader(&layoutContextReader{ctx: ctx, Reader: r}, limit+1))
 	if err != nil {
 		return nil, err
@@ -143,12 +190,49 @@ func readLayoutMetadata(ctx context.Context, r io.Reader, name string, limit int
 		return nil, err
 	}
 	if int64(len(raw)) > limit {
-		return nil, fmt.Errorf("layout metadata %s exceeds its declared size or %s limit (D112)", name, formatBytes(limit))
+		return nil, errLayoutMetadataTooLong
 	}
 	return raw, nil
 }
 
+// layoutReadError marks a failure of this file's own reads on the way out of
+// an index walk. The walk returns an index's error as it came, and a registry
+// index's must stay that way to be recognised as a refusal (D118), so load
+// cannot wrap everything the walk returns -- half of it names the target
+// already. The mark lets nameLayoutError find the half that does not. The
+// text is the cause's, unchanged.
+type layoutReadError struct{ err error }
+
+func (e *layoutReadError) Error() string { return e.err.Error() }
+func (e *layoutReadError) Unwrap() error { return e.err }
+
+// nameLayoutError gives a layout read failure the target it was read from.
+// Only an error that is one at the top: a walk error that wraps one (a
+// skipped entry's) was composed around the target already.
+func nameLayoutError(ref string, err error) error {
+	if _, ok := err.(*layoutReadError); ok {
+		return fmt.Errorf("read oci layout %s: %w", ref, err)
+	}
+	return err
+}
+
 func (idx *boundedLayoutIndex) Image(h v1.Hash) (v1.Image, error) {
+	img, err := idx.image(h)
+	if err != nil {
+		return nil, &layoutReadError{err}
+	}
+	return img, nil
+}
+
+func (idx *boundedLayoutIndex) ImageIndex(h v1.Hash) (indexReader, error) {
+	child, err := idx.imageIndex(h)
+	if err != nil {
+		return nil, &layoutReadError{err}
+	}
+	return child, nil
+}
+
+func (idx *boundedLayoutIndex) image(h v1.Hash) (v1.Image, error) {
 	d, err := idx.descriptor(h)
 	if err != nil {
 		return nil, err
@@ -181,7 +265,7 @@ func (idx *boundedLayoutIndex) Image(h v1.Hash) (v1.Image, error) {
 	return layoutImage{Image: img, openBlob: open}, nil
 }
 
-func (idx *boundedLayoutIndex) ImageIndex(h v1.Hash) (indexReader, error) {
+func (idx *boundedLayoutIndex) imageIndex(h v1.Hash) (*boundedLayoutIndex, error) {
 	d, err := idx.descriptor(h)
 	if err != nil {
 		return nil, err

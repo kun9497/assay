@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -313,6 +315,72 @@ func TestRun_CancelledContextStopsTheImageRead(t *testing.T) {
 				"it was cancelled", ctx.calls, ctx.allowed+1)
 		}
 	})
+
+	// The two rows above stop inside Open, whose archive reader consults the
+	// context on every read and seek of the file, so neither says anything
+	// about the context Run hands the layer walk. That reader cannot stand in
+	// for it either: a layer this small is pulled off the disk in a handful
+	// of reads, after which the walk's check before each entry is the only
+	// thing between a cancelled scan and the end of the layer. So this row
+	// cancels on the 1000th check after Open has returned -- several times
+	// more than the archive reader makes over the whole of this scan, and
+	// fewer than the walk makes in its first pass over 2000 entries. Hand the
+	// walk any other context and that check is never reached: the scan runs
+	// to its end and exits 0.
+	t.Run("cancelled after Open returned: the layer walk stops at its next entry", func(t *testing.T) {
+		const entries, after = 2000, 1000
+		many := map[string]string{}
+		for i := 0; i < entries; i++ {
+			many[fmt.Sprintf("usr/share/d112/many-%04d", i)] = "x"
+		}
+		target := d112DebianImage(t, many)
+
+		parent, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ctx := &cancelAfterChecks{Context: parent, cancel: cancel, allowed: math.MaxInt - 1}
+		// D119's record line is the first thing written once Open has
+		// returned and the last before the walk starts, so it is the seam:
+		// no hook in Run is needed to know where Open ended.
+		errOut := &armOnLine{line: "image " + target + ": "}
+		errOut.arm = func() { ctx.allowed = ctx.calls + after - 1 }
+		var out bytes.Buffer
+		code := Run(ctx, dbPath, target, Options{}, &out, errOut)
+		if !errOut.armed {
+			t.Fatalf("stderr never carried %q, so nothing was cancelled:\n%s", errOut.line, errOut.String())
+		}
+		if code != 2 {
+			t.Fatalf("Run = %d, want 2 -- the walk did not see the cancellation\nstdout:\n%s\nstderr:\n%s",
+				code, out.String(), errOut.String())
+		}
+		if !regexp.MustCompile(`(?m)^error: read layer sha256:[0-9a-f]{64}: context canceled$`).MatchString(errOut.String()) {
+			t.Errorf("stderr should name the layer the walk was in and the cancellation:\n%s", errOut.String())
+		}
+		if out.Len() != 0 {
+			t.Errorf("a cancelled scan wrote to stdout:\n%s", out.String())
+		}
+		if ctx.calls != ctx.allowed+1 {
+			t.Errorf("context checked %d times, want %d -- the walk kept going after "+
+				"it was cancelled", ctx.calls, ctx.allowed+1)
+		}
+	})
+}
+
+// armOnLine is a stderr that runs arm the first time a write carries line.
+// Run prints each diagnostic line in one write, so the line is never split
+// across two.
+type armOnLine struct {
+	bytes.Buffer
+	line  string
+	arm   func()
+	armed bool
+}
+
+func (w *armOnLine) Write(p []byte) (int, error) {
+	if !w.armed && strings.Contains(string(p), w.line) {
+		w.armed = true
+		w.arm()
+	}
+	return w.Buffer.Write(p)
 }
 
 // TestCatalogFromImage_EveryReadSiteIsBounded is the per-file bound held at
