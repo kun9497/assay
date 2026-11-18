@@ -188,9 +188,12 @@ func TestLeakGuard_ReadsTheDocument(t *testing.T) {
 }
 
 // TestLeakGuard_HostileLines holds that no line panics the guard or costs
-// more than a moment: it runs on whatever a document holds.
+// more than a moment: it runs on whatever a document holds. The size and the
+// limit are set for CI's race detector, under which the patterns run some
+// thirty times slower: 100 KB lines took 16 s there and 0.5 s without it.
+// A reading that rescans the line per word would still be far past the limit.
 func TestLeakGuard_HostileLines(t *testing.T) {
-	const size = 100 << 10
+	const size = 32 << 10
 	repeat := func(unit string) string { return strings.Repeat(unit, size/len(unit)+1) }
 	lines := map[string]string{
 		"unterminated single quote":   "echo 'never closed",
@@ -221,7 +224,7 @@ func TestLeakGuard_HostileLines(t *testing.T) {
 		leakedIntoJob.FindString("    - " + line)
 		leakedIntoJob.FindString("  script: [" + line + "]")
 	}
-	if spent := time.Since(start); spent > 5*time.Second {
+	if spent := time.Since(start); spent > 30*time.Second {
 		t.Errorf("the hostile lines took %v", spent)
 	}
 }
