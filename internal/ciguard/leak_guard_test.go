@@ -41,9 +41,11 @@ import (
 // 2026-11-13: `trap 'echo stopping' TERM` in an independent job was refused).
 // Conditional assignments are unknown rather than assumed to have run.
 // An eval of an unknown or partially expanded stored variable is refused.
-// Pipeline brace groups and continued pipeline lines are conservatively
-// refused too: pipeline brace boundaries are not tracked, and a last stage may run in the
-// parent (bash lastpipe), so pipeline spelling alone cannot prove isolation.
+// Pipeline/background brace groups and continued pipeline lines are
+// conservatively refused: their complete group boundaries are not tracked,
+// and a last pipeline stage may run in the parent (bash lastpipe). Indirect
+// eval expansion is refused, and eval has its own control-flow scope. Prefix
+// assignments to POSIX special builtins are unknown because they may persist.
 type leakGuard struct{}
 
 // leakedIntoJob is the guard, read over the install jobs only (installJobs).
@@ -269,6 +271,9 @@ type shellState struct {
 	conditionalDepth   int
 	conditionalBraces  []bool
 	pendingConditional bool
+	conditionalEval    bool
+	evalScope          bool
+	evalClosers        []string
 }
 
 func (state *shellState) lineLeaks(line string) bool {
@@ -286,6 +291,9 @@ func (state *shellState) lineLeaks(line string) bool {
 			state.conditionalDepth = 0
 			state.conditionalBraces = nil
 			state.pendingConditional = false
+			state.conditionalEval = false
+			state.evalScope = false
+			state.evalClosers = nil
 		}
 		s = strings.TrimSpace(s[len(m):])
 		yamlValue = true
@@ -312,6 +320,13 @@ func (state *shellState) shellLeaks(s string) bool {
 		}
 		conditional := cmd.conditional || state.pendingConditional
 		state.pendingConditional = false
+		// A closing brace marked as a child means earlier commands in the
+		// group were not isolated by this simple-command splitter. Refuse
+		// the group instead of letting its assignments erase parent values.
+		_, raws := shellWords(cmd.text)
+		if cmd.child && len(raws) > 0 && raws[0] == "}" {
+			return true
+		}
 		// Non-final pipeline stages and asynchronous lists are isolated.
 		// The final pipeline stage may run in the parent (bash lastpipe).
 		if !cmd.child && state.commandLeaks(cmd.text, conditional) {
@@ -505,6 +520,30 @@ var prefixWords = map[string]bool{"{": true, "then": true, "do": true, "else": t
 // declarationBuiltins assign their NAME=value operands in the calling shell.
 var declarationBuiltins = map[string]bool{"export": true, "readonly": true, "local": true, "declare": true, "typeset": true}
 
+// A prefix assignment before these builtins can survive in the calling
+// shell (POSIX mode), unlike a regular command's environment assignment.
+var specialBuiltins = map[string]bool{":": true, ".": true, "break": true, "continue": true,
+	"eval": true, "exec": true, "exit": true, "export": true, "readonly": true,
+	"return": true, "set": true, "shift": true, "times": true, "trap": true, "unset": true}
+
+func specialPrefixAssignments(words, raws []string) []string {
+	var names []string
+	for i, word := range words {
+		if assigns(raws[i]) {
+			name, _, _ := strings.Cut(raws[i], "=")
+			names = append(names, name)
+			continue
+		}
+		if specialBuiltins[word] {
+			return names
+		}
+		if !prefixWords[word] || declarationBuiltins[word] {
+			break
+		}
+	}
+	return nil
+}
+
 // assigns reports whether a word, as written, is a NAME=value assignment: the
 // name and = unquoted, so "t=$(mktemp)" is a command name, not one.
 func assigns(raw string) bool { return assignmentWord.MatchString(raw) }
@@ -546,13 +585,39 @@ func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 	}
 	words, raws := shellWords(cmd)
 	allWords, allRaws := words, raws
+	if names := specialPrefixAssignments(words, raws); len(names) > 0 {
+		markUnknown := func() {
+			for _, name := range names {
+				delete(state.vars, name)
+				state.unknown[name] = true
+			}
+		}
+		// Before execution protects nested eval; after execution preserves
+		// uncertainty when a builtin restores or changes its prefix value.
+		markUnknown()
+		defer markUnknown()
+	}
 	if len(words) > 0 {
-		switch words[0] {
+		if state.evalScope {
+			switch raws[0] {
+			case "for", "select":
+				state.evalClosers = append(state.evalClosers, "done")
+			case "fi", "done", "}":
+				n := len(state.evalClosers)
+				if n == 0 || state.evalClosers[n-1] != raws[0] {
+					return true
+				}
+				state.evalClosers = state.evalClosers[:n-1]
+			}
+		}
+		switch raws[0] {
 		case "for", "select":
 			state.conditionalDepth++
 		case "fi", "done":
 			if state.conditionalDepth > 0 {
 				state.conditionalDepth--
+			} else if state.evalScope {
+				return true
 			}
 		case "}":
 			if n := len(state.conditionalBraces); n > 0 {
@@ -560,19 +625,31 @@ func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 					state.conditionalDepth--
 				}
 				state.conditionalBraces = state.conditionalBraces[:n-1]
+			} else if state.evalScope {
+				return true
 			}
 		}
 	}
-	conditional = conditional || state.conditionalDepth > 0
+	conditional = conditional || state.conditionalDepth > 0 || state.conditionalEval
 	// The words before the command name: body and condition openers,
 	// declaration builtins, and NAME=value assignments -- the places a
 	// mktemp path is assigned in this shell.
 	for len(words) > 0 && (prefixWords[words[0]] || assigns(raws[0])) {
 		switch words[0] {
 		case "if", "while", "until":
+			if state.evalScope {
+				closer := "done"
+				if words[0] == "if" {
+					closer = "fi"
+				}
+				state.evalClosers = append(state.evalClosers, closer)
+			}
 			state.conditionalDepth++
 			conditional = true
 		case "{":
+			if state.evalScope {
+				state.evalClosers = append(state.evalClosers, "}")
+			}
 			state.conditionalBraces = append(state.conditionalBraces, conditional)
 			if conditional {
 				state.conditionalDepth++
@@ -636,6 +713,11 @@ func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 			words, raws = words[1:], raws[1:]
 		}
 		for i, raw := range raws {
+			if strings.Contains(words[i], "${!") {
+				// Indirection chooses a variable dynamically; do not interpret
+				// it as a harmless literal or assume the target is unset.
+				return true
+			}
 			if value, ok := state.variableWord(raw); ok {
 				words[i] = value
 			} else if state.unresolvedStoredVariable(words[i]) {
@@ -656,11 +738,18 @@ func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 		}
 		state.evaluating[script] = true
 		defer delete(state.evaluating, script)
-		if conditional {
-			state.conditionalDepth++
-			defer func() { state.conditionalDepth-- }()
-		}
-		return state.shellLeaks(script)
+		// eval shares variables but parses an independent shell program.
+		// A fi/} in its string cannot close the caller's conditional scope.
+		nested := *state
+		nested.conditionalDepth = 0
+		nested.conditionalBraces = nil
+		nested.pendingConditional = false
+		nested.conditionalEval = conditional
+		nested.evalScope = true
+		nested.evalClosers = nil
+		leaks := nested.shellLeaks(script)
+		state.evalBytesLeft = nested.evalBytesLeft
+		return leaks || len(nested.evalClosers) != 0 || nested.conditionalDepth != 0 || len(nested.conditionalBraces) != 0 || nested.pendingConditional
 	}
 	if words[0] != "trap" {
 		return false
