@@ -47,7 +47,7 @@ var leakRows = []struct {
 	{"trap", "inside-another-handler", `trap 'trap : EXIT' DEBUG; true`, true, true},
 	{"trap", "handler-from-a-variable", `h='trap : EXIT'; trap "echo; $h" DEBUG; true`, true, true},
 	{"trap", "handler-from-a-variable-harmless", `trap "echo $HOME" TERM`, false, true},
-	{"trap", "after-an-escaped-dollar-and-quote", `echo \$'a\' ; trap : EXIT ; echo \'`, true, true},
+	{"trap", "after-an-escaped-dollar-and-quote", `echo \$'a\' ; trap : EXIT ; echo "'" #"`, true, true},
 	{"trap", "after-an-ansi-c-string", `echo $'a\'' ; trap : EXIT ; echo 'b' "'" #"`, true, true},
 	{"trap", "after-a-hash-inside-a-word", `echo a#b; trap : EXIT`, true, true},
 	{"trap", "after-a-parenthesis-inside-braces", `echo $(echo ${x:-(}) ; trap : EXIT`, true, true},
@@ -105,7 +105,7 @@ var leakRows = []struct {
 	{"unpaired", "quote-inside-braces", `echo "${x#'"'}" ; trap : EXIT ; echo "'" #"`, true, true},
 	{"unpaired", "case-inside-a-substitution", `echo $(case a in a) echo y;; esac)#x; trap : EXIT`, true, true},
 	{"unpaired", "quote-inside-braces-harmless", `echo "${1:-"default"}"`, false, true},
-	{"unpaired", "quote-inside-braces-inside-a-substitution", `echo $(echo ${x:-"a"})`, false, true},
+	{"unpaired", "open-quote-inside-a-substitution", `echo $(echo 'a)`, false, true},
 	{"unpaired", "backtick-harmless", "echo \"`date`\"", false, true},
 	// bash 5.3 runs this in the calling shell; Git Bash 5.2 rejects it.
 	{"unpaired", "substitution-in-this-shell", `x=${ trap : EXIT; }`, false, true},
