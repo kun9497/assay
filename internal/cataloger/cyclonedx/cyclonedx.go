@@ -114,9 +114,10 @@ func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 		target.Distro = &d
 	}
 
-	catalog(doc.Components, top, &target, &stats)
+	own := ownReleases{}
+	catalog(doc.Components, top, &target, &stats, own)
 	if doc.Metadata.Component != nil {
-		catalogSubject(*doc.Metadata.Component, top, &target, &stats)
+		catalogSubject(*doc.Metadata.Component, top, &target, &stats, own)
 	}
 	stats.SerialNumber = doc.SerialNumber
 	return target, stats, nil
@@ -152,18 +153,18 @@ func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 // two listings both nested under the subject, were never read as one
 // package and stay two, so where a generator put its inventory does not
 // change how many packages it holds.
-func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, stats *Stats) {
+func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, stats *Stats, own ownReleases) {
 	// The dedupe base is fixed before the subject tree adds anything to
 	// target.Packages: everything bom.components yielded, and only that.
 	base := len(target.Packages)
 	// Catalog the subject once, preserving the OS context of each branch.
 	all := pkgmeta.Target{Packages: append([]pkgmeta.Package{}, target.Packages...)}
 	var subjectStats Stats
-	catalogOne(subject, ctx, &all, &subjectStats)
+	catalogOne(subject, ctx, &all, &subjectStats, own)
 	if len(all.Packages) == base && pseudoSubjectShape(subject, subjectStats) {
 		subjectStats = Stats{} // a document root is not a counted skip
 	}
-	catalog(subject.Components, childContext(subject, ctx), &all, &subjectStats)
+	catalog(subject.Components, childContext(subject, ctx), &all, &subjectStats, own)
 	subjectPackages := all.Packages[base:]
 	// Skips are counted here. Cataloged components are counted only when
 	// the merge retains a separate inventory entry.
@@ -176,6 +177,14 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 		stats.Components += len(subjectPackages)
 		stats.Cataloged += len(subjectPackages)
 		return
+	}
+	// Before any identity is computed: the release a bare listing adopts is
+	// part of it (bareIdentity). all's base is a copy, so the top-level
+	// listing itself takes the release too.
+	for _, i := range adoptOwnRelease(all.Packages, own) {
+		if i < base {
+			target.Packages[i].UncoveredRelease = all.Packages[i].UncoveredRelease
+		}
 	}
 	keyed := keyedReleases(all.Packages)
 	// The key a merge adopts comes from the subject tree alone -- the
@@ -989,14 +998,92 @@ func pseudoSubjectShape(subject component, scratch Stats) bool {
 // catalog walks components depth-first so nested ones are seen. Every path out
 // of catalogOne increments exactly one counter, which is what lets the report's
 // summary account for every component the document contained.
-func catalog(components []component, ctx osContext, target *pkgmeta.Target, stats *Stats) {
+func catalog(components []component, ctx osContext, target *pkgmeta.Target, stats *Stats, own ownReleases) {
 	for _, c := range components {
-		catalogOne(c, ctx, target, stats)
-		catalog(c.Components, childContext(c, ctx), target, stats)
+		catalogOne(c, ctx, target, stats, own)
+		catalog(c.Components, childContext(c, ctx), target, stats, own)
 	}
 }
 
-func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats) {
+// ownReleases marks, by position in the walk's package list, the listings
+// whose UncoveredRelease nothing but their own `distro=` qualifier states
+// (catalogOne's last arm): no operating-system declaration names a release
+// for them. It is what adoptOwnRelease tells such a listing by from one a
+// declared OS names.
+type ownReleases map[int]bool
+
+// adoptOwnRelease gives a listing that states no release at all the
+// uncovered release its twins name by qualifier alone, and returns the
+// positions it changed.
+//
+// The qualifier-only release identity (6c975a3) keeps a sid listing out of
+// its Debian 12 twin, and it also stopped the bare listing of the same name
+// and version from being the sid install listed twice: with no OS component,
+// components=[apt] under a subject apt?distro=debian-sid read two packages
+// and two skips where it had read one (review of v0.18.5, 2026-11-18) -- and
+// where the same bare listing still joins a debian-12 twin, and a sid twin
+// when an OS component declares sid. Naming no release, the bare listing
+// contradicts none; it takes the release so the two are one identity for
+// everything after (bareIdentity).
+//
+// Only when the document leaves no doubt which install it is: every other
+// listing of the name and version must name that one release, by qualifier
+// alone. Beside a keyed twin, a second uncovered release, or a listing an
+// OS declaration or a contradiction placed, it could be any of them and
+// stays what it was -- a package of its own. Every bare listing of such a
+// name and version takes the release, on either side of the subject dedupe
+// and whatever architecture it states: the identity is then the one all of
+// them shared before the qualifier-only release was part of it, and the
+// dedupe's own rules (subject against bom.components, sameArch) decide what
+// joins what, as they did.
+func adoptOwnRelease(pkgs []pkgmeta.Package, own ownReleases) []int {
+	type listing struct{ typ, name, version string }
+	type statements struct {
+		release string
+		// mixed: a listing of this name and version is placed some other
+		// way, or two name different releases.
+		mixed bool
+	}
+	of := func(p pkgmeta.Package) listing { return listing{p.Type, p.Name, p.Version} }
+	stated := map[listing]*statements{}
+	var bare []int
+	for i, p := range pkgs {
+		if statesNoRelease(p) {
+			bare = append(bare, i)
+			continue
+		}
+		s := stated[of(p)]
+		if s == nil {
+			s = &statements{release: p.UncoveredRelease}
+			stated[of(p)] = s
+		}
+		if !own[i] || p.UncoveredRelease != s.release {
+			s.mixed = true
+		}
+	}
+	var changed []int
+	for _, i := range bare {
+		if s := stated[of(pkgs[i])]; s != nil && !s.mixed {
+			pkgs[i].UncoveredRelease = s.release
+			changed = append(changed, i)
+		}
+	}
+	return changed
+}
+
+// statesNoRelease reports whether nothing places p in a release: no key, no
+// release identity, no contradictory or ambiguous OS beside it, and no
+// `distro=` of its own -- one that names an unknown vendor identifies no
+// release, but it is not silence either.
+func statesNoRelease(p pkgmeta.Package) bool {
+	if p.Ecosystem != "" || p.UncoveredRelease != "" || p.OSConflict != "" || p.AmbiguousOS {
+		return false
+	}
+	parsed, err := pkgmeta.ParsePURL(p.PURL)
+	return err == nil && parsed.Qualifiers["distro"] == ""
+}
+
+func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats, own ownReleases) {
 	if c.Type == "operating-system" {
 		// Described the target in the first pass (D7); it is not a package to
 		// scan, and counting it here would inflate the component total.
@@ -1148,9 +1235,17 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 			// With no OS declaration, an explicit release still identifies
 			// a separate installation even when it has no advisory key.
 			// Otherwise a sid listing can disappear into its Debian 12 twin.
+			//
+			// ctx.distro is always nil here, and the check is kept for the
+			// reader: a context's distro with no key always states a
+			// version (contextFor and childContext admit no other), which
+			// is the first case, and one with a key leaves eco non-empty
+			// (ResolveDistroPURL). A mutation dropping it survives -- an
+			// equivalent, not a gap.
 			if ctx.distro == nil {
 				if i := strings.LastIndexByte(qualifier, '-'); i > 0 && i < len(qualifier)-1 && pkgmeta.KnownDistroID(qualifier[:i]) {
 					pkg.UncoveredRelease = qualifier
+					own[len(target.Packages)] = true
 				}
 			}
 		}
@@ -1479,7 +1574,7 @@ func documentCodename(doc bom, release string) string {
 		walk([]component{*doc.Metadata.Component})
 	}
 	codename, attributable := "", true
-	var versionless []string
+	var versionless, unlent []string
 	for _, e := range decls {
 		switch {
 		case e.conflict:
@@ -1491,6 +1586,7 @@ func documentCodename(doc bom, release string) string {
 			attributable = false
 		case e.version == "":
 			versionless = append(versionless, e.codename)
+			unlent = append(unlent, e.unlent)
 		case release == "" || ubuntuRelease(e.version) != release:
 			// Another release, a version that names none, or a target of
 			// no release that no version can be shown to be (fourth
@@ -1510,17 +1606,31 @@ func documentCodename(doc bom, release string) string {
 		for _, cn := range versionless {
 			codename = pkgmeta.MergeCodename(codename, cn)
 		}
+		// A generic-named declaration's codename lends none and can still
+		// contradict one: weighed after the others are merged, so it never
+		// becomes the document's codename itself, against whatever they
+		// gave (review of v0.18.5, 2026-11-18: with no version of its own
+		// to be held to it had been erased in readOS, and `linux` saying
+		// noble left the document's jammy to exempt a package that the same
+		// declaration named `ubuntu` refused).
+		for _, cn := range unlent {
+			if codename != "" && pkgmeta.MergeCodename(codename, cn) != codename {
+				codename = pkgmeta.ContradictedCodename
+			}
+		}
 	}
 	return codename
 }
 
 // osEvidence is what one operating-system component says: whether it names
 // Ubuntu, its version (syft's VERSION_ID, else the standard version), its
-// codename, and whether it contradicts itself.
+// codename, and whether it contradicts itself. unlent is the codename of a
+// version-less declaration under a generic name (osRead.unlentCodename).
 type osEvidence struct {
 	ubuntu            bool
 	version, codename string
 	conflict          bool
+	unlent            string
 }
 
 func osDeclaration(c component) (osEvidence, bool) {
@@ -1533,7 +1643,7 @@ func osDeclaration(c component) (osEvidence, bool) {
 	// still gives the package an unambiguous advisory key.
 	conflict := r.conflict != "" || (r.ubuntu && ubuntuRelease(d.VersionID) != "" &&
 		pkgmeta.UbuntuCodenameOf(d) == pkgmeta.ContradictedCodename)
-	return osEvidence{r.ubuntu, d.VersionID, d.VersionCodename, conflict}, true
+	return osEvidence{r.ubuntu, d.VersionID, d.VersionCodename, conflict, r.unlentCodename}, true
 }
 
 // versionsAgree reports whether two spellings of an OS version name one
@@ -1601,6 +1711,11 @@ type osRead struct {
 	distro   pkgmeta.Distro
 	conflict string
 	ubuntu   bool
+	// unlentCodename is the codename an Ubuntu declaration of no version
+	// states under a generic display name: not evidence FOR a codename, so
+	// it is kept off distro, and still a statement another declaration's
+	// codename can contradict (documentCodename).
+	unlentCodename string
 }
 
 // D94: Microsoft's distribution has two os-release IDs for the same
@@ -1707,6 +1822,15 @@ func readOS(c component) osRead {
 	// It does not invalidate the numeric release used for advisory lookup.
 	if r.conflict == "" && r.ubuntu && name != "" && name != "ubuntu" && !strings.HasPrefix(name, "ubuntu ") &&
 		pkgmeta.UbuntuCodenameOf(r.distro) != pkgmeta.ContradictedCodename {
+		// With no version there is nothing here to hold the codename to,
+		// and the contradiction it may carry is with ANOTHER declaration's:
+		// set aside for the document-wide merge rather than dropped. The
+		// version check is for the reader: documentCodename reads the
+		// set-aside value only for a version-less declaration, so removing
+		// the check changes nothing (a mutation that does so survives).
+		if r.distro.VersionID == "" {
+			r.unlentCodename = r.distro.VersionCodename
+		}
 		r.distro.VersionCodename = ""
 	}
 	return r
