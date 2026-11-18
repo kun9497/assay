@@ -42,6 +42,8 @@ var MaxScanBytes int64 = 2 << 30
 // declaring 256 MiB streamed 256 MiB and allocated twice that before the
 // digest mismatch was noticed. 16 MiB is four orders of magnitude above any
 // config this project has measured.
+// Docker archives enforce this limit against the tar header and bounded
+// config read before handing the captured metadata to the library.
 const MaxConfigBytes int64 = 16 << 20
 
 // FileLimitError is the error for a file past MaxFileBytes. It names the path
