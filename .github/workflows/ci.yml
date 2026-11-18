@@ -85,6 +85,10 @@ jobs:
         run: |
           sh scripts/install_test.sh
           python3 scripts/recover_install_test.py
+      # Only root restores the tar member's build-runner UID on extraction.
+      # Keep both runs: non-root alone cannot catch an ownership regression.
+      - name: Installer harness (root ownership)
+        run: sudo sh scripts/install_test.sh
       - name: Ops-alert harness (D138)
         run: sh scripts/ops_alert_test.sh
 

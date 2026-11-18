@@ -123,9 +123,15 @@ run() {
 run C1 "$tmp/install-k1.sh" 0 "installed v9.9.1"
 "$PY" - "$tmp/bin-C1/assay" <<'PYTHON'
 import os, stat, sys
-s = os.stat(sys.argv[1])
-assert s.st_uid == os.geteuid(), (s.st_uid, os.geteuid())
-assert stat.S_IMODE(s.st_mode) == 0o755, oct(s.st_mode)
+if os.name == "nt":
+    # Native Windows Python has neither geteuid nor POSIX permission bits.
+    # Keep running the signature cases in Git Bash after this assertion.
+    print("SKIP C1 POSIX owner/mode: native Windows (Linux/macOS CI checks them)")
+else:
+    s = os.stat(sys.argv[1])
+    assert s.st_uid == os.geteuid(), (s.st_uid, os.geteuid())
+    assert stat.S_IMODE(s.st_mode) == 0o755, oct(s.st_mode)
+    print("ok   C1 owner/mode (uid %d, mode 0755)" % s.st_uid)
 PYTHON
 (ASSAY_RELEASE_DIR="$root/v9.9.1" ASSAY_RELEASE_BASE=http://invalid.invalid run C1-local "$tmp/install-k1.sh" 0 "signature on")
 "$tmp/bin-C1/assay" | grep -q "v9.9.1 (genuine build)" || { echo "FAIL C1: wrong binary installed"; echo C1 >>"$fails"; }
@@ -149,6 +155,37 @@ fi
 set -- "$tmp/existing-bin"/.assay-install.*
 [ ! -e "$1" ]
 echo "ok   failed extraction preserves existing executable and cleans staging"
+
+# The member exists, but tar encounters EOF after writing part of it. The
+# destination must survive this too, not just a missing-member refusal.
+partial="$tmp/partial-release"
+mkdir "$partial"
+"$PY" - "$partial/$archive" <<'PYTHON'
+import gzip, sys, tarfile
+info = tarfile.TarInfo("assay")
+info.size = 8192
+info.mode = 0o755
+with gzip.open(sys.argv[1], "wb") as archive:
+    archive.write(info.tobuf())
+    archive.write(b"partial executable data\n" * 32)
+PYTHON
+# Check the fixture with this platform's tar: a failure before any bytes
+# were emitted would not exercise replacing a partially written file.
+if tar -xzOf "$partial/$archive" assay >"$tmp/partial-probe" 2>"$tmp/partial-probe.err"; then
+	echo "FAIL truncated member fixture did not fail extraction"; exit 1
+fi
+[ -s "$tmp/partial-probe" ]
+printf '%s  %s\n' "$(sha256 "$partial/$archive")" "$archive" >"$partial/$sums"
+openssl dgst -sha256 -sign "$tmp/key1.pem" -out "$tmp/partial.der" "$partial/$sums"
+base64 <"$tmp/partial.der" | tr -d '\n' >"$partial/$sums.sig"
+if ASSAY_RELEASE_DIR="$partial" sh "$tmp/install-k1.sh" -b "$tmp/existing-bin" >"$tmp/partial.out" 2>"$tmp/partial.err"; then
+	echo "FAIL signed archive with a truncated assay member was installed"; exit 1
+fi
+grep -q "signature on .* verified" "$tmp/partial.err"
+[ "$(cat "$tmp/existing-bin/assay")" = keep-existing ]
+set -- "$tmp/existing-bin"/.assay-install.*
+[ ! -e "$1" ]
+echo "ok   partial extraction preserves existing executable and cleans staging"
 
 # C2 archive tampered, checksums + sig untouched
 cp -r "$root" "$tmp/c2"
