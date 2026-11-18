@@ -20,10 +20,14 @@ func (img layoutImage) RawConfigFile() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	return readLayoutConfig(m, img.openBlob)
+}
+
+func readLayoutConfig(m *v1.Manifest, openBlob func(v1.Hash) (io.ReadCloser, error)) ([]byte, error) {
 	if err := checkConfigDescriptor(m); err != nil {
 		return nil, err
 	}
-	rc, err := img.openBlob(m.Config.Digest)
+	rc, err := openBlob(m.Config.Digest)
 	if err != nil {
 		return nil, err
 	}
