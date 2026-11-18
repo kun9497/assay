@@ -19,8 +19,10 @@ externally supplied targets" 항목이 같은 경계의 설계 측 기록이고,
 
 ## 1. assay가 스스로 한정하는 것
 
-아래 한도는 모두 닫히는 쪽으로 실패합니다: 부분 인벤토리로 계속 가지 않고, 스캔은 exit 2(CLI
-계약의 "신뢰할 수 없음", D11)로 끝나며 리포트를 내지 않습니다. 숫자는 설정할 수 없습니다 —
+실패 동작은 행마다 적었습니다. 치명적 오류, 집계되는 skip, 읽지 못한 경로는 서로 다릅니다.
+필수 이미지 메타데이터를 읽지 못하면 스캔은 exit 2(CLI 계약의 "신뢰할 수 없음", D11)로 끝나며
+리포트를 내지 않습니다. 플랫폼 정보가 없는 후보를 읽지 못한 경우에는 아래 설명처럼 이미지
+선택 중 건너뛸 수 있습니다(D119). 숫자는 설정할 수 없습니다 —
 배포마다 움직이는 한도는 버그 리포트에서 아무도 추론할 수 없는 숫자이기 때문이고(D112, "What
 stays out"), 두 크기 한도가 패키지 수준 변수인 것은 테스트가 낮출 수 있게 하기 위해서일
 뿐입니다(`internal/source/limits.go`).
@@ -30,9 +32,9 @@ stays out"), 두 크기 한도가 패키지 수준 변수인 것은 테스트가
 | 이미지 인덱스 | 플랫폼 탐색 전체에서 **4단계**, **디스크립터 4,096개** | 서로 다른 인덱스마다 목록에 있는 디스크립터 수를 한 번 합산합니다. 목록의 중복 항목도 세며, 디스크립터를 처리할 때마다 타임아웃을 확인합니다 | 둘 중 한도 하나라도 넘으면 exit 2 | D112, D119 |
 | 파일당 | **512 MiB** 압축 해제 기준 (`MaxFileBytes`) | 이미지 레이어에서 읽는 모든 파일(`Files`, `FilesUnder`, `FilesNamed`, `FilesMatching`); SBOM 타깃(`internal/scancmd/scancmd.go`의 `decodeSBOM`); jar 아카이브의 디스크 크기와 거기서 풀리는 각 엔트리(`internal/cataloger/jar/jar.go`) | exit 2: `<path> exceeds the 512 MiB per-file limit (D112)` | D112 |
 | 스캔당 | **2 GiB** (`MaxScanBytes`) | 한 이미지의 모든 레이어 패스에 걸쳐 읽은 파일의 합; 별도로, jar 아카이브 하나가 중첩 아카이브까지 포함해 푸는 바이트의 합 | exit 2: `image reads exceeded the 2 GiB per-scan limit (D112) at <path>`; jar 는 `<archive> exceeds the 2 GiB per-archive decompression budget (D112) at <entry>` | D112 |
-| 이미지 config | **16 MiB** (`MaxConfigBytes`) | 레지스트리와 OCI 레이아웃은 blob 요청 전에 선언 크기를 검사합니다. Docker 아카이브는 본문 읽기 전에 config 헤더를 검사합니다. 로컬 레이아웃은 선언 크기를 한 바이트라도 넘으면 읽기를 중단합니다 | 선언이 한도를 넘거나 선택한 로컬 config의 실제 크기가 다르면 exit 2 | D112 |
+| 이미지 config | **16 MiB** (`MaxConfigBytes`) | 레지스트리와 OCI 레이아웃은 blob 요청 전에 선언 크기를 검사합니다. Docker 아카이브는 본문 읽기 전에 config 헤더를 검사합니다. 로컬 레이아웃은 선언 크기를 한 바이트라도 넘으면 읽기를 중단합니다 | 선택한 이미지의 config가 한도를 넘거나 로컬 실제 크기가 다르면 exit 2. 플랫폼 정보가 없는 후보를 읽지 못하면 건너뛸 수 있습니다 | D112, D119 |
 | Docker 아카이브 매니페스트 | **100 MiB** (`maxArchiveManifestBytes`) | 링크로 연결된 메타데이터를 포함해 `manifest.json` 헤더와 제한된 본문 읽기를 검사합니다. 레이어를 다시 열 때도 보관한 매니페스트와 config 바이트를 사용합니다 | 한도를 넘는 본문을 읽거나 디코딩하기 전에 exit 2 | D112 |
-| 로컬 OCI 메타데이터 | **파일당 100 MiB** (`internal/source/layoutmetadata.go`) | 루트 `index.json`, 각 이미지 매니페스트와 중첩 인덱스. 같은 열린 파일에서 읽기를 제한하고, 디코딩할 바이트에 대해 디스크립터 크기와 다이제스트를 검증합니다 | 파일 한도 초과, 음수·불일치 디스크립터 크기, 다이제스트 불일치, 같은 다이제스트의 크기·미디어 타입 선언 충돌이면 exit 2 | D112 |
+| 로컬 OCI 메타데이터 | **파일당 100 MiB** (`internal/source/layoutmetadata.go`) | 루트 `index.json`, 각 이미지 매니페스트와 중첩 인덱스. 같은 열린 파일에서 읽기를 제한하고, 디코딩할 바이트에 대해 디스크립터 크기와 다이제스트를 검증합니다 | 필수 루트·중첩 인덱스 또는 선택한 이미지의 메타데이터 오류(크기·다이제스트·반복 디스크립터 충돌 포함)는 exit 2. 플랫폼 정보가 없는 이미지 후보를 읽지 못하면 건너뛸 수 있습니다 | D112, D119 |
 | 링크 홉 | 원하는 경로당 **40** 링크(`maxSymlinks`, `internal/source/walk.go`) — Linux의 `MAXSYMLINKS`; 순환은 첫 반복에서 끝남 | 이미지 안에서 `/etc/os-release`와 패키지 데이터베이스를 찾아가며 만나는 심볼릭 링크와 하드링크 | 그 자체로 exit 2는 아님: 그 경로를 stderr 에 `not read: <path> (still a link after 40 symbolic links ...)`로, JSON `unread[]`와 SARIF `assay/not-read`로 보고하고 `--fail-on-incomplete`(두 범위 모두)를 트립함. 잃은 경로가 패키지 데이터베이스였으면 스캔이 아무것도 찾지 못하므로 exit 2가 됨 | D109, D130, 2026-10-22 감사 |
 | 중첩 jar | **3** 단계 (`maxNestedDepth`, `internal/cataloger/jar/jar.go`) | jar 나 war 안의 아카이브 | 세 번째 단계를 넘는 아카이브는 집계되는 skip 이지 조용한 절단이 아님 | D70 |
 | 디렉터리 깊이 | 루트 아래 **6** 단계 (`maxDepth`, `internal/cataloger/dirscan/walk.go`) | `dir:` 타깃 | 더 깊은 디렉터리는 가지치기되며, 의도적으로 공개하지 않음 — 오류 아님 | D26 |
@@ -127,6 +129,12 @@ stat에서 거부하며, 그 뒤 파일이 커져도 같은 열린 핸들의 읽
 모순된 선언을 허용하지는 않습니다. config의 16 MiB 한도는 별도입니다. 유효한 20 MiB 루트
 인덱스는 100 MiB 한도 안에 있습니다. 약 20 MiB blob을 1바이트라고 선언한 잘못된 QA 입력은
 20 MiB 임계값 때문이 아니라 크기 불일치로 거부됩니다.
+
+메타데이터 읽기를 거부한다고 항상 스캔이 실패하는 것은 아닙니다. D119의 기존 플랫폼 선택
+(`internal/source/image.go`의 `collectCandidates`)은 플랫폼 정보가 없는 이미지 후보의
+매니페스트나 config를 읽지 못하면 그 후보를 건너뛸 수 있습니다. 다른 유효한 후보가 요청을
+만족하면 해당 이미지를 계속 스캔하며, 선택 자체가 실패하면 건너뛴 항목의 원인을 오류에
+포함합니다. 필수 루트·중첩 인덱스 읽기와 선택한 이미지의 메타데이터 실패는 치명적 오류입니다.
 
 **버퍼링되고 한정되지 않음.** `dir:` 타깃의 락파일은 `os.ReadFile`로 통째로 읽히며
 (`internal/cataloger/*lock*`, `requirements`, `gomod` 아래 모든 cataloger) 크기 검사가

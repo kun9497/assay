@@ -20,8 +20,10 @@ it connects**, **which credentials it finds**, **how much memory or CPU the proc
 
 ## 1. What assay bounds itself
 
-Every bound below fails closed: the scan exits 2 (the CLI contract's "cannot be trusted",
-D11) and prints no report, rather than continuing with a partial inventory. The numbers are
+Failure behavior is listed per row: fatal errors, counted skips and unread paths differ.
+Failure to read required image metadata stops the scan with exit 2 (the CLI contract's
+"cannot be trusted", D11) and no report. An unreadable platform-less candidate can instead
+be skipped during image selection, as described below (D119). The numbers are
 not configurable — a limit that moved per deployment would be a number nobody could reason
 about in a bug report (D112, "What stays out") — and the two size limits are package-level
 variables only so a test can lower them (`internal/source/limits.go`).
@@ -31,9 +33,9 @@ variables only so a test can lower them (`internal/source/limits.go`).
 | Image index | **4 levels** and **4,096 descriptors** across the platform search | each distinct index contributes its listed descriptors once, including repeated references. The scan checks its timeout between descriptors | exit 2 if either limit is exceeded | D112, D119 |
 | Per file | **512 MiB** decompressed (`MaxFileBytes`) | every file read out of an image layer (`Files`, `FilesUnder`, `FilesNamed`, `FilesMatching`); an SBOM target (`decodeSBOM` in `internal/scancmd/scancmd.go`); a jar archive's size on disk and each entry inflated from it (`internal/cataloger/jar/jar.go`) | exit 2: `<path> exceeds the 512 MiB per-file limit (D112)` | D112 |
 | Per scan | **2 GiB** (`MaxScanBytes`) | the sum of every file read across every layer pass of one image; separately, the sum of everything one jar archive inflates, nested archives included | exit 2: `image reads exceeded the 2 GiB per-scan limit (D112) at <path>`; for a jar, `<archive> exceeds the 2 GiB per-archive decompression budget (D112) at <entry>` | D112 |
-| Image config | **16 MiB** (`MaxConfigBytes`) | registry and OCI layout descriptors are checked before fetching. Docker archive config headers are checked before reading the body. A local layout read also stops at the first undeclared byte | exit 2 for an oversized declaration or a selected local config whose size differs | D112 |
+| Image config | **16 MiB** (`MaxConfigBytes`) | registry and OCI layout descriptors are checked before fetching. Docker archive config headers are checked before reading the body. A local layout read also stops at the first undeclared byte | exit 2 when the selected image's config exceeds the limit or its local size differs; an unreadable platform-less candidate may be skipped | D112, D119 |
 | Docker archive manifest | **100 MiB** (`maxArchiveManifestBytes`) | `manifest.json` header and bounded body read, including linked metadata. Captured manifest and config bytes are reused for later layer opens | exit 2 before an oversized body is read or decoded | D112 |
-| Local OCI metadata | **100 MiB per file** (`internal/source/layoutmetadata.go`) | root `index.json`, each image manifest and each nested index. Reads are bounded on the same open file; descriptor sizes and digests are checked against the bytes decoded | exit 2 for an oversized file, negative or mismatched descriptor size, digest mismatch, or conflicting size/media type declarations for a repeated digest | D112 |
+| Local OCI metadata | **100 MiB per file** (`internal/source/layoutmetadata.go`) | root `index.json`, each image manifest and each nested index. Reads are bounded on the same open file; descriptor sizes and digests are checked against the bytes decoded | errors in required root/nested-index or selected-image metadata exit 2, including size, digest and repeated-descriptor conflicts. An unreadable platform-less image candidate may be skipped | D112, D119 |
 | Link hops | **40** links per wanted path (`maxSymlinks`, `internal/source/walk.go`) — Linux's `MAXSYMLINKS`; a cycle ends at its first repeat | symlinks and hardlinks met while resolving `/etc/os-release` and the package databases inside an image | not exit 2 by itself: the path is reported `not read: <path> (still a link after 40 symbolic links ...)` on stderr, in the JSON `unread[]` and as SARIF `assay/not-read`, and trips `--fail-on-incomplete` (either scope). It becomes exit 2 when the lost path was the package database, because the scan then finds none | D109, D130, audit 2026-10-22 |
 | Nested jars | **3** levels (`maxNestedDepth`, `internal/cataloger/jar/jar.go`) | archives inside a jar or war | an archive past the third level is a counted skip, never silent truncation | D70 |
 | Directory depth | **6** levels below the root (`maxDepth`, `internal/cataloger/dirscan/walk.go`) | `dir:` targets | deeper directories are pruned, deliberately without disclosure — not an error | D26 |
@@ -130,6 +132,12 @@ media type; the visit-once optimization does not excuse contradictory declaratio
 16 MiB config limit remains separate. A valid 20 MiB root index is below the 100 MiB limit;
 the malformed QA inputs declaring one byte for a roughly 20 MiB blob fail on the size
 mismatch, not on a 20 MiB threshold.
+
+Refusing a metadata read is not always a failed scan. D119's existing platform selection
+(`collectCandidates`, `internal/source/image.go`) can skip a platform-less image whose
+manifest or config cannot be read. If another usable candidate satisfies the request, that
+image can still be scanned; a selection failure includes the skipped-entry reason. Required
+root or nested-index reads and the selected image's metadata remain fatal on failure.
 
 **Buffered, unbounded.** A `dir:` target's lockfiles are read whole with `os.ReadFile`
 (every cataloger under `internal/cataloger/*lock*`, `requirements`, `gomod`) with no size
