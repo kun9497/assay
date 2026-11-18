@@ -134,6 +134,13 @@ func TestRun_CDXBareListingJoinsItsQualifierOnlyUncoveredTwin(t *testing.T) {
 			strings.TrimSuffix(sidOS, "}") + `,"components":[` + lib("") + `]}`, 2, 0, 2},
 		{"experimental top, bare child of a sid OS subject", []string{lib("distro=debian-experimental")},
 			strings.TrimSuffix(sidOS, "}") + `,"components":[` + lib("") + `]}`, 2, 0, 2},
+		// A listing its branch's OS keys, with no qualifier of its own, is
+		// that release's; and a `distro=` naming a vendor this build does
+		// not know is a statement, though it identifies no release.
+		{"sid top, bare child of a debian-12 OS subject", []string{lib("distro=debian-sid")},
+			`{"type":"operating-system","name":"debian","version":"12","components":[` + lib("") + `]}`, 2, 1, 1},
+		{"unknown-vendor top, sid subject", []string{lib("distro=weirdos-1")}, lib("distro=debian-sid"), 2, 0, 2},
+		{"sid top, unknown-vendor subject", []string{lib("distro=debian-sid")}, lib("distro=weirdos-1"), 2, 0, 2},
 		// Nor is a listing beside a contradictory declaration, or beside
 		// two releases, silent about its release: it is not joined, and its
 		// presence leaves a bare listing elsewhere unplaced too.
