@@ -2,6 +2,8 @@ package ciguard
 
 import (
 	"fmt"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -72,6 +74,52 @@ func releaseGateProblems(src string) []string {
 func TestReleaseMainCIGateIsWiredBeforePublishing(t *testing.T) {
 	for _, p := range releaseGateProblems(readRepoFile(t, ".github/workflows/release.yml")) {
 		t.Error(p)
+	}
+}
+
+func TestReleasePlatformMatrixMatchesInstallerDefaults(t *testing.T) {
+	defaultFor := func(path, pattern string) string {
+		t.Helper()
+		matches := regexp.MustCompile(pattern).FindAllStringSubmatch(readRepoFile(t, path), -1)
+		if len(matches) != 1 {
+			t.Fatalf("%s: want exactly one default release", path)
+		}
+		return matches[0][1]
+	}
+	unix := defaultFor("install.sh", `(?m)^VERSION="(v[0-9]+\.[0-9]+\.[0-9]+)"$`)
+	windows := defaultFor("install.ps1", `(?m)^\$DefaultVersion = '(v[0-9]+\.[0-9]+\.[0-9]+)'$`)
+	wantWindows := unix
+	wantOS := []string{"darwin", "linux", "windows"}
+	if unix == "v0.18.5" {
+		wantOS = []string{"darwin", "linux"}
+		wantWindows = "v0.18.4"
+	}
+	if windows != wantWindows {
+		t.Errorf("install.ps1 defaults to %s; want %s for release %s", windows, wantWindows, unix)
+	}
+	var config struct {
+		Builds []struct {
+			ID      string
+			GOOS    []string
+			GOARCH  []string
+			Targets []string
+			Ignore  []map[string]string
+		}
+	}
+	if err := yaml.Unmarshal([]byte(readRepoFile(t, ".goreleaser.yaml")), &config); err != nil {
+		t.Fatal(err)
+	}
+	if len(config.Builds) != 1 || config.Builds[0].ID != "assay" {
+		t.Fatal("expected one release build named assay")
+	}
+	build := config.Builds[0]
+	if len(build.Targets) != 0 || len(build.Ignore) != 0 {
+		t.Fatal("unexpected release targets overriding the OS and architecture matrix")
+	}
+	slices.Sort(build.GOOS)
+	slices.Sort(build.GOARCH)
+	if !slices.Equal(build.GOOS, wantOS) || !slices.Equal(build.GOARCH, []string{"amd64", "arm64"}) {
+		t.Errorf("release %s targets %v / %v; want %v / [amd64 arm64]", unix, build.GOOS, build.GOARCH, wantOS)
 	}
 }
 

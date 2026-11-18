@@ -30,10 +30,12 @@ class RecoveryTest(unittest.TestCase):
             with self.subTest(system=system, machine=machine), tempfile.TemporaryDirectory() as checkout:
                 root = Path(checkout)
                 (root / "install.sh").write_text('VERSION="v9.8.7"\n', encoding="utf-8")
+                (root / "install.ps1").write_text("$DefaultVersion = 'v9.8.6'\n", encoding="utf-8")
                 os_name = system.lower()
+                version = "9.8.6" if system == "Windows" else "9.8.7"
                 extension = "zip" if system == "Windows" else "tar.gz"
-                names = [f"assay_9.8.7_{os_name}_{arch}.{extension}",
-                         "assay_9.8.7_checksums.txt", "assay_9.8.7_checksums.txt.sig"]
+                names = [f"assay_{version}_{os_name}_{arch}.{extension}",
+                         f"assay_{version}_checksums.txt", f"assay_{version}_checksums.txt.sig"]
                 downloads = []
 
                 def fetch(curl, url, path):
@@ -55,7 +57,7 @@ class RecoveryTest(unittest.TestCase):
                     self.assertNotIn("ASSAY_ALLOW_UNSIGNED", env)
                     if system == "Windows":
                         self.assertEqual(cmd, [which("pwsh") or "powershell.exe", "-NoProfile",
-                                             "-File", str(root / "install.ps1"), "-Version", "v9.8.7"]
+                                             "-File", str(root / "install.ps1"), "-Version", "v9.8.6"]
                                          + (["-BinDir", bin_dir] if bin_dir else []))
                     else:
                         self.assertEqual(env["ASSAY_OS"], os_name)
@@ -76,7 +78,7 @@ class RecoveryTest(unittest.TestCase):
                     self.assertEqual(os.environ["ASSAY_ALLOW_UNSIGNED"], "1")
                 run.assert_called_once()
                 self.assertEqual([url for _, url, _ in downloads],
-                                 [f"https://github.com/kun9497/assay/releases/download/v9.8.7/{name}" for name in names])
+                                 [f"https://github.com/kun9497/assay/releases/download/v{version}/{name}" for name in names])
                 self.assertEqual([curl for curl, _, _ in downloads],
                                  [which("curl.exe" if system == "Windows" else "curl")] * 3)
                 self.assertEqual([path.name for _, _, path in downloads], names)

@@ -264,13 +264,12 @@ try {
         } else { Write-Host "ok   C9b [$edition] (a pinned TLS list is restored)" }
     }
 
-    # C11: install.sh and install.ps1 install the same release by default.
-    # Render replaces $DefaultVersion in every other case, so this is the
-    # only check on the committed value; prepare-release.sh sets both.
+    # C11 checks the committed defaults. v0.18.5 ships only Unix archives.
     $shVersion = [regex]::Match([IO.File]::ReadAllText((Join-Path $repo 'install.sh')), '(?m)^VERSION="(v[^"]+)"$').Groups[1].Value
     $psVersion = [regex]::Match([IO.File]::ReadAllText($installer), "(?m)^\`$DefaultVersion = '(v[^']+)'$").Groups[1].Value
-    if (-not $shVersion -or $shVersion -ne $psVersion) { Write-Host "FAIL C11: install.sh VERSION '$shVersion', install.ps1 `$DefaultVersion '$psVersion'"; $fail = $true }
-    else { Write-Host "ok   C11 (both installers default to $psVersion)" }
+    $expectedWindows = if ($shVersion -ceq 'v0.18.5') { 'v0.18.4' } else { $shVersion }
+    if (-not $shVersion -or $expectedWindows -cne $psVersion) { Write-Host "FAIL C11: expected Windows $expectedWindows for Unix $shVersion, got $psVersion"; $fail = $true }
+    else { Write-Host "ok   C11 (Unix $shVersion, Windows $psVersion)" }
 
     # C7: the installer contacts nothing but the release base
     if ([IO.File]::ReadAllText($installer).Contains('api.github.com')) { Write-Host 'FAIL C7: install.ps1 calls api.github.com'; $fail = $true }

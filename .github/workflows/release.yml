@@ -6,7 +6,7 @@
 #   sh scripts/prepare-release.sh vX.Y.Z   # sets install.sh's VERSION and
 #                                          # install.ps1's $DefaultVersion
 #   git commit -am "chore: prepare vX.Y.Z" && git push origin main
-#   # wait for CI on that commit (the installer harnesses check the two agree)
+#   # wait for CI on that commit (including the release matrix and installer defaults)
 #   git tag vX.Y.Z && git push origin vX.Y.Z
 #
 # Secrets: COSIGN_PRIVATE_KEY and COSIGN_PASSWORD (D137) sign the checksums
@@ -51,12 +51,8 @@ jobs:
       - name: Hold the toolchain to go.mod's floor
         run: sh scripts/check-go-toolchain.sh
 
-      - name: Require both installers to default to the release tag
-        run: |
-          if ! grep -Fxq "VERSION=\"$GITHUB_REF_NAME\"" install.sh || ! grep -Fxq "\$DefaultVersion = '$GITHUB_REF_NAME'" install.ps1; then
-            echo "::error::Both tagged installers must default to $GITHUB_REF_NAME."
-            exit 1
-          fi
+      - name: Verify the tagged installers' platform versions
+        run: sh scripts/prepare-release.sh --check "$GITHUB_REF_NAME"
 
       - uses: ./.github/actions/setup-cosign
 

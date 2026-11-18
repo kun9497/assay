@@ -9,6 +9,8 @@
 
 ## [0.18.5] - 2026-11-18
 
+아래 변경 사항은 Linux와 macOS의 amd64·arm64 바이너리에 반영했습니다. Windows 설치기는 기본으로 [Windows 릴리스 v0.18.4](https://github.com/kun9497/assay/releases/tag/v0.18.4)를 설치합니다.
+
 ### Security
 
 - Docker 아카이브의 본문을 읽기 전에 config 16 MiB, 매니페스트 100 MiB 한도를 검사합니다.

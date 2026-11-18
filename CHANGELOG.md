@@ -9,6 +9,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.18.5] - 2026-11-18
 
+The changes below ship in the Linux and macOS binaries for amd64 and arm64. The Windows installer defaults to the [v0.18.4 Windows release](https://github.com/kun9497/assay/releases/tag/v0.18.4).
+
 ### Security
 
 - Docker archives now enforce the 16 MiB config and 100 MiB manifest limits before
