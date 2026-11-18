@@ -40,7 +40,7 @@ param(
 )
 
 # Set by scripts/prepare-release.sh when preparing a release.
-$DefaultVersion = 'v0.18.4'
+$DefaultVersion = 'v0.18.5'
 $Repo = 'kun9497/assay'
 
 # The public keys this installer trusts, PEM, one per release signing key.

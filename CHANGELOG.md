@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.5] - 2026-11-18
+
 ### Security
 
 - Docker archives now enforce the 16 MiB config and 100 MiB manifest limits before
@@ -1408,7 +1410,8 @@ All notable changes to this project are documented here. The format follows
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.4...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.5...main
+[0.18.5]: https://github.com/kun9497/assay/compare/v0.18.4...v0.18.5
 [0.18.4]: https://github.com/kun9497/assay/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/kun9497/assay/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/kun9497/assay/compare/v0.18.1...v0.18.2
