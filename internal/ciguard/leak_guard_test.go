@@ -689,7 +689,7 @@ func functionHeader(raws []string) (n int, brace bool) {
 // arm's body does not. A word with a substitution in it is a command's.
 func casePatternEnd(raws []string) int {
 	for i, raw := range raws {
-		if !strings.HasSuffix(raw, ")") || strings.Contains(raw, "$(") || strings.Contains(raw, "`") {
+		if !strings.HasSuffix(raw, ")") || strings.Contains(raw, "$(") {
 			continue
 		}
 		if strings.HasPrefix(raw, "(") || strings.Count(raw, ")") > strings.Count(raw, "(") {
@@ -721,6 +721,13 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 		if state.caseDepth > 0 && !patternRead {
 			patternRead = true
 			if k := casePatternEnd(raws); k >= 0 {
+				// A word taken for a pattern's may have been an arm body's
+				// assignment beside a value that ends in ); it is not lost.
+				for _, raw := range raws[:k+1] {
+					if name, _, _ := strings.Cut(raw, "="); !child && assigns(raw) {
+						state.forget(strings.TrimSuffix(name, "+"))
+					}
+				}
 				words, raws = words[k+1:], raws[k+1:]
 				continue
 			}
@@ -765,7 +772,7 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 	case "for", "select":
 		state.conditionalDepth++
 		state.loops = append(state.loops, map[string]bool{})
-		if !child && len(words) > 1 && shellName.MatchString(words[1]) {
+		if len(words) > 1 && shellName.MatchString(words[1]) {
 			state.forget(words[1])
 		}
 	case "fi":
@@ -832,11 +839,12 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 			state.loops = append(state.loops, map[string]bool{})
 			conditional = true
 		case "{":
-			group := braceGroup{conditional: conditional || state.pendingFunction, function: state.pendingFunction, effects: state.effects}
+			// A function's body is not made conditional: what it writes
+			// is poisoned (wrote), which is the stronger of the two.
+			group := braceGroup{conditional: conditional, function: state.pendingFunction, effects: state.effects}
 			state.pendingFunction = false
 			if group.function {
 				state.functionDepth++
-				conditional = true
 			}
 			if group.conditional {
 				state.conditionalDepth++
@@ -986,7 +994,6 @@ func (state *shellState) variableCommandLeaks(raws []string) bool {
 	if !state.unresolvedStoredVariable(name) {
 		return false
 	}
-	state.effects++
 	known := func(ref string) (string, bool) {
 		value, ok := state.vars[strings.Trim(ref, "${}")]
 		return value, ok
@@ -1084,12 +1091,11 @@ func (state *shellState) remember(raw, word string, conditional bool) {
 	_, value, _ := strings.Cut(word, "=")
 	appends := strings.HasSuffix(name, "+")
 	name = strings.TrimSuffix(name, "+")
-	if conditional || appends || state.poisoned[name] {
-		state.forget(name)
-		return
-	}
 	state.wrote(name)
-	if expanded, ok := state.variableWord(rawValue); ok {
+	if conditional || appends || state.poisoned[name] {
+		delete(state.vars, name)
+		state.unknown[name] = true
+	} else if expanded, ok := state.variableWord(rawValue); ok {
 		state.vars[name] = expanded
 		delete(state.unknown, name)
 	} else if !strings.ContainsAny(blankSingleQuoted(rawValue), "$`") {
