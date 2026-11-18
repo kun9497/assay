@@ -432,7 +432,10 @@ func TestInstallOneLiners_GitHubRunShellScope(t *testing.T) {
 		{"another job", step(install) + "  other:\n" + job + step(trap), false},
 		{"other run before", step(trap) + step(install), false},
 		{"other run after", step(install) + step(trap), false},
-		{"local variable from other run", step(assign) + step(install+"\n"+evaluate), false},
+		// An eval is refused wherever its variable was set: the guard no
+		// longer follows variables (leakGuard). This row said false while it
+		// did, since `cleanup` is unset in the install run's own shell.
+		{"local variable from other run", step(assign) + step(install+"\n"+evaluate), true},
 		{"trap in install run", step(trap + "\n" + install), true},
 		{"trap in second install run", step(install) + step(install+"\n"+trap), true},
 		{"variable in install run", step(install + "\n" + assign + "\n" + evaluate), true},
