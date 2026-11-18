@@ -12,13 +12,34 @@ All notable changes to this project are documented here. The format follows
 - Docker archives now enforce the 16 MiB config and 100 MiB manifest limits before
   reading their bodies. Bounded metadata snapshots prevent later archive opens from
   replacing the checked contents. Metadata traversal honors cancellation and limits links to 40 hops.
+- Local OCI layouts now bound each `index.json`, image manifest and nested index to 100 MiB.
+  Reads stop at the first byte beyond a descriptor's declared size, and negative sizes,
+  length mismatches and digest mismatches are refused. Repeated descriptors across the indexes
+  read during traversal must agree on size and media type for the same digest.
 
 ### Fixed
 
 - Docker archives with different layer and config diff-ID counts now fail with a
   descriptive error before the library can panic or omit layers from the scan.
+- CycloneDX retains contradictory Ubuntu codename evidence even when the OS component's
+  name is `linux`, preventing a VEX waiver from hiding a finding. The numeric release can
+  still supply an unambiguous advisory key.
+- A package's uncovered distro qualifier, such as `debian-sid`, keeps that installation
+  separate from a covered twin even when the SBOM declares no OS component. Its coverage
+  skip is preserved in the report instead of disappearing during deduplication.
+- The CI documentation guard tracks conditional assignments and `unset`, expanded `eval`
+  arguments and dynamic trap signals. A pipeline's last stage is checked conservatively
+  because some shells can run it in the parent.
 
 ## [0.18.4] - 2026-11-17
+
+### Changed
+
+- The CI examples use `--fail-on-incomplete` and `--config none`: incomplete scans exit 2,
+  and a checkout's `.assay.yaml` cannot waive findings in the copied pipeline.
+- The GitHub Actions example uses `github/codeql-action/upload-sarif@v4` and grants
+  `actions: read` for private-repository uploads.
+- Both tagged installers default to v0.18.4.
 
 ### Security
 
@@ -38,12 +59,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [0.18.3] - 2026-11-17
 
+### Security
+
+- Unix installation creates the executable as the installing user, with mode 0755.
+  Older installers could restore the build runner's UID from tar when run as root;
+  the v0.18.0 release assets confirm a nonroot archive owner. Users who installed as root
+  with a pre-v0.18.3 installer should check ownership and reinstall if needed.
+
 ### Fixed
 - The CI documentation check treats each GitHub Actions `run` step as a separate
   shell when checking for installer variables and cleanup traps.
-- Unix installation creates the executable as the installing user, with mode 0755.
-  An installation run as root previously restored the build runner's UID from tar.
-- Both tagged installers default to v0.18.3. The published install commands can
+- Both tagged installers default to v0.18.3. The v0.18.2 tag's `install.sh` had still
+  defaulted to v0.18.1. The published install commands can
   fetch the same pinned script through GitHub's contents API if the raw host is unavailable.
   If a release asset connection times out, a pinned Git checkout can retrieve the release
   through another address returned by DNS, with the same TLS, signature and checksum verification.
@@ -1381,7 +1408,8 @@ All notable changes to this project are documented here. The format follows
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.3...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.4...main
+[0.18.4]: https://github.com/kun9497/assay/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/kun9497/assay/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/kun9497/assay/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/kun9497/assay/compare/v0.18.0...v0.18.1

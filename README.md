@@ -40,8 +40,10 @@ vX.Y.Z; s=$?; …`), verified against the same keys. A release whose checksums f
 signature is refused, never installed on the checksum alone: v0.10.0 is the first signed
 release, so anything older goes through `go install` or the release page.
 
-If you previously installed as root using the v0.18.1 or tagged v0.18.2 installer,
-rerun the command above to replace the build-runner-owned binary with one owned by root.
+If you installed as root with an installer older than v0.18.3, check the executable's owner
+and rerun the command above if it is not root. Older installers could restore the build
+runner's UID from the archive; this was confirmed in the v0.18.0 release assets. The current
+installer creates the executable as the installing user.
 
 On a runner without sudo, replace `sudo sh "$t" -b /usr/local/bin` in the install line with
 `sh "$t" -b "$HOME/.local/bin"`. Run `export PATH="$HOME/.local/bin:$PATH"` in the scan step.
@@ -94,8 +96,10 @@ Prebuilt binaries and checksums for every platform are attached to each
 
 Install Assay on your CI runner using the instructions above. Run this as one shell step.
 It downloads the signed DB from GHCR and scans a public Alpine image without a Docker daemon or login.
-Allow disk space for the local DB (about 5–6 GiB in November 2026). Updating an existing DB
-temporarily needs room for the old and new copies together.
+Allow disk space for the local DB. The November 2026 Windows measurement was a **6 GiB logical
+file size**; see the [measurement and memory model](docs/operating-envelope.md#3-memory-model).
+Size varies by artifact and platform. Updating an existing DB temporarily needs room for the
+old and new copies together.
 For your build, replace `IMAGE` with the digest your build pushed and set `--platform` to its deployment platform.
 
 ```sh

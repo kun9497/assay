@@ -33,10 +33,11 @@ variables only so a test can lower them (`internal/source/limits.go`).
 | Per scan | **2 GiB** (`MaxScanBytes`) | the sum of every file read across every layer pass of one image; separately, the sum of everything one jar archive inflates, nested archives included | exit 2: `image reads exceeded the 2 GiB per-scan limit (D112) at <path>`; for a jar, `<archive> exceeds the 2 GiB per-archive decompression budget (D112) at <entry>` | D112 |
 | Image config | **16 MiB** (`MaxConfigBytes`) | registry and OCI layout descriptors are checked before fetching. Docker archive config headers are checked before reading the body. A local layout read also stops at the first undeclared byte | exit 2 for an oversized declaration or a selected local config whose size differs | D112 |
 | Docker archive manifest | **100 MiB** (`maxArchiveManifestBytes`) | `manifest.json` header and bounded body read, including linked metadata. Captured manifest and config bytes are reused for later layer opens | exit 2 before an oversized body is read or decoded | D112 |
+| Local OCI metadata | **100 MiB per file** (`internal/source/layoutmetadata.go`) | root `index.json`, each image manifest and each nested index. Reads are bounded on the same open file; descriptor sizes and digests are checked against the bytes decoded | exit 2 for an oversized file, negative or mismatched descriptor size, digest mismatch, or conflicting size/media type declarations for a repeated digest | D112 |
 | Link hops | **40** links per wanted path (`maxSymlinks`, `internal/source/walk.go`) — Linux's `MAXSYMLINKS`; a cycle ends at its first repeat | symlinks and hardlinks met while resolving `/etc/os-release` and the package databases inside an image | not exit 2 by itself: the path is reported `not read: <path> (still a link after 40 symbolic links ...)` on stderr, in the JSON `unread[]` and as SARIF `assay/not-read`, and trips `--fail-on-incomplete` (either scope). It becomes exit 2 when the lost path was the package database, because the scan then finds none | D109, D130, audit 2026-10-22 |
 | Nested jars | **3** levels (`maxNestedDepth`, `internal/cataloger/jar/jar.go`) | archives inside a jar or war | an archive past the third level is a counted skip, never silent truncation | D70 |
 | Directory depth | **6** levels below the root (`maxDepth`, `internal/cataloger/dirscan/walk.go`) | `dir:` targets | deeper directories are pruned, deliberately without disclosure — not an error | D26 |
-| Time | **`--timeout <duration>`**, off by default | a registry fetch (`remote.WithContext`, `internal/source/image.go`) and the layer walks, which check the context before every tar entry and between 32 KiB chunks of the digest drain (`readLayer`, `drainLayer` in `internal/source/layerdigest.go`) | exit 2: `error: scan did not finish within <duration> (--timeout): <where the walk was>` | D112 |
+| Time | **`--timeout <duration>`**, off by default | a registry fetch (`remote.WithContext`, `internal/source/image.go`), local OCI metadata reads (`internal/source/layoutmetadata.go`) and the layer walks, which check the context before every tar entry and between 32 KiB chunks of the digest drain (`readLayer`, `drainLayer` in `internal/source/layerdigest.go`) | exit 2: `error: scan did not finish within <duration> (--timeout): <where the walk was>` | D112 |
 
 Three things the table implies but a wrapper should read as plain statements:
 
@@ -102,8 +103,12 @@ What a scan holds in memory, and what nobody has measured yet.
 
 **Buffered, bounded.** Every wanted file out of an image is read whole into memory under the
 per-file limit (`readEntry`, `internal/source/limits.go`), and the files kept across a scan
-are bounded by the per-scan limit — so an image scan holds at most 2 GiB of file content, plus
-registry or Docker archive manifest (≤ 100 MiB) and config (≤ 16 MiB). The rest of each layer is
+are bounded by the per-scan limit — at most 2 GiB of collected layer-file content. Image
+metadata has separate limits: each registry, Docker archive or local OCI manifest/index is
+at most 100 MiB, and each config is at most 16 MiB. These are **per-blob limits**, not an
+aggregate metadata or process-memory ceiling: platform selection can retain several
+candidate manifests and configs, and decoded objects and library copies add memory. The
+2 GiB file budget does not include those objects. The rest of each layer is
 drained through a 32 KiB buffer and discarded (`drainLayer`); it costs time, not memory. An
 SBOM is streamed through its decoder under the same 512 MiB read limit; the decoded structure
 is the decoder's and is proportional to the document. A jar inflates at most 512 MiB per
@@ -114,7 +119,17 @@ entry and 2 GiB per archive. A Go binary is read through `debug/buildinfo.ReadFi
 (`dockerArchiveOpener`, `internal/source/archive.go`). Every subsequent archive open reads
 those captured bytes, including after a file replacement. Metadata links have the same
 40-hop bound as layer links. Archive reads check cancellation while skipping preceding layers.
-The byte limits apply to input content. Decoded objects and library copies also consume memory.
+
+`oci-dir:` uses bounded snapshots of root `index.json`, image manifests and nested indexes
+(`internal/source/layoutmetadata.go`). An oversized root file is refused by stat before
+reading; the same open handle is still read through a hard limit in case it grows. For a
+descriptor's blob, the declared size is checked before opening, and the read stops at the
+first undeclared byte. Its actual length and digest are checked before the same bytes are
+decoded. Repeated references in the indexes read during traversal must agree on size and
+media type; the visit-once optimization does not excuse contradictory declarations. The
+16 MiB config limit remains separate. A valid 20 MiB root index is below the 100 MiB limit;
+the malformed QA inputs declaring one byte for a roughly 20 MiB blob fail on the size
+mismatch, not on a 20 MiB threshold.
 
 **Buffered, unbounded.** A `dir:` target's lockfiles are read whole with `os.ReadFile`
 (every cataloger under `internal/cataloger/*lock*`, `requirements`, `gomod`) with no size
@@ -123,13 +138,19 @@ check — by decision, see section 1. Memory for a hostile checkout is the cgrou
 **The database is memory-mapped.** A scan opens the store read-only
 (`bolt.Open(path, 0o600, &bolt.Options{ReadOnly: true})`, `internal/store/bolt.go`), and
 bbolt maps the whole file. Pages a lookup touches are paged in; the mapping is file-backed, so
-it counts toward a cgroup's memory while being reclaimable. The size: the published artifact's
-database layer was **482,350,701 bytes gzip-compressed** when its manifest was read for this
-page (`ghcr.io/kun9497/assay-db:v9`, digest `sha256:ddd969bc…`, 2026-11-09). The uncompressed
-size of the published database was not measured for this page; the only local figure is a
-partial 2026-08 build at 3 GiB on disk on Windows, where bbolt extends the file to its mmap
-size in 1 GiB steps (`bolt_windows.go`, `mmapSize` in `db.go`, bbolt v1.5.0), so that is an
-upper bound of the data in it, not a measurement.
+it counts toward a cgroup's memory while being reclaimable.
+
+**Measured installed DB file size:** on Windows, a file-length check on 2026-11-18 returned
+**6,442,450,944 bytes (6 GiB)** for `vulnerability.db`, using Python
+`Path(db_path).stat().st_size` (GiB = bytes / 2³⁰). It was the signed public artifact
+`ghcr.io/kun9497/assay-db:v9` at digest
+`sha256:111cdcc5387c94a0807dc6568e9892e3675d55f85c0ad960cc25bf76413b88f0`,
+built at `2026-11-16T13:41:05.652029793Z` and pulled at `2026-11-17T09:28:24.1153845Z`.
+This measures the installed file's **logical length**, not allocated filesystem blocks,
+the compressed artifact size, or RSS. On Windows, bbolt extends the file to its mmap size
+in 1 GiB steps (`bolt_windows.go`, `mmapSize` in `db.go`, bbolt v1.5.0), so the file can
+contain padding beyond the stored data. Size varies by artifact and platform. An update
+temporarily needs room for both the old and new DB files.
 
 **Peak RSS has not been measured.** No number on this page is a measured resident-set size,
 and none should be inferred from the bounds above: the bounds are ceilings on input, not on

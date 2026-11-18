@@ -32,10 +32,11 @@ stays out"), 두 크기 한도가 패키지 수준 변수인 것은 테스트가
 | 스캔당 | **2 GiB** (`MaxScanBytes`) | 한 이미지의 모든 레이어 패스에 걸쳐 읽은 파일의 합; 별도로, jar 아카이브 하나가 중첩 아카이브까지 포함해 푸는 바이트의 합 | exit 2: `image reads exceeded the 2 GiB per-scan limit (D112) at <path>`; jar 는 `<archive> exceeds the 2 GiB per-archive decompression budget (D112) at <entry>` | D112 |
 | 이미지 config | **16 MiB** (`MaxConfigBytes`) | 레지스트리와 OCI 레이아웃은 blob 요청 전에 선언 크기를 검사합니다. Docker 아카이브는 본문 읽기 전에 config 헤더를 검사합니다. 로컬 레이아웃은 선언 크기를 한 바이트라도 넘으면 읽기를 중단합니다 | 선언이 한도를 넘거나 선택한 로컬 config의 실제 크기가 다르면 exit 2 | D112 |
 | Docker 아카이브 매니페스트 | **100 MiB** (`maxArchiveManifestBytes`) | 링크로 연결된 메타데이터를 포함해 `manifest.json` 헤더와 제한된 본문 읽기를 검사합니다. 레이어를 다시 열 때도 보관한 매니페스트와 config 바이트를 사용합니다 | 한도를 넘는 본문을 읽거나 디코딩하기 전에 exit 2 | D112 |
+| 로컬 OCI 메타데이터 | **파일당 100 MiB** (`internal/source/layoutmetadata.go`) | 루트 `index.json`, 각 이미지 매니페스트와 중첩 인덱스. 같은 열린 파일에서 읽기를 제한하고, 디코딩할 바이트에 대해 디스크립터 크기와 다이제스트를 검증합니다 | 파일 한도 초과, 음수·불일치 디스크립터 크기, 다이제스트 불일치, 같은 다이제스트의 크기·미디어 타입 선언 충돌이면 exit 2 | D112 |
 | 링크 홉 | 원하는 경로당 **40** 링크(`maxSymlinks`, `internal/source/walk.go`) — Linux의 `MAXSYMLINKS`; 순환은 첫 반복에서 끝남 | 이미지 안에서 `/etc/os-release`와 패키지 데이터베이스를 찾아가며 만나는 심볼릭 링크와 하드링크 | 그 자체로 exit 2는 아님: 그 경로를 stderr 에 `not read: <path> (still a link after 40 symbolic links ...)`로, JSON `unread[]`와 SARIF `assay/not-read`로 보고하고 `--fail-on-incomplete`(두 범위 모두)를 트립함. 잃은 경로가 패키지 데이터베이스였으면 스캔이 아무것도 찾지 못하므로 exit 2가 됨 | D109, D130, 2026-10-22 감사 |
 | 중첩 jar | **3** 단계 (`maxNestedDepth`, `internal/cataloger/jar/jar.go`) | jar 나 war 안의 아카이브 | 세 번째 단계를 넘는 아카이브는 집계되는 skip 이지 조용한 절단이 아님 | D70 |
 | 디렉터리 깊이 | 루트 아래 **6** 단계 (`maxDepth`, `internal/cataloger/dirscan/walk.go`) | `dir:` 타깃 | 더 깊은 디렉터리는 가지치기되며, 의도적으로 공개하지 않음 — 오류 아님 | D26 |
-| 시간 | **`--timeout <duration>`**, 기본은 꺼짐 | 레지스트리 fetch(`internal/source/image.go`의 `remote.WithContext`)와 레이어 walk — tar 엔트리마다 그 전에, 그리고 digest drain 의 32 KiB 청크 사이마다 컨텍스트를 확인(`readLayer`, `internal/source/layerdigest.go`의 `drainLayer`) | exit 2: `error: scan did not finish within <duration> (--timeout): <walk 가 있던 곳>` | D112 |
+| 시간 | **`--timeout <duration>`**, 기본은 꺼짐 | 레지스트리 fetch(`internal/source/image.go`의 `remote.WithContext`), 로컬 OCI 메타데이터 읽기(`internal/source/layoutmetadata.go`)와 레이어 walk — tar 엔트리마다 그 전에, 그리고 digest drain 의 32 KiB 청크 사이마다 컨텍스트를 확인(`readLayer`, `internal/source/layerdigest.go`의 `drainLayer`) | exit 2: `error: scan did not finish within <duration> (--timeout): <walk 가 있던 곳>` | D112 |
 
 표가 함의하지만 래퍼가 평서문으로 읽어야 할 세 가지:
 
@@ -100,8 +101,12 @@ update`와 `db build --seed`에만 있고(D140), 스캔의 레이어 읽기에�
 
 **버퍼링되고 한정됨.** 이미지에서 원하는 모든 파일은 파일당 한도 아래서 통째로 메모리에
 읽히고(`internal/source/limits.go`의 `readEntry`), 한 스캔에 걸쳐 보관되는 파일은 스캔당
-한도로 한정됩니다 — 그래서 이미지 스캔은 파일 내용을 최대 2 GiB 들고, 거기에
-레지스트리 또는 Docker 아카이브 매니페스트(≤ 100 MiB)와 config(≤ 16 MiB)가 더해집니다. 각 레이어의 나머지는
+한도로 한정됩니다 — 수집한 레이어 파일 내용이 최대 2 GiB입니다. 이미지 메타데이터의 한도는
+별도입니다. 레지스트리·Docker 아카이브·로컬 OCI의 각 매니페스트/인덱스는 최대 100 MiB,
+각 config는 최대 16 MiB입니다. 이는 **blob별 한도**이며 메타데이터 전체나 프로세스 메모리의
+상한이 아닙니다. 플랫폼 선택 중 여러 후보의 매니페스트와 config를 보관할 수 있고, 디코딩한
+객체와 라이브러리 복사본도 메모리를 사용합니다. 2 GiB 파일 예산은 그 객체들을 포함하지 않습니다.
+각 레이어의 나머지는
 32 KiB 버퍼로 drain 되어 버려집니다(`drainLayer`); 시간이 들지 메모리는 들지 않습니다. SBOM 은
 같은 512 MiB 읽기 한도 아래서 디코더로 스트리밍되며, 디코드된 구조체는 디코더의 것이고 문서
 크기에 비례합니다. jar 는 엔트리당 최대 512 MiB, 아카이브당 2 GiB 를 풉니다. Go 바이너리는
@@ -112,7 +117,16 @@ update`와 `db build --seed`에만 있고(D140), 스캔의 레이어 읽기에�
 (`internal/source/archive.go`의 `dockerArchiveOpener`). 파일이 교체돼도 이후 아카이브를
 열 때마다 보관한 바이트를 읽습니다. 메타데이터 링크에도 레이어 링크와 같은 40홉 한도가
 적용됩니다. 앞선 레이어를 건너뛰는 동안에도 취소를 확인합니다.
-바이트 한도는 입력 내용에 적용되며, 디코딩한 객체와 라이브러리 복사본도 메모리를 사용합니다.
+
+`oci-dir:`는 루트 `index.json`, 이미지 매니페스트, 중첩 인덱스를 한도 안에서 읽은 바이트로
+보관합니다(`internal/source/layoutmetadata.go`). 루트 파일의 크기가 한도를 넘으면 읽기 전
+stat에서 거부하며, 그 뒤 파일이 커져도 같은 열린 핸들의 읽기 한도가 적용됩니다. 디스크립터가
+있는 blob은 열기 전에 선언 크기를 확인하고, 선언보다 한 바이트라도 많으면 읽기를 중단합니다.
+실제 길이와 다이제스트를 검증한 동일 바이트로 디코딩합니다. 탐색하며 읽은 인덱스들에서 같은
+다이제스트를 반복 참조하면 크기와 미디어 타입이 일치해야 하며, 한 번만 방문하는 최적화가
+모순된 선언을 허용하지는 않습니다. config의 16 MiB 한도는 별도입니다. 유효한 20 MiB 루트
+인덱스는 100 MiB 한도 안에 있습니다. 약 20 MiB blob을 1바이트라고 선언한 잘못된 QA 입력은
+20 MiB 임계값 때문이 아니라 크기 불일치로 거부됩니다.
 
 **버퍼링되고 한정되지 않음.** `dir:` 타깃의 락파일은 `os.ReadFile`로 통째로 읽히며
 (`internal/cataloger/*lock*`, `requirements`, `gomod` 아래 모든 cataloger) 크기 검사가
@@ -122,13 +136,19 @@ update`와 `db build --seed`에만 있고(D140), 스캔의 레이어 읽기에�
 **데이터베이스는 메모리 매핑됩니다.** 스캔은 스토어를 읽기 전용으로 열고
 (`bolt.Open(path, 0o600, &bolt.Options{ReadOnly: true})`, `internal/store/bolt.go`), bbolt 는
 파일 전체를 매핑합니다. 조회가 건드리는 페이지가 페이지 인됩니다. 매핑은 파일 기반이라 cgroup
-메모리에 집계되면서도 회수 가능합니다. 크기: 이 페이지를 위해 매니페스트를 읽었을 때 발행된
-아티팩트의 데이터베이스 레이어는 **gzip 압축 기준 482,350,701 바이트**였고
-(`ghcr.io/kun9497/assay-db:v9`, digest `sha256:ddd969bc…`, 2026-11-09). 발행된 데이터베이스의
-압축 해제 크기는 이 페이지를 위해 재지 않았습니다. 유일한 로컬 수치는 2026-08의 부분 빌드가
-Windows 디스크에서 3 GiB 라는 것인데, Windows 의 bbolt 는 파일을 mmap 크기까지 1 GiB 단위로
-늘리므로(`bolt_windows.go`, `db.go`의 `mmapSize`, bbolt v1.5.0) 그 숫자는 측정값이 아니라 데이터의
-상한입니다.
+메모리에 집계되면서도 회수 가능합니다.
+
+**설치된 DB 파일 크기 실측:** 2026-11-18 Windows에서 Python의
+`Path(db_path).stat().st_size`로 `vulnerability.db`를 확인한 결과
+**6,442,450,944 바이트(6 GiB)**였습니다(GiB = 바이트 / 2³⁰). 해당 파일은 서명된 공개 아티팩트
+`ghcr.io/kun9497/assay-db:v9`, 다이제스트
+`sha256:111cdcc5387c94a0807dc6568e9892e3675d55f85c0ad960cc25bf76413b88f0`이며,
+빌드 시각은 `2026-11-16T13:41:05.652029793Z`, 내려받은 시각은
+`2026-11-17T09:28:24.1153845Z`입니다. 이는 설치된 파일의 **논리 길이**를 측정한 것으로,
+파일시스템의 실제 할당 블록·압축 아티팩트 크기·RSS가 아닙니다. Windows의 bbolt는 파일을
+mmap 크기까지 1 GiB 단위로 늘리므로(`bolt_windows.go`, `db.go`의 `mmapSize`, bbolt v1.5.0),
+저장된 데이터보다 큰 패딩이 포함될 수 있습니다. 크기는 아티팩트와 플랫폼에 따라 달라지며,
+갱신 중에는 이전 DB 파일과 새 DB 파일을 함께 보관할 여유 공간이 필요합니다.
 
 **피크 RSS 는 측정되지 않았습니다.** 이 페이지의 어떤 숫자도 측정된 상주 메모리 크기가 아니며,
 위 한도에서 추론해서도 안 됩니다: 한도는 입력의 천장이지 프로세스의 천장이 아닙니다. 그
