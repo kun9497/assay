@@ -71,7 +71,9 @@ func openLayoutIndex(ctx context.Context, dir string) (*boundedLayoutIndex, erro
 	}
 	raw, err := readLayoutMetadata(ctx, f, maxArchiveManifestBytes)
 	if errors.Is(err, errLayoutMetadataTooLong) {
-		// The file grew past the stat above while it was being read.
+		// The file grew past the stat above while it was being read. No test
+		// reaches this: it takes a writer racing the read, and with the
+		// branch gone the scan still stops, on the sentinel's own text.
 		return nil, fmt.Errorf("layout index.json exceeds the %s limit (D112)", formatBytes(maxArchiveManifestBytes))
 	}
 	if err != nil {
