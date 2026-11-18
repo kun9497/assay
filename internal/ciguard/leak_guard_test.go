@@ -23,8 +23,12 @@ import (
 // elif while until time command builtin export readonly local declare
 // typeset`, leading NAME=value assignments) come off, `case WORD in` and an
 // arm's pattern come off a case arm's command and a function's header off its
-// body, `eval`'s argument is read again, and the words go through sh's quote
-// removal. Four review rounds of PR #327 found a regex for this leaking both
+// body -- at a command's start or after the reserved words before it (`do
+// case ...`, `then f() { ...`) -- `eval`'s argument is read again, and the
+// words go through sh's quote removal. From `case WORD in` and from each ;;
+// to the ) that closes the arm's pattern list, what a | splits off is an
+// alternative of the pattern, not a command: the `done` of done|y) closes no
+// loop. Four review rounds of PR #327 found a regex for this leaking both
 // ways.
 //
 // It is a lint over this repository's examples, held to what a reader
@@ -47,8 +51,17 @@ import (
 //     string eval would run from one it would reject is a parser's work, and
 //     three rounds of counting if against fi still accepted `then`, a stray
 //     `)` and an open quote (review of a09f948);
-//   - by NAME+=, `for NAME`, `read NAME`, `printf -v NAME`, ${NAME:=...}, or
-//     a prefix assignment to a POSIX special builtin, which may persist.
+//   - by NAME+=, NAME[i]=, NAME=( ... ), `for NAME`, `read NAME` (REPLY
+//     without one), `printf -v NAME`, ${NAME:=...}, a declaration builtin's
+//     operand that is an assignment only once its quotes are gone (export
+//     NAME"=value"), `declare -n` for both of its names, or a prefix
+//     assignment to a POSIX special builtin, which may persist.
+//
+// A reference is found in the word as written: "$c"ap reads c, where the word
+// after quote removal, $cap, reads another name. Around a name never written
+// here ${NAME:-word} is read as its word wherever it is run -- as a command
+// word, or as one of an eval string -- which is what it gives when the
+// environment has no such name either.
 //
 // Refused though sh would not leave them in the job shell, on the same loud
 // side:
@@ -69,13 +82,35 @@ import (
 //     same open loop, or in any function body, reads -- the read happens
 //     again after the assignment -- and a trap or mktemp in a case arm or a
 //     function body that never runs;
-//   - a function whose body is not a brace group.
+//   - a function whose body is not a brace group;
+//   - a command word holding something this reader does not have -- a value
+//     assigned from a substitution or in a branch, a $( ... ), ${!name} --
+//     and no literal / or =: `$SUDO make` after SUDO=$(command -v sudo) or
+//     after `[ ... ] || SUDO=sudo`, `$sh -c ...`, `ASSAY=$(command -v
+//     assay); $ASSAY version`, `$(command -v assay) version`. With a / in it
+//     ("$bin/assay", $(go env GOPATH)/bin/assay) the word is a path and no
+//     builtin's or keyword's name, and is accepted;
+//   - read, printf -v or a declaration builtin whose name is in a $
+//     expansion (read -r "$x", export $(cat .env)), and `declare -n` without
+//     a literal target;
+//   - an eval of "$1" or "$@" anywhere, and "$@" or $1 run as a command
+//     outside a function body, where only `set --` gives them a value;
+//   - a case whose pattern list this reader cannot close (a pattern that is
+//     a substitution, a list continued on the next line), and a reserved
+//     word after an assignment (a=1 case ...), which sh rejects whole.
 //
-// Not read, and so a miss: a multi-line subshell `(` ... `)` and a heredoc's
-// body (both read as the job shell's commands, so a trap in one is refused
-// and a reassignment in one is believed); a trap or mktemp after a
+// Not read, and so a miss (leakMisses holds each one accepted, so this list
+// and the reader cannot drift apart): a multi-line subshell `(` ... `)` and a
+// heredoc's body (both read as the job shell's commands, so a trap in one is
+// refused and a reassignment in one is believed); a trap or mktemp after a
 // quote-spanning multi-line string; `trap $args` with handler and signal in
-// one expansion; an unset name before a command ($none trap ...).
+// one expansion; an unset name before a command ($none trap ...); an
+// unquoted expansion that splits into words ahead of the / of a command word
+// (x=$(printf 'trap : EXIT '); $x/y); a function body that runs its
+// arguments as a command ("$@", $1 ...), called with a trap; a name written
+// by mapfile or readarray; a backtick substitution as a command word or as
+// the name read or a declaration builtin writes (the prose this guard also
+// reads opens lines with words in backticks); an alias.
 type leakGuard struct{}
 
 // leakedIntoJob is the guard, read over the install jobs only (installJobs).
@@ -134,8 +169,8 @@ var mktempValue = regexp.MustCompile("^\\w+=(?:\\$\\{\\w+:?[-=+]\\s*)?(?:\\$\\(\
 // mappingKey is a YAML mapping key with a scalar after it on the same line.
 var mappingKey = regexp.MustCompile(`^[A-Za-z_][\w-]*:[ \t]+`)
 
-// assignmentWord is a NAME=value or NAME+=value word.
-var assignmentWord = regexp.MustCompile(`^\w+\+?=`)
+// assignmentWord is a NAME=value, NAME+=value or NAME[subscript]=value word.
+var assignmentWord = regexp.MustCompile(`^\w+(?:\[[^\]]*\])?\+?=`)
 
 // FindString is the first line of text that leaks, "" when none does.
 func (leakGuard) FindString(text string) string {
@@ -342,6 +377,10 @@ type shellScope struct {
 	loopBase           int
 	pendingConditional bool
 	pendingFunction    bool
+	// patternOpen is set from `case WORD in` and from each ;; to the ) that
+	// closes the arm's pattern list. What is read there is a pattern's
+	// alternatives, not commands.
+	patternOpen bool
 	// inEval marks the commands of an eval string. What they assign or unset
 	// is unknown, never a value: whether the string parsed, and so whether
 	// any of it ran, is not something this reader can prove.
@@ -366,6 +405,10 @@ func (state *shellState) reset() {
 
 func (state *shellState) lineLeaks(line string) bool {
 	s := strings.TrimSpace(line)
+	if strings.HasPrefix(s, "```") {
+		// A README fence's own line is not a line of sh.
+		return false
+	}
 	yamlValue := false
 	if strings.HasPrefix(s, "- ") || s == "-" {
 		s = strings.TrimSpace(strings.TrimPrefix(s, "-"))
@@ -395,6 +438,18 @@ func (state *shellState) lineLeaks(line string) bool {
 
 func (state *shellState) shellLeaks(s string) bool {
 	for _, cmd := range shellCommands(s) {
+		if cmd.armEnd {
+			state.patternOpen = true
+			continue
+		}
+		if cmd.afterParen {
+			// A ( ... ) skipped where a pattern list was due is that list:
+			// (a|b) at the start of an arm's line.
+			state.patternOpen = false
+			if cmd.text == "" {
+				continue
+			}
+		}
 		if cmd.text == "" {
 			state.pendingConditional = true
 			continue
@@ -474,6 +529,10 @@ type simpleCommand struct {
 	text        string
 	child       bool
 	conditional bool
+	// armEnd is a ;; (or ;& or ;;&) on its own: the end of a case arm.
+	armEnd bool
+	// afterParen marks a command that began with a skipped ( ... ).
+	afterParen bool
 }
 
 // shellCommands splits one line of sh into its simple commands at the
@@ -490,10 +549,13 @@ func shellCommands(s string) []simpleCommand {
 	listStart := 0
 	inPipe := false
 	conditional := false
+	afterParen := false
 	var parens parenScan
 	flush := func(operator string) {
 		if c := strings.TrimSpace(cur.String()); c != "" {
-			cmds = append(cmds, simpleCommand{text: c, child: operator == "|", conditional: conditional || inPipe})
+			cmds = append(cmds, simpleCommand{text: c, child: operator == "|", conditional: conditional || inPipe, afterParen: afterParen})
+		} else if afterParen {
+			cmds = append(cmds, simpleCommand{afterParen: true})
 		} else if operator == "" && (conditional || inPipe) {
 			// Shell syntax also continues after an operator without a
 			// backslash. Keep that condition across physical lines.
@@ -512,6 +574,7 @@ func shellCommands(s string) []simpleCommand {
 		conditional = operator == "&&" || operator == "||"
 		cur.Reset()
 		atStart = true
+		afterParen = false
 	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
@@ -556,6 +619,7 @@ func shellCommands(s string) []simpleCommand {
 			continue
 		case c == '(' && atStart:
 			depth = 1
+			afterParen = true
 			continue
 		case c == ')':
 			// Outside a subshell or substitution, this can close a case
@@ -570,6 +634,16 @@ func shellCommands(s string) []simpleCommand {
 			// (second review: 2>&1 t=$(mktemp) had split into "1 t=...").
 		case c == '|' && i > 0 && s[i-1] == '>', c == '&' && i+1 < len(s) && s[i+1] == '>':
 			// The | of >| and the & of bash's &> are redirections.
+		case c == ';' && i+1 < len(s) && (s[i+1] == ';' || s[i+1] == '&'):
+			// ;; ;& and ;;& end a case arm; the next arm's pattern list
+			// follows.
+			flush(";")
+			cmds = append(cmds, simpleCommand{armEnd: true})
+			listStart = len(cmds)
+			for i+1 < len(s) && (s[i+1] == ';' || s[i+1] == '&') {
+				i++
+			}
+			continue
 		case c == ';' || c == '&' || c == '|':
 			end := i + 1
 			if c != ';' && end < len(s) && s[end] == c {
@@ -625,10 +699,20 @@ func specialPrefixAssignments(words, raws []string) []string {
 // name and = unquoted, so "t=$(mktemp)" is a command name, not one.
 func assigns(raw string) bool { return assignmentWord.MatchString(raw) }
 
-// assignedName is the name a NAME=value or NAME+=value word writes.
+// assignedName is the name a NAME=value, NAME+=value or NAME[subscript]=value
+// word writes.
 func assignedName(raw string) string {
 	name, _, _ := strings.Cut(raw, "=")
+	name, _, _ = strings.Cut(name, "[")
 	return strings.TrimSuffix(name, "+")
+}
+
+// assignsArray reports whether an assignment word, as written, opens an array
+// literal: NAME=(. Its elements are words of their own, and $NAME reads the
+// first of them.
+func assignsArray(raw string) bool {
+	_, value, _ := strings.Cut(raw, "=")
+	return assigns(raw) && strings.HasPrefix(value, "(")
 }
 
 // assignsMktemp reports whether a word, as written, assigns a mktemp path: an
@@ -668,7 +752,10 @@ var defaultAssignment = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):?=`)
 
 // functionName is a function definition's first word: f(), or f(){ with the
 // body's brace attached.
-var functionName = regexp.MustCompile(`^[A-Za-z_][\w.:-]*\(\)(\{?)$`)
+var functionName = regexp.MustCompile(`^[A-Za-z_][\w.:/-]*\(\)(\{?)$`)
+
+// functionWord is a function's name written apart from its parentheses.
+var functionWord = regexp.MustCompile(`^[A-Za-z_][\w.:/-]*$`)
 
 // functionHeader is how many of a command's first words define a function --
 // f(), f (), function f, function f () -- 0 when none do, and whether the
@@ -683,10 +770,19 @@ func functionHeader(raws []string) (n int, brace bool) {
 	if m := functionName.FindStringSubmatch(raws[0]); m != nil {
 		return 1, m[1] != ""
 	}
-	if len(raws) > 1 && shellName.MatchString(raws[0]) && (raws[1] == "()" || raws[1] == "(){") {
+	if len(raws) > 1 && functionWord.MatchString(raws[0]) && (raws[1] == "()" || raws[1] == "(){") {
 		return 2, raws[1] == "(){"
 	}
 	return 0, false
+}
+
+// opensCompound reports whether a command's first words open a construct
+// wordsLeak reads by its opener: a case, a for or select loop, a function.
+func opensCompound(raws []string) bool {
+	if n, _ := functionHeader(raws); n > 0 {
+		return true
+	}
+	return raws[0] == "case" || raws[0] == "for" || raws[0] == "select"
 }
 
 // casePatternEnd is the index of the word that ends a case arm's pattern
@@ -723,6 +819,14 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 		}
 	}
 	words, raws := shellWords(cmd)
+	return state.wordsLeak(words, raws, conditional, child)
+}
+
+// wordsLeak is commandLeaks over the command's words. It reads itself again
+// on what follows then, do, else, { and the other reserved words when that
+// opens a case, a loop or a function: `do case ...`, `then f() { ...` and
+// `{ for ...` open what the same words open at a command's start.
+func (state *shellState) wordsLeak(words, raws []string, conditional, child bool) bool {
 	// `case WORD in` and an arm's pattern list come off; what follows is the
 	// arm's command. Which arm runs is not read, so every one is conditional.
 	for patternRead := false; len(raws) > 0; {
@@ -737,7 +841,16 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 					}
 				}
 				words, raws = words[k+1:], raws[k+1:]
+				state.patternOpen = false
 				continue
+			}
+			if state.patternOpen && raws[0] != "esac" {
+				// A pattern list split at its | leaves alternatives, not
+				// commands: the `done` of done|y) closes no loop and the `fi`
+				// of a|fi) no if. Only the stage holding the list's ) ends
+				// it, so a whole command without one where a list was due is
+				// not a case this reader follows.
+				return !child
 			}
 		}
 		if raws[0] != "case" {
@@ -753,6 +866,7 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 			return false
 		}
 		words, raws = words[k+1:], raws[k+1:]
+		state.patternOpen = true
 		patternRead = false
 	}
 	if len(raws) == 0 {
@@ -799,6 +913,7 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 			state.caseDepth--
 			state.conditionalDepth--
 		}
+		state.patternOpen = false
 	case "}":
 		n := len(state.braces)
 		if n == 0 {
@@ -836,7 +951,10 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 	conditional = conditional || state.conditionalDepth > 0 || state.inEval
 	// The words before the command name: body and condition openers,
 	// declaration builtins, and NAME=value assignments -- the places a
-	// mktemp path is assigned in this shell.
+	// mktemp path is assigned in this shell. reserved stays true while the
+	// word after them is still read as a reserved word: not after command,
+	// builtin or a declaration builtin, whose next word is an argument.
+	reserved := true
 	for len(words) > 0 && (prefixWords[words[0]] || assigns(raws[0])) {
 		switch words[0] {
 		case "if":
@@ -860,33 +978,36 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 			state.braces = append(state.braces, group)
 		case "then", "else", "elif", "do":
 			conditional = true
-		case "command":
-			// -p only picks the PATH the name is looked up in; -v and -V
-			// make it a query and stay, as a command name that runs nothing.
-			if len(words) > 1 && words[1] == "-p" {
-				words, raws = words[1:], raws[1:]
+		case "command", "builtin":
+			// -p only picks the PATH the name is looked up in, however often
+			// it is given; -v and -V make it a query and stay, as a command
+			// name that runs nothing.
+			for words[0] == "command" && len(words) > 1 && strings.HasPrefix(words[1], "-p") && strings.Trim(words[1], "p") == "-" {
+				words, raws = append(words[:1:1], words[2:]...), append(raws[:1:1], raws[2:]...)
+			}
+			// -- ends the options of either.
+			if len(words) > 1 && words[1] == "--" {
+				words, raws = append(words[:1:1], words[2:]...), append(raws[:1:1], raws[2:]...)
 			}
 		}
 		if !child {
 			if assignsMktemp(raws[0]) {
 				return true
 			}
+			if assignsArray(raws[0]) {
+				// Whatever follows -- its other elements, a command -- the
+				// name is written with a value this reader does not have.
+				state.forget(assignedName(raws[0]))
+			}
 			if declarationBuiltins[words[0]] {
-				// A declaration builtin assigns every NAME=value operand in
-				// this shell, after its options and plain names too: export
-				// PATH t=$(mktemp), local -r t=$(mktemp) (review of the guard
-				// branch: the loop had stopped at PATH and -r).
-				for i, r := range raws[1:] {
-					// Its operand is an assignment after expansion, so a quoted
-					// one assigns too: export "t=$(mktemp)" (second review).
-					if mktempValue.MatchString(shView(r)) {
-						return true
-					}
-					state.remember(r, words[i+1], conditional)
-				}
+				return state.declarationLeaks(words, raws, conditional)
 			}
 		}
+		reserved = reserved && words[0] != "command" && words[0] != "builtin" && !declarationBuiltins[words[0]]
 		words, raws = words[1:], raws[1:]
+	}
+	if reserved && len(raws) > 0 && len(raws) < len(allRaws) && opensCompound(raws) {
+		return state.wordsLeak(words, raws, conditional, child)
 	}
 	if child {
 		return false
@@ -926,19 +1047,39 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 		return false
 	case "read":
 		// Every operand that can be a name: an option's argument that looks
-		// like one is forgotten too, which costs nothing.
-		for _, word := range words[1:] {
+		// like one is forgotten too, which costs nothing. An operand with an
+		// expansion in it may name any variable at all, and without a name
+		// the line goes to REPLY. (A backtick is left alone here as in a
+		// command word: prose opens lines with "read `x` ..." too.)
+		named := false
+		for i, word := range words[1:] {
+			if strings.Contains(blankSingleQuoted(raws[i+1]), "$") {
+				return true
+			}
 			if shellName.MatchString(word) {
 				state.forget(word)
+				named = true
 			}
+		}
+		if !named {
+			state.forget("REPLY")
 		}
 		return false
 	case "printf":
-		if len(words) > 2 && words[1] == "-v" && shellName.MatchString(words[2]) {
-			state.forget(words[2])
-		} else if len(words) > 1 && strings.HasPrefix(words[1], "-v") && shellName.MatchString(words[1][2:]) {
-			state.forget(words[1][2:])
+		name, ok := "", false
+		if len(words) > 2 && words[1] == "-v" {
+			name, ok = words[2], true
+		} else if len(words) > 1 && strings.HasPrefix(words[1], "-v") {
+			name, ok = words[1][2:], true
 		}
+		if !ok {
+			return false
+		}
+		if !shellName.MatchString(name) {
+			// printf -v "$x": the name it writes is not one this reader has.
+			return true
+		}
+		state.forget(name)
 		return false
 	case "eval":
 		words, raws = words[1:], raws[1:]
@@ -957,11 +1098,23 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 				// What a command prints is not text this reader has.
 				return true
 			}
+			if positionalReference.MatchString(words[i]) {
+				// "$1" and "$@" are what a caller passed, or what set -- put
+				// there: text this reader does not have either.
+				return true
+			}
 			if value, ok := state.variableWord(raw); ok {
 				words[i] = value
-			} else if state.unresolvedStoredVariable(words[i]) {
+				continue
+			}
+			if state.unresolvedStoredVariable(words[i]) {
 				// Concatenation and parameter operators are not evaluated by
 				// this lint. They must not hide a remembered script from it.
+				return true
+			}
+			if state.readsStored(raw) {
+				// The same question of the word as written: after quote
+				// removal "$c"ap reads as $cap, a name nobody stored.
 				return true
 			}
 		}
@@ -981,8 +1134,7 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 			if strings.ContainsAny(sig, "$`") || strings.EqualFold(sig, "EXIT") || strings.EqualFold(sig, "SIGEXIT") {
 				return true
 			}
-			// EXIT by number, however many zeros spell it.
-			if allDigitsWord(sig) && strings.Trim(sig, "0") == "" {
+			if exitByNumber(sig) {
 				return true
 			}
 		}
@@ -991,40 +1143,272 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 	return state.variableCommandLeaks(raws)
 }
 
+// exitByNumber reports whether a trap's signal operand is EXIT by its number.
+// bash reads the operand as strtoimax does: blanks around it and a sign
+// before it are part of the number, so 0, 00, +0, -0 and " 0" are all EXIT.
+func exitByNumber(sig string) bool {
+	digits := strings.TrimSpace(sig)
+	if digits != "" && (digits[0] == '+' || digits[0] == '-') {
+		digits = digits[1:]
+	}
+	return allDigitsWord(digits) && strings.Trim(digits, "0") == ""
+}
+
+// positionalReference is $1, ${1}, $@, $* -- an argument of the script or of
+// the function being read -- anywhere in a word.
+var positionalReference = regexp.MustCompile(`\$\{?[0-9@*]`)
+
+// namerefOption is an option word of declare, typeset or local that makes
+// its operands namerefs: -n, -gn.
+var namerefOption = regexp.MustCompile(`^-[A-Za-z]*n[A-Za-z]*$`)
+
+// declarationLeaks reads export, readonly, local, declare or typeset with its
+// operands, every one of which is this builtin's: none is a command of its
+// own. A declaration builtin assigns each NAME=value operand in this shell,
+// after its options and plain names too: export PATH t=$(mktemp), local -r
+// t=$(mktemp) (review of the guard branch: the loop had stopped at PATH and
+// -r).
+func (state *shellState) declarationLeaks(words, raws []string, conditional bool) bool {
+	nameref := false
+	for i, raw := range raws[1:] {
+		word := words[i+1]
+		// Its operand is an assignment after expansion, so a quoted one
+		// assigns too: export "t=$(mktemp)" (second review).
+		if mktempValue.MatchString(shView(raw)) {
+			return true
+		}
+		if strings.HasPrefix(word, "-") && !strings.Contains(word, "=") {
+			nameref = nameref || (words[0] != "export" && words[0] != "readonly" && namerefOption.MatchString(word))
+			continue
+		}
+		if written, _, _ := strings.Cut(raw, "="); strings.Contains(blankSingleQuoted(written), "$") {
+			// export "$x=...", export $(cat .env): which name it writes is
+			// in the expansion.
+			return true
+		}
+		switch {
+		case nameref:
+			// declare -n ref=target: from here a write to either name is a
+			// write to the other, wherever it stands. Both stay unknown; a
+			// nameref with no literal target can come to name anything.
+			name, target, _ := strings.Cut(word, "=")
+			if !shellName.MatchString(name) || !shellName.MatchString(target) {
+				return true
+			}
+			for _, n := range []string{name, target} {
+				state.poisoned[n] = true
+				state.forget(n)
+			}
+		case !assigns(raw) && assignmentWord.MatchString(word):
+			// export cleanup"=value": no assignment as written, one once
+			// the quotes are gone.
+			state.forget(assignedName(word))
+		default:
+			state.remember(raw, word, conditional)
+		}
+	}
+	return false
+}
+
+// wordPart is one piece of a word as written: literal text, or an expansion.
+type wordPart struct {
+	kind int
+	// text is a literal's text after quote removal, the word of a
+	// partDefault, and any other expansion as written.
+	text string
+	// name is the parameter an expansion reads, "" for a literal and for an
+	// opaque part. A positional or special parameter is its character.
+	name string
+}
+
+const (
+	partLiteral  = iota
+	partPlain    // $NAME, ${NAME}
+	partDefault  // ${NAME:-word} ${NAME-word} ${NAME:+word} ${NAME+word}
+	partOperator // any other operator on NAME
+	partOpaque   // $( ... ), ${!NAME}: nothing this reader has
+)
+
+// bracedReference reads ${NAME} and ${NAME:-word} with its three sisters.
+var bracedReference = regexp.MustCompile(`(?s)^\$\{([A-Za-z_][A-Za-z0-9_]*|[0-9@*])(?:(:?[-+])(.*))?\}$`)
+
+// bracedName is the parameter of any other ${...}: ${NAME%...}, ${#NAME},
+// ${NAME[0]}.
+var bracedName = regexp.MustCompile(`^\$\{#?([A-Za-z_][A-Za-z0-9_]*|[0-9@*])`)
+
+// wordParts reads a word as written, before quote removal: "$c"ap is the
+// reference $c and the text ap, where the word after quote removal, $cap,
+// names another variable. Single-quoted text and escaped characters are
+// literal; a reference is one in or out of double quotes.
+func wordParts(raw string) []wordPart {
+	var parts []wordPart
+	var literal strings.Builder
+	flush := func() {
+		if literal.Len() > 0 {
+			parts = append(parts, wordPart{kind: partLiteral, text: literal.String()})
+			literal.Reset()
+		}
+	}
+	singleQuoted := func(i int) int {
+		j := strings.IndexByte(raw[i+1:], '\'')
+		if j < 0 {
+			j = len(raw) - i - 1
+		}
+		literal.WriteString(raw[i+1 : i+1+j])
+		return i + j + 1
+	}
+	dq := false
+	for i := 0; i < len(raw); i++ {
+		c := raw[i]
+		next := byte(0)
+		if i+1 < len(raw) {
+			next = raw[i+1]
+		}
+		switch {
+		case c == '\'' && !dq:
+			i = singleQuoted(i)
+		case c == '$' && next == '\'' && !dq:
+			i = singleQuoted(i + 1)
+		case c == '"':
+			dq = !dq
+		case c == '\\' && next != 0:
+			if dq && strings.IndexByte("\"\\$`", next) < 0 {
+				literal.WriteByte(c)
+			}
+			literal.WriteByte(next)
+			i++
+		case c == '$' && next == '(':
+			// A backtick substitution is not read as one: the prose this
+			// guard also reads opens lines with `words` in backticks.
+			flush()
+			j := substitutionEnd(raw, i)
+			parts = append(parts, wordPart{kind: partOpaque, text: raw[i:j]})
+			i = j - 1
+		case c == '$' && next == '{':
+			flush()
+			j := substitutionEnd(raw, i)
+			parts = append(parts, bracedPart(raw[i:j]))
+			i = j - 1
+		case c == '$' && (next == '_' || (next|0x20 >= 'a' && next|0x20 <= 'z')):
+			j := i + 2
+			for j < len(raw) && (raw[j] == '_' || (raw[j] >= '0' && raw[j] <= '9') || (raw[j]|0x20 >= 'a' && raw[j]|0x20 <= 'z')) {
+				j++
+			}
+			flush()
+			parts = append(parts, wordPart{kind: partPlain, text: raw[i:j], name: raw[i+1 : j]})
+			i = j - 1
+		case c == '$' && next != 0 && strings.IndexByte("0123456789@*", next) >= 0:
+			flush()
+			parts = append(parts, wordPart{kind: partPlain, text: raw[i : i+2], name: raw[i+1 : i+2]})
+			i++
+		default:
+			literal.WriteByte(c)
+		}
+	}
+	flush()
+	return parts
+}
+
+// bracedPart reads one ${...} as written.
+func bracedPart(raw string) wordPart {
+	m := bracedReference.FindStringSubmatch(raw)
+	switch {
+	case m != nil && m[2] == "":
+		return wordPart{kind: partPlain, text: raw, name: m[1]}
+	case m != nil && strings.Contains(m[3], "$(") || m != nil && strings.Contains(m[3], "`"):
+		return wordPart{kind: partOpaque, text: raw}
+	case m != nil && !strings.Contains(m[3], "$"):
+		// The word is text: what the expansion gives when the name is unset
+		// (or, for +, set). Its own quotes go as the shell's would.
+		return wordPart{kind: partDefault, text: strings.NewReplacer(`\"`, `"`, `"`, "", "'", "").Replace(m[3]), name: m[1]}
+	}
+	if n := bracedName.FindStringSubmatch(raw); n != nil {
+		return wordPart{kind: partOperator, text: raw, name: n[1]}
+	}
+	if strings.HasPrefix(raw, "${!") {
+		return wordPart{kind: partOpaque, text: raw}
+	}
+	// Nothing sh expands: the ${{ ... }} of a workflow expression.
+	return wordPart{kind: partLiteral, text: raw}
+}
+
+// stored reports whether this shell wrote name: to a value the guard read, or
+// to one it could not.
+func (state *shellState) stored(name string) bool {
+	_, known := state.vars[name]
+	return known || state.unknown[name]
+}
+
+// readsStored reports whether an eval argument, as written, expands a name
+// this shell wrote. The names it reads are recorded as evaluated either way.
+func (state *shellState) readsStored(raw string) bool {
+	stored := false
+	for _, part := range wordParts(raw) {
+		if part.name != "" {
+			state.evaluatedName(part.name)
+			stored = stored || state.stored(part.name)
+		}
+	}
+	return stored
+}
+
 // variableCommandLeaks reads a command whose name comes out of a variable
 // this shell wrote -- $cleanup, "$dir/tool" -- as eval would read it: the
 // value is the command, a trap in it a trap. That is more than the shell does
 // with it (no keyword or assignment survives an expansion), so it errs loud.
-// A name never written here is somebody's environment and is left alone.
+// A name never written here is somebody's environment and is left alone,
+// except that ${NAME:-word} around one is read as its word.
+//
+// Where the word holds something this reader does not have -- an unknown
+// value, a command substitution, an operator around a stored name, a
+// positional parameter outside a function -- it is refused unless a literal /
+// or = stands in it: "$bin/assay" is a path and "t=$(date)" a name no
+// builtin and no keyword has. bash does let a function be named a/b or a=b,
+// and its body is read where it is defined like any other's.
 func (state *shellState) variableCommandLeaks(raws []string) bool {
-	name := shView(raws[0])
-	state.evaluated(name)
-	if !state.unresolvedStoredVariable(name) {
+	var expanded strings.Builder
+	follow, noBuiltin, unreadable := false, false, false
+	for _, part := range wordParts(raws[0]) {
+		if part.name != "" {
+			state.evaluatedName(part.name)
+		}
+		value, known := state.vars[part.name]
+		switch {
+		case part.kind == partLiteral:
+			noBuiltin = noBuiltin || strings.ContainsAny(part.text, "/=")
+			expanded.WriteString(part.text)
+		case part.kind == partOpaque:
+			unreadable = true
+		case !shellName.MatchString(part.name):
+			// "$@" and $1 in a function body are its caller's, and left
+			// alone as the environment is. Outside one they are what set --
+			// put there.
+			if state.functionDepth == 0 {
+				unreadable = true
+			}
+			expanded.WriteString(part.text)
+		case !state.stored(part.name):
+			follow = follow || part.kind == partDefault
+			// ${none:-$c} reads c.
+			unreadable = unreadable || (part.kind == partOperator && state.unresolvedStoredVariable(part.text))
+			expanded.WriteString(part.text)
+		case part.kind == partPlain && known:
+			follow = true
+			expanded.WriteString(value)
+		default:
+			// An unknown value, or a parameter operator around a stored one.
+			unreadable = true
+		}
+	}
+	if unreadable {
+		return !noBuiltin
+	}
+	if !follow {
 		return false
 	}
-	known := func(ref string) (string, bool) {
-		value, ok := state.vars[strings.Trim(ref, "${}")]
-		return value, ok
-	}
-	rest := plainReference.ReplaceAllStringFunc(name, func(ref string) string {
-		if _, ok := known(ref); ok {
-			return ""
-		}
-		return ref
-	})
-	if state.unresolvedStoredVariable(rest) {
-		// An unknown value, or a parameter operator around a known one.
-		return true
-	}
-	expanded := plainReference.ReplaceAllStringFunc(name, func(ref string) string {
-		if value, ok := known(ref); ok {
-			return value
-		}
-		return ref
-	})
 	// The arguments stay as written, quotes and all: sh -c '...' is still a
 	// child's script.
-	return state.readStored(append([]string{expanded}, raws[1:]...))
+	return state.readStored(append([]string{expanded.String()}, raws[1:]...))
 }
 
 // readStored reads words, joined, as the program an eval runs: with the
@@ -1079,12 +1463,16 @@ func (state *shellState) forget(name string) {
 // where the read will happen again later: in a loop, in a function body.
 func (state *shellState) evaluated(word string) {
 	for _, ref := range shellVariableReference.FindAllStringSubmatch(word, -1) {
-		for _, loop := range state.loops {
-			loop[ref[1]] = true
-		}
-		if state.functionDepth > 0 {
-			state.deferred[ref[1]] = true
-		}
+		state.evaluatedName(ref[1])
+	}
+}
+
+func (state *shellState) evaluatedName(name string) {
+	for _, loop := range state.loops {
+		loop[name] = true
+	}
+	if state.functionDepth > 0 {
+		state.deferred[name] = true
 	}
 }
 
@@ -1100,7 +1488,7 @@ func (state *shellState) remember(raw, word string, conditional bool) {
 	name := assignedName(raw)
 	appends := written != name
 	state.wrote(name)
-	if conditional || appends || state.poisoned[name] {
+	if conditional || appends || state.poisoned[name] || assignsArray(raw) {
 		delete(state.vars, name)
 		state.unknown[name] = true
 	} else if expanded, ok := state.variableWord(rawValue); ok {
