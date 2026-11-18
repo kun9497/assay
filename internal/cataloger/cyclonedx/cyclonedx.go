@@ -1144,6 +1144,15 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 			pkg.OSConflict = fmt.Sprintf("the SBOM's operating-system declaration contradicts itself (%s), so %s %s is keyed to no release", ctx.conflict, name, version)
 		case ctx.mixedRelease && ctx.distro == nil:
 			pkg.AmbiguousOS = true
+		default:
+			// With no OS declaration, an explicit release still identifies
+			// a separate installation even when it has no advisory key.
+			// Otherwise a sid listing can disappear into its Debian 12 twin.
+			if ctx.distro == nil {
+				if i := strings.LastIndexByte(qualifier, '-'); i > 0 && i < len(qualifier)-1 && pkgmeta.KnownDistroID(qualifier[:i]) {
+					pkg.UncoveredRelease = qualifier
+				}
+			}
 		}
 	}
 	switch p.Type {
@@ -1651,9 +1660,6 @@ func readOS(c component) osRead {
 	}
 	if r.conflict == "" {
 		r.ubuntu = r.distro.ID == "ubuntu"
-		if r.ubuntu && name != "" && name != "ubuntu" && !strings.HasPrefix(name, "ubuntu ") {
-			r.distro.VersionCodename = ""
-		}
 	}
 
 	r.distro.VersionID = c.Version
@@ -1694,6 +1700,14 @@ func readOS(c component) osRead {
 				}
 			}
 		}
+	}
+	// A generic display name supplies no positive codename evidence. Hold
+	// the codename to the resolved version first: dropping a contradiction
+	// here would let another declaration lend a waiver to this installation.
+	// It does not invalidate the numeric release used for advisory lookup.
+	if r.conflict == "" && r.ubuntu && name != "" && name != "ubuntu" && !strings.HasPrefix(name, "ubuntu ") &&
+		pkgmeta.UbuntuCodenameOf(r.distro) != pkgmeta.ContradictedCodename {
+		r.distro.VersionCodename = ""
 	}
 	return r
 }

@@ -95,20 +95,22 @@ func TestRun_CDXUncoveredReleaseIsNotAKeyedTwin(t *testing.T) {
 	const releases = `{"type":"operating-system","name":"debian","version":"sid"},{"type":"operating-system","name":"debian","version":"12"}`
 	const sid = `{"type":"library","purl":"pkg:deb/debian/apt@3.0.3?distro=debian-sid"}`
 	const twelve = `{"type":"library","purl":"pkg:deb/debian/apt@3.0.3?distro=debian-12"}`
-	for _, pair := range [][2]string{{sid, twelve}, {twelve, sid}} {
-		p := filepath.Join(t.TempDir(), "releases.cdx.json")
-		doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[` + releases + "," + pair[0] + `],"metadata":{"component":` + pair[1] + `}}`
-		if err := os.WriteFile(p, []byte(doc), 0600); err != nil {
-			t.Fatal(err)
-		}
-		var out, stderr bytes.Buffer
-		rc := Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnIncompleteTarget: true}, &out, &stderr)
-		var rep report.Document
-		if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
-			t.Fatal(err)
-		}
-		if rc != 0 || rep.Summary.Components != 2 || rep.Summary.Evaluated != 1 || rep.Summary.TargetIncomplete != 0 || len(rep.Skipped) != 1 || len(rep.Findings) != 1 {
-			t.Fatalf("exit %d, summary %+v, skips %+v", rc, rep.Summary, rep.Skipped)
+	for _, declarations := range []string{releases + ",", ""} {
+		for _, pair := range [][2]string{{sid, twelve}, {twelve, sid}} {
+			p := filepath.Join(t.TempDir(), "releases.cdx.json")
+			doc := `{"bomFormat":"CycloneDX","specVersion":"1.6","version":1,"components":[` + declarations + pair[0] + `],"metadata":{"component":` + pair[1] + `}}`
+			if err := os.WriteFile(p, []byte(doc), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var out, stderr bytes.Buffer
+			rc := Run(context.Background(), db, "sbom:"+p, Options{Output: "json", FailOnIncompleteTarget: true}, &out, &stderr)
+			var rep report.Document
+			if err := json.Unmarshal(out.Bytes(), &rep); err != nil {
+				t.Fatal(err)
+			}
+			if rc != 0 || rep.Summary.Components != 2 || rep.Summary.Evaluated != 1 || rep.Summary.TargetIncomplete != 0 || len(rep.Skipped) != 1 || len(rep.Findings) != 1 {
+				t.Fatalf("exit %d, summary %+v, skips %+v", rc, rep.Summary, rep.Skipped)
+			}
 		}
 	}
 }
