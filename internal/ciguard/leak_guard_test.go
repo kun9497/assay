@@ -691,18 +691,21 @@ func functionHeader(raws []string) (n int, brace bool) {
 
 // casePatternEnd is the index of the word that ends a case arm's pattern
 // list -- y), "a b"), (y) -- or -1 when the command has none, as a line of an
-// arm's body does not. A word with a substitution in it is a command's.
+// arm's body does not. A word with a substitution in it is a command's, an
+// escaped ) is a character, and () is a function's.
 func casePatternEnd(raws []string) int {
 	for i, raw := range raws {
-		if !strings.HasSuffix(raw, ")") || strings.Contains(raw, "$(") {
+		if !strings.HasSuffix(raw, ")") || strings.Contains(raw, "$(") || strings.HasSuffix(raw, escapedParen) {
 			continue
 		}
-		if strings.HasPrefix(raw, "(") || strings.Count(raw, ")") > strings.Count(raw, "(") {
+		if (strings.HasPrefix(raw, "(") && raw != "()") || strings.Count(raw, ")") > strings.Count(raw, "(") {
 			return i
 		}
 	}
 	return -1
 }
+
+const escapedParen = "\\)"
 
 // commandLeaks reports whether one simple command leaves a mktemp variable
 // or an EXIT trap in the shell that runs it, or does something this reader
@@ -727,9 +730,9 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 			patternRead = true
 			if k := casePatternEnd(raws); k >= 0 {
 				// A word taken for a pattern's may have been an arm body's
-				// assignment beside a value that ends in ); it is not lost.
+				// assignment beside an array's closing ); it is not lost.
 				for _, raw := range raws[:k+1] {
-					if !child && assigns(raw) {
+					if assigns(raw) {
 						state.forget(assignedName(raw))
 					}
 				}

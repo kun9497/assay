@@ -55,8 +55,12 @@ var leakShapes = []struct {
 	{"case-nested-arm-sets-trap", `cleanup='echo ok'; case x in x) case y in y) cleanup='trap "echo LEAK" EXIT';; esac;; esac; eval "$cleanup"`, true, true},
 	{"case-parenthesised-pattern-sets-trap", `cleanup='echo ok'; case x in (x) cleanup='trap "echo LEAK" EXIT';; esac; eval "$cleanup"`, true, true},
 	{"case-arm-body-substitution-with-paren", "cleanup='echo ok'\ncase x in\nx)\ncleanup=$(printf '%s' 'trap : EXIT #)')\n;;\nesac\neval \"$cleanup\"", true, true},
-	{"case-arm-body-assignment-beside-paren-value", "cleanup='echo ok'\ncase x in\nx)\ncleanup='trap : EXIT' a=\\)\n;;\nesac\neval \"$cleanup\"", true, true},
-	{"assignment-after-esac-beside-paren-value", `cleanup='trap "echo LEAK" EXIT'; case x in y) :;; esac; cleanup='echo ok' a=\); eval "$cleanup"`, false, false},
+	{"case-arm-body-assignment-beside-array", "cleanup='echo ok'\ncase x in\nx)\ncleanup='trap : EXIT' arr=(a b)\n;;\nesac\neval \"$cleanup\"", true, true},
+	{"case-arm-body-trap-handler-substitution-with-paren", "cleanup='echo ok'\ncase x in\nx)\ntrap $(printf '%s' ':)') EXIT\n;;\nesac\n:", true, true},
+	{"case-arm-body-escaped-paren-argument", "cleanup='echo ok'\ncase x in\nx)\neval 'trap : EXIT #' \\)\n;;\nesac\n:", true, true},
+	{"case-arm-body-defines-function", "cleanup='echo ok'\ncase x in\nx)\nf () { cleanup='trap : EXIT'; }\n;;\nesac\ncleanup='echo ok'; f; eval \"$cleanup\"", true, true},
+	{"function-subshell-body-after-esac", `case x in y) :;; esac; f() (echo hi)`, true, false},
+	{"eval-string-in-case-arm-reads-its-own-commands", `case x in x) eval 'f() (echo hi)';; esac`, true, false},
 	{"case-then-known-reassign", `cleanup='trap "echo LEAK" EXIT'; case x in y) cleanup='echo a';; esac; cleanup='echo ok'; eval "$cleanup"`, false, false},
 	{"case-without-assignment", `cleanup='echo ok'; case x in x) echo hit;; *) echo miss;; esac; eval "$cleanup"`, false, false},
 
@@ -68,6 +72,7 @@ var leakShapes = []struct {
 	{"function-spaced-parens-sets-trap", `cleanup='echo ok'; f () { cleanup='trap "echo LEAK" EXIT'; }; f; eval "$cleanup"`, true, true},
 	{"function-attached-brace-sets-trap", `cleanup='echo ok'; f(){ cleanup='trap "echo LEAK" EXIT'; }; f; eval "$cleanup"`, true, true},
 	{"function-body-on-next-line", "cleanup='echo ok'\nf()\n{\ncleanup='trap \"echo LEAK\" EXIT'\n}\nf\neval \"$cleanup\"", true, true},
+	{"function-body-on-next-line-uncalled-reassign", "cleanup='trap \"echo LEAK\" EXIT'\nf()\n{\ncleanup='echo ok'\n}\neval \"$cleanup\"", true, true},
 	{"function-body-not-a-group", `cleanup='echo ok'; f() if true; then cleanup='trap : EXIT'; fi; cleanup='echo ok'; f; eval "$cleanup"`, true, true},
 	{"function-evals-later-value", `cleanup='echo ok'; f() { eval "$cleanup"; }; cleanup='trap "echo LEAK" EXIT'; f`, true, true},
 	{"function-runs-later-value", `cleanup='echo ok'; f() { $cleanup; }; cleanup='trap : EXIT'; f`, true, true},
@@ -92,6 +97,7 @@ var leakShapes = []struct {
 	{"loop-eval-string-reaches-next-iteration", `cleanup='echo ok'; for i in 1 2; do eval 'eval "$cleanup"'; cleanup='trap "echo LEAK" EXIT'; done`, true, true},
 	{"loop-not-closed-by-eval-string", `cleanup='echo ok'; for i in 1 2; do eval 'done' || :; eval "$cleanup"; cleanup='trap "echo LEAK" EXIT'; done`, true, true},
 	{"loop-opened-in-eval-string-ends-with-it", `eval 'while false; do' || :; cleanup='echo ok'; eval "$cleanup"; cleanup='echo other' `, false, false},
+	{"loop-not-replaced-by-eval-string", `cleanup='echo ok'; for i in 1 2; do eval "$cleanup"; eval 'done; for j in 1; do' || :; cleanup='trap "echo LEAK" EXIT'; done`, true, true},
 	{"loop-eval-then-assignment-after-done", `cleanup='echo ok'; for i in 1 2; do eval "$cleanup"; done; cleanup='echo other'`, false, false},
 	{"loop-then-known-reassign", `cleanup='trap "echo LEAK" EXIT'; for i in 1; do cleanup='echo a'; done; cleanup='echo ok'; eval "$cleanup"`, false, false},
 	{"read-loop", `while read -r line; do echo "$line"; done </dev/null`, false, false},
@@ -114,7 +120,7 @@ var leakShapes = []struct {
 	{"unknown-variable-beside-quote-in-command-word", `a="'"; b=$(printf trap); $a$b 'echo LEAK' EXIT`, true, false},
 	{"known-variable-run-as-command", `run='echo build'; $run`, false, false},
 	{"known-directory-in-command-word", `dir=/bin; "$dir/echo" hi`, false, false},
-	{"known-command-keeps-its-quoted-argument", `sh=sh; $sh -c 'trap "echo child" EXIT'`, false, false},
+	{"known-command-keeps-its-quoted-argument", `sh=sh; $sh -c 'echo hi; trap "echo child" EXIT' `, false, false},
 	{"unset-variable-before-command", `$ASSAY_NO_SUCH_PREFIX echo hi`, false, false},
 
 	{"builtin-trap", `builtin trap 'echo LEAK' EXIT`, true, true},
@@ -173,6 +179,23 @@ func TestInstallLeakGuardUnknownValues(t *testing.T) {
 				t.Errorf("install job refused=%v, want %v: %s", got, tc.refused, tc.script)
 			}
 		})
+	}
+}
+
+// A GitHub Actions run step is a shell of its own: nothing one step set,
+// defined or left open is the next step's.
+func TestInstallLeakGuardRunStepsStartClean(t *testing.T) {
+	for name, doc := range map[string]string{
+		"value":         "steps:\n  - run: cleanup='trap echo EXIT'\n  - run: eval \"$cleanup\"\n",
+		"unknown":       "steps:\n  - run: cleanup=$(date)\n  - run: eval \"$cleanup\"\n",
+		"function body": "steps:\n  - run: f() { cleanup='trap echo EXIT'; }\n  - run: cleanup='echo ok'; eval \"$cleanup\"\n",
+		"function read": "steps:\n  - run: f() { eval \"$cleanup\"; }\n  - run: cleanup='echo ok'\n",
+		"open loop":     "steps:\n  - run: for i in 1; do eval \"$cleanup\"\n  - run: cleanup='echo ok'\n",
+		"open if":       "steps:\n  - run: if true; then\n  - run: cleanup='echo ok'; eval \"$cleanup\"\n",
+	} {
+		if got := leakedInInstallJob(doc); got != "" {
+			t.Errorf("%s: a run step was refused at %q for what another step left", name, got)
+		}
 	}
 }
 
