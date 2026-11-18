@@ -608,8 +608,7 @@ func specialPrefixAssignments(words, raws []string) []string {
 	var names []string
 	for i, word := range words {
 		if assigns(raws[i]) {
-			name, _, _ := strings.Cut(raws[i], "=")
-			names = append(names, strings.TrimSuffix(name, "+"))
+			names = append(names, assignedName(raws[i]))
 			continue
 		}
 		if specialBuiltins[word] {
@@ -625,6 +624,12 @@ func specialPrefixAssignments(words, raws []string) []string {
 // assigns reports whether a word, as written, is a NAME=value assignment: the
 // name and = unquoted, so "t=$(mktemp)" is a command name, not one.
 func assigns(raw string) bool { return assignmentWord.MatchString(raw) }
+
+// assignedName is the name a NAME=value or NAME+=value word writes.
+func assignedName(raw string) string {
+	name, _, _ := strings.Cut(raw, "=")
+	return strings.TrimSuffix(name, "+")
+}
 
 // assignsMktemp reports whether a word, as written, assigns a mktemp path: an
 // assignment whose value, read as sh reads it, runs mktemp -- double quotes
@@ -724,8 +729,8 @@ func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool 
 				// A word taken for a pattern's may have been an arm body's
 				// assignment beside a value that ends in ); it is not lost.
 				for _, raw := range raws[:k+1] {
-					if name, _, _ := strings.Cut(raw, "="); !child && assigns(raw) {
-						state.forget(strings.TrimSuffix(name, "+"))
+					if !child && assigns(raw) {
+						state.forget(assignedName(raw))
 					}
 				}
 				words, raws = words[k+1:], raws[k+1:]
@@ -1087,10 +1092,10 @@ func (state *shellState) remember(raw, word string, conditional bool) {
 	if !assigns(raw) {
 		return
 	}
-	name, rawValue, _ := strings.Cut(raw, "=")
+	written, rawValue, _ := strings.Cut(raw, "=")
 	_, value, _ := strings.Cut(word, "=")
-	appends := strings.HasSuffix(name, "+")
-	name = strings.TrimSuffix(name, "+")
+	name := assignedName(raw)
+	appends := written != name
 	state.wrote(name)
 	if conditional || appends || state.poisoned[name] {
 		delete(state.vars, name)
