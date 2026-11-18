@@ -39,6 +39,11 @@ import (
 // reads as 4d823d1 did. A trap on TERM or INT alone is a
 // job's own business, not the installer's leftover (main QA of 67e2cf6,
 // 2026-11-13: `trap 'echo stopping' TERM` in an independent job was refused).
+// Conditional assignments are unknown rather than assumed to have run.
+// An eval of an unknown or partially expanded stored variable is refused.
+// Pipeline brace groups and continued pipeline lines are conservatively
+// refused too: pipeline brace boundaries are not tracked, and a last stage may run in the
+// parent (bash lastpipe), so pipeline spelling alone cannot prove isolation.
 type leakGuard struct{}
 
 // leakedIntoJob is the guard, read over the install jobs only (installJobs).
@@ -112,7 +117,7 @@ func (leakGuard) FindString(text string) string {
 }
 
 func newShellState() shellState {
-	return shellState{vars: map[string]string{}, evaluating: map[string]bool{}, evalBytesLeft: 1 << 20}
+	return shellState{vars: map[string]string{}, unknown: map[string]bool{}, evaluating: map[string]bool{}, evalBytesLeft: 1 << 20}
 }
 
 // A decoded run scalar is already shell source. Retain indentation following
@@ -257,9 +262,13 @@ func closesSubstitution(s string, j int) bool {
 // shellState carries literal shell assignments between commands in one
 // install shell. Only eval interprets a stored string as shell commands.
 type shellState struct {
-	vars          map[string]string
-	evaluating    map[string]bool
-	evalBytesLeft int
+	vars               map[string]string
+	unknown            map[string]bool
+	evaluating         map[string]bool
+	evalBytesLeft      int
+	conditionalDepth   int
+	conditionalBraces  []bool
+	pendingConditional bool
 }
 
 func (state *shellState) lineLeaks(line string) bool {
@@ -273,6 +282,10 @@ func (state *shellState) lineLeaks(line string) bool {
 		if strings.TrimSpace(m) == "run:" {
 			// GitHub Actions starts each run step in its own shell.
 			clear(state.vars)
+			clear(state.unknown)
+			state.conditionalDepth = 0
+			state.conditionalBraces = nil
+			state.pendingConditional = false
 		}
 		s = strings.TrimSpace(s[len(m):])
 		yamlValue = true
@@ -293,9 +306,15 @@ func (state *shellState) lineLeaks(line string) bool {
 
 func (state *shellState) shellLeaks(s string) bool {
 	for _, cmd := range shellCommands(s) {
-		// Pipeline stages and asynchronous lists run in child shells;
-		// neither their variables nor their traps reach the parent.
-		if !cmd.child && state.commandLeaks(cmd.text) {
+		if cmd.text == "" {
+			state.pendingConditional = true
+			continue
+		}
+		conditional := cmd.conditional || state.pendingConditional
+		state.pendingConditional = false
+		// Non-final pipeline stages and asynchronous lists are isolated.
+		// The final pipeline stage may run in the parent (bash lastpipe).
+		if !cmd.child && state.commandLeaks(cmd.text, conditional) {
 			return true
 		}
 	}
@@ -360,8 +379,9 @@ func yamlUnquote(s string) string {
 }
 
 type simpleCommand struct {
-	text  string
-	child bool
+	text        string
+	child       bool
+	conditional bool
 }
 
 // shellCommands splits one line of sh into its simple commands at the
@@ -377,9 +397,14 @@ func shellCommands(s string) []simpleCommand {
 	atStart := true
 	listStart := 0
 	inPipe := false
+	conditional := false
 	flush := func(operator string) {
 		if c := strings.TrimSpace(cur.String()); c != "" {
-			cmds = append(cmds, simpleCommand{text: c, child: inPipe || operator == "|"})
+			cmds = append(cmds, simpleCommand{text: c, child: operator == "|", conditional: conditional || inPipe})
+		} else if operator == "" && (conditional || inPipe) {
+			// Shell syntax also continues after an operator without a
+			// backslash. Keep that condition across physical lines.
+			cmds = append(cmds, simpleCommand{})
 		}
 		if operator == "&" {
 			// a && b & backgrounds the whole AND-OR list.
@@ -391,6 +416,7 @@ func shellCommands(s string) []simpleCommand {
 			listStart = len(cmds)
 		}
 		inPipe = operator == "|"
+		conditional = operator == "&&" || operator == "||"
 		cur.Reset()
 		atStart = true
 	}
@@ -514,16 +540,46 @@ func shView(raw string) string {
 
 // commandLeaks reports whether one simple command leaves a mktemp variable
 // or an EXIT trap in the shell that runs it.
-func (state *shellState) commandLeaks(cmd string) bool {
+func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 	if mktempAssign.MatchString(blankSingleQuoted(cmd)) {
 		return true
 	}
 	words, raws := shellWords(cmd)
 	allWords, allRaws := words, raws
+	if len(words) > 0 {
+		switch words[0] {
+		case "for", "select":
+			state.conditionalDepth++
+		case "fi", "done":
+			if state.conditionalDepth > 0 {
+				state.conditionalDepth--
+			}
+		case "}":
+			if n := len(state.conditionalBraces); n > 0 {
+				if state.conditionalBraces[n-1] {
+					state.conditionalDepth--
+				}
+				state.conditionalBraces = state.conditionalBraces[:n-1]
+			}
+		}
+	}
+	conditional = conditional || state.conditionalDepth > 0
 	// The words before the command name: body and condition openers,
 	// declaration builtins, and NAME=value assignments -- the places a
 	// mktemp path is assigned in this shell.
 	for len(words) > 0 && (prefixWords[words[0]] || assigns(raws[0])) {
+		switch words[0] {
+		case "if", "while", "until":
+			state.conditionalDepth++
+			conditional = true
+		case "{":
+			state.conditionalBraces = append(state.conditionalBraces, conditional)
+			if conditional {
+				state.conditionalDepth++
+			}
+		case "then", "else", "elif", "do":
+			conditional = true
+		}
 		if assignsMktemp(raws[0]) {
 			return true
 		}
@@ -538,7 +594,7 @@ func (state *shellState) commandLeaks(cmd string) bool {
 				if mktempValue.MatchString(shView(r)) {
 					return true
 				}
-				state.remember(r, words[i+1])
+				state.remember(r, words[i+1], conditional)
 			}
 		}
 		words, raws = words[1:], raws[1:]
@@ -547,33 +603,63 @@ func (state *shellState) commandLeaks(cmd string) bool {
 		// NAME=value before a regular command is only in that command's
 		// environment. An assignment without a command persists.
 		for i, r := range allRaws {
-			state.remember(r, allWords[i])
+			state.remember(r, allWords[i], conditional)
 		}
 		return false
 	}
 	if words[0] == "unset" {
-		for _, name := range words[1:] {
+		names := words[1:]
+		for len(names) > 0 && strings.HasPrefix(names[0], "-") {
+			option := names[0]
+			names = names[1:]
+			if option == "--" {
+				break
+			}
+			if option != "-v" {
+				// -f unsets functions, not variables. An unrecognized option
+				// may fail without changing the previous variable value.
+				return false
+			}
+		}
+		for _, name := range names {
 			delete(state.vars, name)
+			if conditional {
+				state.unknown[name] = true
+			} else {
+				delete(state.unknown, name)
+			}
 		}
 	}
 	if words[0] == "eval" {
-		for i, raw := range raws[1:] {
+		words, raws = words[1:], raws[1:]
+		if len(words) > 0 && words[0] == "--" {
+			words, raws = words[1:], raws[1:]
+		}
+		for i, raw := range raws {
 			if value, ok := state.variableWord(raw); ok {
-				words[i+1] = value
+				words[i] = value
+			} else if state.unresolvedStoredVariable(words[i]) {
+				// Concatenation and parameter operators are not evaluated by
+				// this lint. They must not hide a remembered script from it.
+				return true
 			}
 			// Bound total expanded code before allocating it. Even without
 			// a cycle, one stored script can invoke the next twice.
-			state.evalBytesLeft -= len(words[i+1]) + 1
+			state.evalBytesLeft -= len(words[i]) + 1
 			if state.evalBytesLeft < 0 {
 				return true
 			}
 		}
-		script := strings.Join(words[1:], " ")
+		script := strings.Join(words, " ")
 		if state.evaluating[script] {
 			return true
 		}
 		state.evaluating[script] = true
 		defer delete(state.evaluating, script)
+		if conditional {
+			state.conditionalDepth++
+			defer func() { state.conditionalDepth-- }()
+		}
 		return state.shellLeaks(script)
 	}
 	if words[0] != "trap" {
@@ -589,28 +675,45 @@ func (state *shellState) commandLeaks(cmd string) bool {
 		return false
 	}
 	for _, sig := range words[1:] {
-		if strings.EqualFold(sig, "EXIT") || strings.EqualFold(sig, "SIGEXIT") || sig == "0" {
+		if strings.ContainsAny(sig, "$`") || strings.EqualFold(sig, "EXIT") || strings.EqualFold(sig, "SIGEXIT") || sig == "0" {
 			return true
 		}
 	}
 	return false
 }
 
-// remember records a statically known assignment. An unknown reassignment
-// invalidates the old value, just as unset does.
-func (state *shellState) remember(raw, word string) {
+// remember records a statically known unconditional assignment. A branch
+// may not execute, so its reassignment cannot erase a possibly unsafe value.
+func (state *shellState) remember(raw, word string, conditional bool) {
 	if !assigns(raw) {
 		return
 	}
 	name, rawValue, _ := strings.Cut(raw, "=")
 	_, value, _ := strings.Cut(word, "=")
-	if expanded, ok := state.variableWord(rawValue); ok {
+	if conditional {
+		delete(state.vars, name)
+		state.unknown[name] = true
+	} else if expanded, ok := state.variableWord(rawValue); ok {
 		state.vars[name] = expanded
+		delete(state.unknown, name)
 	} else if !strings.ContainsAny(blankSingleQuoted(rawValue), "$`") {
 		state.vars[name] = value
+		delete(state.unknown, name)
 	} else {
 		delete(state.vars, name)
+		state.unknown[name] = true
 	}
+}
+
+var shellVariableReference = regexp.MustCompile(`\$(?:\{)?([A-Za-z_][A-Za-z0-9_]*)`)
+
+func (state *shellState) unresolvedStoredVariable(word string) bool {
+	for _, ref := range shellVariableReference.FindAllStringSubmatch(word, -1) {
+		if _, known := state.vars[ref[1]]; known || state.unknown[ref[1]] {
+			return true
+		}
+	}
+	return false
 }
 
 // variableWord resolves a direct $name or ${name} argument, optionally
@@ -793,7 +896,7 @@ eval "$cleanup_script"`, true},
 		{`cleanup='trap "echo cleanup" EXIT'; unset cleanup; eval "$cleanup"`, false},
 		{`cleanup='trap "echo cleanup" EXIT' env; eval "$cleanup"`, false},
 		{`cleanup='trap "echo cleanup" EXIT' | cat; eval "$cleanup"`, false},
-		{`true | cleanup='trap "echo cleanup" EXIT'; eval "$cleanup"`, false},
+		{`true | cleanup='trap "echo cleanup" EXIT'; eval "$cleanup"`, true},
 		{`true && cleanup='trap "echo cleanup" EXIT' & wait; eval "$cleanup"`, false},
 		{`cleanup='trap "echo cleanup" EXIT'; eval "$cleanup" | cat; echo done`, false},
 		{`cleanup='trap "echo cleanup" EXIT'; eval "$cleanup" & wait; echo done`, false},
