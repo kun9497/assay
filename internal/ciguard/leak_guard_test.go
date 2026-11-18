@@ -20,32 +20,62 @@ import (
 // commands at ; && || & and | outside quotes, a subshell `( ... )` and a
 // comment are skipped, the words that open a body or a condition and the
 // builtins that run their arguments in the same shell (`{ then do else ! if
-// elif while until time command export readonly local declare typeset`,
-// leading NAME=value assignments) come off, `eval`'s argument is read again,
-// and the words go through sh's quote removal. Four review rounds of PR #327
-// found a regex for this leaking both ways.
+// elif while until time command builtin export readonly local declare
+// typeset`, leading NAME=value assignments) come off, `case WORD in` and an
+// arm's pattern come off a case arm's command and a function's header off its
+// body, `eval`'s argument is read again, and the words go through sh's quote
+// removal. Four review rounds of PR #327 found a regex for this leaking both
+// ways.
 //
 // It is a lint over this repository's examples, held to what a reader
 // rewriting the four-line form would plausibly write, not a shell parser.
-// Deliberately not read: a trap in a case arm, a function body defined on
-// the line, a heredoc's body (read as commands, so a trap in one is
-// refused); a trap or mktemp after a quote-spanning multi-line string. A
-// refusal there is loud -- the documents' test goes red -- and a miss is a
-// spelling nobody writes in an install step. Refused though sh would not
-// leave them in the job shell, on the same loud side: an assignment after
-// `command` or `time`, one before a regular command (t=$(mktemp) make),
-// which only that command's environment sees, and a NAME=$(mktemp) after a
-// blank anywhere outside single quotes (echo t=$(mktemp)), which mktempAssign
-// reads as 4d823d1 did. A trap on TERM or INT alone is a
-// job's own business, not the installer's leftover (main QA of 67e2cf6,
-// 2026-11-13: `trap 'echo stopping' TERM` in an independent job was refused).
-// Conditional assignments are unknown rather than assumed to have run.
-// An eval of an unknown or partially expanded stored variable is refused.
-// Pipeline/background brace groups and continued pipeline lines are
-// conservatively refused: their complete group boundaries are not tracked,
-// and a last pipeline stage may run in the parent (bash lastpipe). Indirect
-// eval expansion is refused, and eval has its own control-flow scope. Prefix
-// assignments to POSIX special builtins are unknown because they may persist.
+// Where it cannot be sure it refuses, and it proves nothing it does not have
+// to. A trap on TERM or INT alone is a job's own business, not the
+// installer's leftover (main QA of 67e2cf6, 2026-11-13: `trap 'echo
+// stopping' TERM` in an independent job was refused).
+//
+// A stored string reaches eval, or is run as a command, as one of three
+// things: a literal the guard read, which it reads again as commands; a name
+// never written in this shell, which is the environment's and left alone; or
+// unknown, which is refused. A value is a literal only when it was assigned
+// where the assignment certainly ran. Unknown, then, is everything assigned
+// or unset
+//   - after && or ||, in an if, a loop, a case arm or a function body (a
+//     name a function body writes stays unknown for good: the body runs
+//     whenever it is called);
+//   - inside an eval string, whether or not the string parses -- telling a
+//     string eval would run from one it would reject is a parser's work, and
+//     three rounds of counting if against fi still accepted `then`, a stray
+//     `)` and an open quote (review of a09f948);
+//   - by NAME+=, `for NAME`, `read NAME`, `printf -v NAME`, ${NAME:=...}, or
+//     a prefix assignment to a POSIX special builtin, which may persist.
+//
+// Refused though sh would not leave them in the job shell, on the same loud
+// side:
+//   - an assignment after `command` or `time`, one before a regular command
+//     (t=$(mktemp) make), which only that command's environment sees, and a
+//     NAME=$(mktemp) after a blank anywhere outside single quotes (echo
+//     t=$(mktemp)), which mktempAssign reads as 4d823d1 did;
+//   - an eval of a name an eval string assigned, of a partially expanded
+//     stored name (eval "$c;"), of ${!name}, or of a command substitution
+//     (eval "$(ssh-agent -s)");
+//   - a trap whose signal is an expansion, and the last stage of a pipeline,
+//     which may run in the parent (bash lastpipe), a continued pipeline line
+//     with it;
+//   - a brace group in a pipeline or the background that assigns, unsets,
+//     traps or evals: its commands were read as the job shell's, so what they
+//     changed here is wrong. A group that does none of those is accepted;
+//   - an assignment to a name that an eval or a command word earlier in the
+//     same open loop, or in any function body, reads -- the read happens
+//     again after the assignment -- and a trap or mktemp in a case arm or a
+//     function body that never runs;
+//   - a function whose body is not a brace group.
+//
+// Not read, and so a miss: a multi-line subshell `(` ... `)` and a heredoc's
+// body (both read as the job shell's commands, so a trap in one is refused
+// and a reassignment in one is believed); a trap or mktemp after a
+// quote-spanning multi-line string; `trap $args` with handler and signal in
+// one expansion; an unset name before a command ($none trap ...).
 type leakGuard struct{}
 
 // leakedIntoJob is the guard, read over the install jobs only (installJobs).
@@ -104,8 +134,8 @@ var mktempValue = regexp.MustCompile("^\\w+=(?:\\$\\{\\w+:?[-=+]\\s*)?(?:\\$\\(\
 // mappingKey is a YAML mapping key with a scalar after it on the same line.
 var mappingKey = regexp.MustCompile(`^[A-Za-z_][\w-]*:[ \t]+`)
 
-// assignmentWord is a NAME=value word.
-var assignmentWord = regexp.MustCompile(`^\w+=`)
+// assignmentWord is a NAME=value or NAME+=value word.
+var assignmentWord = regexp.MustCompile(`^\w+\+?=`)
 
 // FindString is the first line of text that leaks, "" when none does.
 func (leakGuard) FindString(text string) string {
@@ -119,7 +149,8 @@ func (leakGuard) FindString(text string) string {
 }
 
 func newShellState() shellState {
-	return shellState{vars: map[string]string{}, unknown: map[string]bool{}, evaluating: map[string]bool{}, evalBytesLeft: 1 << 20}
+	return shellState{vars: map[string]string{}, unknown: map[string]bool{}, evaluating: map[string]bool{},
+		poisoned: map[string]bool{}, deferred: map[string]bool{}, evalBytesLeft: 1 << 20}
 }
 
 // A decoded run scalar is already shell source. Retain indentation following
@@ -188,6 +219,7 @@ func continues(line string) bool {
 		return false
 	}
 	quote := byte(0)
+	var parens parenScan
 	for i := 0; i < len(s); i++ {
 		c := s[i]
 		switch {
@@ -211,7 +243,7 @@ func continues(line string) bool {
 			}
 		case c == '\'' || c == '"':
 			quote = c
-		case c == '#' && commentStarts(s, i):
+		case c == '#' && parens.commentStarts(s, i):
 			return false
 		}
 	}
@@ -224,19 +256,29 @@ func continues(line string) bool {
 // one word (second review), (make)# note is a comment (third review).
 // a#b and $# are not comments. (Review of the guard branch: continues had
 // taken only a blank, so `make;# note \` still swallowed the next line.)
-func commentStarts(s string, i int) bool {
+func (scan *parenScan) commentStarts(s string, i int) bool {
 	if i == 0 || strings.IndexByte(" \t;&|(", s[i-1]) >= 0 {
 		return true
 	}
-	return s[i-1] == ')' && !closesSubstitution(s, i-1)
+	return s[i-1] == ')' && !scan.closesSubstitution(s, i-1)
+}
+
+// parenScan is the reading closesSubstitution has done of one line. Every
+// question is about a later ) of the same line, so it goes on from where the
+// last one stopped: a line of `a)#a)#...` had been read from its start once
+// for each #.
+type parenScan struct {
+	k     int
+	open  []bool // true: $(
+	quote byte
 }
 
 // closesSubstitution reports whether the ) at s[j] closes a $( rather than a
 // subshell's (, reading the parentheses before it outside quotes.
-func closesSubstitution(s string, j int) bool {
-	var open []bool // true: $(
-	quote := byte(0)
-	for k := 0; k < j; k++ {
+func (scan *parenScan) closesSubstitution(s string, j int) bool {
+	open, quote, k := scan.open, scan.quote, scan.k
+	defer func() { scan.open, scan.quote, scan.k = open, quote, k }()
+	for ; k < j; k++ {
 		switch c := s[k]; {
 		case quote != 0:
 			if c == quote {
@@ -261,19 +303,65 @@ func closesSubstitution(s string, j int) bool {
 	return len(open) == 0 || open[len(open)-1]
 }
 
-// shellState carries literal shell assignments between commands in one
-// install shell. Only eval interprets a stored string as shell commands.
+// shellState carries what the guard knows of one install shell between its
+// commands: the names whose value is a literal it read (vars) and the names
+// it saw written without being able to say to what (unknown). A name in
+// neither was never written here. Only eval, or a name run as a command,
+// reads a stored string as shell commands.
 type shellState struct {
-	vars               map[string]string
-	unknown            map[string]bool
-	evaluating         map[string]bool
-	evalBytesLeft      int
+	vars       map[string]string
+	unknown    map[string]bool
+	evaluating map[string]bool
+	// poisoned names are written in a function body. The body runs whenever
+	// the function is called, so no later assignment makes the name known.
+	poisoned map[string]bool
+	// deferred names are evaluated in a function body, and each loops entry
+	// holds the names evaluated in one open loop. Either reads the name again
+	// later than where it stands in the text, so an assignment after it is
+	// refused: the value the guard read there is not the one that will run.
+	deferred map[string]bool
+	loops    []map[string]bool
+	// replayed is set by such an assignment; shellLeaks refuses on it.
+	replayed bool
+	// effects counts the commands that changed or consulted this state. A
+	// brace group that turns out to have run in a child is refused when the
+	// count moved inside it.
+	effects       int
+	evalBytesLeft int
+	shellScope
+}
+
+// shellScope is the part an eval string starts afresh: eval shares the
+// shell's variables but parses a program of its own, so a fi or } in its
+// string closes nothing of the caller's.
+type shellScope struct {
 	conditionalDepth   int
-	conditionalBraces  []bool
+	braces             []braceGroup
+	caseDepth          int
+	functionDepth      int
+	loopBase           int
 	pendingConditional bool
-	conditionalEval    bool
-	evalScope          bool
-	evalClosers        []string
+	pendingFunction    bool
+	// inEval marks the commands of an eval string. What they assign or unset
+	// is unknown, never a value: whether the string parsed, and so whether
+	// any of it ran, is not something this reader can prove.
+	inEval bool
+}
+
+// braceGroup is one open `{`.
+type braceGroup struct {
+	conditional bool // opened where its commands may not run
+	function    bool // a function's body
+	effects     int  // shellState.effects when it opened
+}
+
+func (state *shellState) reset() {
+	clear(state.vars)
+	clear(state.unknown)
+	clear(state.poisoned)
+	clear(state.deferred)
+	state.loops = nil
+	state.shellScope = shellScope{}
 }
 
 func (state *shellState) lineLeaks(line string) bool {
@@ -286,14 +374,7 @@ func (state *shellState) lineLeaks(line string) bool {
 	if m := mappingKey.FindString(s); m != "" {
 		if strings.TrimSpace(m) == "run:" {
 			// GitHub Actions starts each run step in its own shell.
-			clear(state.vars)
-			clear(state.unknown)
-			state.conditionalDepth = 0
-			state.conditionalBraces = nil
-			state.pendingConditional = false
-			state.conditionalEval = false
-			state.evalScope = false
-			state.evalClosers = nil
+			state.reset()
 		}
 		s = strings.TrimSpace(s[len(m):])
 		yamlValue = true
@@ -320,16 +401,12 @@ func (state *shellState) shellLeaks(s string) bool {
 		}
 		conditional := cmd.conditional || state.pendingConditional
 		state.pendingConditional = false
-		// A closing brace marked as a child means earlier commands in the
-		// group were not isolated by this simple-command splitter. Refuse
-		// the group instead of letting its assignments erase parent values.
-		_, raws := shellWords(cmd.text)
-		if cmd.child && len(raws) > 0 && raws[0] == "}" {
-			return true
-		}
-		// Non-final pipeline stages and asynchronous lists are isolated.
-		// The final pipeline stage may run in the parent (bash lastpipe).
-		if !cmd.child && state.commandLeaks(cmd.text, conditional) {
+		// A non-final pipeline stage and an asynchronous list run in a
+		// child: nothing they set reaches the job shell, but the words that
+		// open and close a compound command are still read from them, or
+		// `if a | b; then` and `case x in a|b)` would open nothing. The
+		// final pipeline stage may run in the parent (bash lastpipe).
+		if state.commandLeaks(cmd.text, conditional, cmd.child) || state.replayed {
 			return true
 		}
 	}
@@ -413,6 +490,7 @@ func shellCommands(s string) []simpleCommand {
 	listStart := 0
 	inPipe := false
 	conditional := false
+	var parens parenScan
 	flush := func(operator string) {
 		if c := strings.TrimSpace(cur.String()); c != "" {
 			cmds = append(cmds, simpleCommand{text: c, child: operator == "|", conditional: conditional || inPipe})
@@ -484,7 +562,7 @@ func shellCommands(s string) []simpleCommand {
 			// pattern. Its | separated alternatives, not pipeline stages.
 			// Retain the existing checks on the following arm.
 			inPipe = false
-		case c == '#' && commentStarts(s, i):
+		case c == '#' && parens.commentStarts(s, i):
 			flush("")
 			return cmds
 		case c == '&' && i > 0 && (s[i-1] == '>' || s[i-1] == '<'):
@@ -515,7 +593,7 @@ func shellCommands(s string) []simpleCommand {
 // prefixWords are the words that open a body or a condition, or run the rest
 // of the command in the same shell.
 var prefixWords = map[string]bool{"{": true, "then": true, "do": true, "else": true, "!": true, "if": true, "elif": true,
-	"while": true, "until": true, "time": true, "command": true, "export": true, "readonly": true, "local": true, "declare": true, "typeset": true}
+	"while": true, "until": true, "time": true, "command": true, "builtin": true, "export": true, "readonly": true, "local": true, "declare": true, "typeset": true}
 
 // declarationBuiltins assign their NAME=value operands in the calling shell.
 var declarationBuiltins = map[string]bool{"export": true, "readonly": true, "local": true, "declare": true, "typeset": true}
@@ -531,7 +609,7 @@ func specialPrefixAssignments(words, raws []string) []string {
 	for i, word := range words {
 		if assigns(raws[i]) {
 			name, _, _ := strings.Cut(raws[i], "=")
-			names = append(names, name)
+			names = append(names, strings.TrimSuffix(name, "+"))
 			continue
 		}
 		if specialBuiltins[word] {
@@ -577,104 +655,225 @@ func shView(raw string) string {
 	return b.String()
 }
 
+// shellName is a variable's name.
+var shellName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// defaultAssignment is an expansion that assigns: ${NAME:=value}, ${NAME=value}.
+var defaultAssignment = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*):?=`)
+
+// functionName is a function definition's first word: f(), or f(){ with the
+// body's brace attached.
+var functionName = regexp.MustCompile(`^[A-Za-z_][\w.:-]*\(\)(\{?)$`)
+
+// functionHeader is how many of a command's first words define a function --
+// f(), f (), function f, function f () -- 0 when none do, and whether the
+// last of them carries the body's opening brace.
+func functionHeader(raws []string) (n int, brace bool) {
+	if raws[0] == "function" && len(raws) > 1 {
+		if len(raws) > 2 && raws[2] == "()" {
+			return 3, false
+		}
+		return 2, false
+	}
+	if m := functionName.FindStringSubmatch(raws[0]); m != nil {
+		return 1, m[1] != ""
+	}
+	if len(raws) > 1 && shellName.MatchString(raws[0]) && (raws[1] == "()" || raws[1] == "(){") {
+		return 2, raws[1] == "(){"
+	}
+	return 0, false
+}
+
+// casePatternEnd is the index of the word that ends a case arm's pattern
+// list -- y), "a b"), (y) -- or -1 when the command has none, as a line of an
+// arm's body does not. A word with a substitution in it is a command's.
+func casePatternEnd(raws []string) int {
+	for i, raw := range raws {
+		if !strings.HasSuffix(raw, ")") || strings.Contains(raw, "$(") || strings.Contains(raw, "`") {
+			continue
+		}
+		if strings.HasPrefix(raw, "(") || strings.Count(raw, ")") > strings.Count(raw, "(") {
+			return i
+		}
+	}
+	return -1
+}
+
 // commandLeaks reports whether one simple command leaves a mktemp variable
-// or an EXIT trap in the shell that runs it.
-func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
-	if mktempAssign.MatchString(blankSingleQuoted(cmd)) {
-		return true
+// or an EXIT trap in the shell that runs it, or does something this reader
+// cannot follow. A child's command (child) sets nothing here; it is read for
+// the words that open and close a compound command only.
+func (state *shellState) commandLeaks(cmd string, conditional, child bool) bool {
+	if !child {
+		if mktempAssign.MatchString(blankSingleQuoted(cmd)) {
+			return true
+		}
+		// ${NAME:=value} assigns wherever its word stands, a regular
+		// command's argument included.
+		for _, m := range defaultAssignment.FindAllStringSubmatch(blankSingleQuoted(cmd), -1) {
+			state.forget(m[1])
+		}
 	}
 	words, raws := shellWords(cmd)
+	// `case WORD in` and an arm's pattern list come off; what follows is the
+	// arm's command. Which arm runs is not read, so every one is conditional.
+	for patternRead := false; len(raws) > 0; {
+		if state.caseDepth > 0 && !patternRead {
+			patternRead = true
+			if k := casePatternEnd(raws); k >= 0 {
+				words, raws = words[k+1:], raws[k+1:]
+				continue
+			}
+		}
+		if raws[0] != "case" {
+			break
+		}
+		state.caseDepth++
+		state.conditionalDepth++
+		k := 0
+		for k < len(raws) && raws[k] != "in" {
+			k++
+		}
+		if k == len(raws) {
+			return false
+		}
+		words, raws = words[k+1:], raws[k+1:]
+		patternRead = false
+	}
+	if len(raws) == 0 {
+		return false
+	}
+	if n, brace := functionHeader(raws); n > 0 {
+		words, raws = words[n:], raws[n:]
+		if brace {
+			words, raws = append([]string{"{"}, words...), append([]string{"{"}, raws...)
+		}
+		state.pendingFunction = true
+		if len(raws) == 0 {
+			// The body opens on the next line.
+			return false
+		}
+	}
+	if state.pendingFunction && raws[0] != "{" {
+		// A function whose body is not a brace group -- f() if ...; fi,
+		// f() ( ... ) -- has no end this reader tracks.
+		state.pendingFunction = false
+		return true
+	}
 	allWords, allRaws := words, raws
-	if names := specialPrefixAssignments(words, raws); len(names) > 0 {
-		markUnknown := func() {
-			for _, name := range names {
-				delete(state.vars, name)
-				state.unknown[name] = true
-			}
+	switch raws[0] {
+	case "for", "select":
+		state.conditionalDepth++
+		state.loops = append(state.loops, map[string]bool{})
+		if !child && len(words) > 1 && shellName.MatchString(words[1]) {
+			state.forget(words[1])
 		}
-		// Before execution protects nested eval; after execution preserves
-		// uncertainty when a builtin restores or changes its prefix value.
-		markUnknown()
-		defer markUnknown()
+	case "fi":
+		if state.conditionalDepth > 0 {
+			state.conditionalDepth--
+		}
+	case "done":
+		if state.conditionalDepth > 0 {
+			state.conditionalDepth--
+		}
+		if len(state.loops) > state.loopBase {
+			state.loops = state.loops[:len(state.loops)-1]
+		}
+	case "esac":
+		if state.caseDepth > 0 {
+			state.caseDepth--
+			state.conditionalDepth--
+		}
+	case "}":
+		n := len(state.braces)
+		if n == 0 {
+			// Its { was not read, so neither was what the group did.
+			return child
+		}
+		group := state.braces[n-1]
+		state.braces = state.braces[:n-1]
+		if group.conditional {
+			state.conditionalDepth--
+		}
+		if group.function {
+			state.functionDepth--
+		}
+		if child && state.effects != group.effects {
+			// The group ran in a child -- a pipeline stage, a background
+			// list -- but its commands were read as the job shell's: an
+			// unset or a reassignment in it erased nothing here.
+			return true
+		}
 	}
-	if len(words) > 0 {
-		if state.evalScope {
-			switch raws[0] {
-			case "for", "select":
-				state.evalClosers = append(state.evalClosers, "done")
-			case "fi", "done", "}":
-				n := len(state.evalClosers)
-				if n == 0 || state.evalClosers[n-1] != raws[0] {
-					return true
+	if !child {
+		if names := specialPrefixAssignments(words, raws); len(names) > 0 {
+			markUnknown := func() {
+				for _, name := range names {
+					state.forget(name)
 				}
-				state.evalClosers = state.evalClosers[:n-1]
 			}
-		}
-		switch raws[0] {
-		case "for", "select":
-			state.conditionalDepth++
-		case "fi", "done":
-			if state.conditionalDepth > 0 {
-				state.conditionalDepth--
-			} else if state.evalScope {
-				return true
-			}
-		case "}":
-			if n := len(state.conditionalBraces); n > 0 {
-				if state.conditionalBraces[n-1] {
-					state.conditionalDepth--
-				}
-				state.conditionalBraces = state.conditionalBraces[:n-1]
-			} else if state.evalScope {
-				return true
-			}
+			// Before execution protects nested eval; after execution preserves
+			// uncertainty when a builtin restores or changes its prefix value.
+			markUnknown()
+			defer markUnknown()
 		}
 	}
-	conditional = conditional || state.conditionalDepth > 0 || state.conditionalEval
+	conditional = conditional || state.conditionalDepth > 0 || state.inEval
 	// The words before the command name: body and condition openers,
 	// declaration builtins, and NAME=value assignments -- the places a
 	// mktemp path is assigned in this shell.
 	for len(words) > 0 && (prefixWords[words[0]] || assigns(raws[0])) {
 		switch words[0] {
-		case "if", "while", "until":
-			if state.evalScope {
-				closer := "done"
-				if words[0] == "if" {
-					closer = "fi"
-				}
-				state.evalClosers = append(state.evalClosers, closer)
-			}
+		case "if":
 			state.conditionalDepth++
 			conditional = true
+		case "while", "until":
+			state.conditionalDepth++
+			state.loops = append(state.loops, map[string]bool{})
+			conditional = true
 		case "{":
-			if state.evalScope {
-				state.evalClosers = append(state.evalClosers, "}")
+			group := braceGroup{conditional: conditional || state.pendingFunction, function: state.pendingFunction, effects: state.effects}
+			state.pendingFunction = false
+			if group.function {
+				state.functionDepth++
+				conditional = true
 			}
-			state.conditionalBraces = append(state.conditionalBraces, conditional)
-			if conditional {
+			if group.conditional {
 				state.conditionalDepth++
 			}
+			state.braces = append(state.braces, group)
 		case "then", "else", "elif", "do":
 			conditional = true
+		case "command":
+			// -p only picks the PATH the name is looked up in; -v and -V
+			// make it a query and stay, as a command name that runs nothing.
+			if len(words) > 1 && words[1] == "-p" {
+				words, raws = words[1:], raws[1:]
+			}
 		}
-		if assignsMktemp(raws[0]) {
-			return true
-		}
-		if declarationBuiltins[words[0]] {
-			// A declaration builtin assigns every NAME=value operand in
-			// this shell, after its options and plain names too: export
-			// PATH t=$(mktemp), local -r t=$(mktemp) (review of the guard
-			// branch: the loop had stopped at PATH and -r).
-			for i, r := range raws[1:] {
-				// Its operand is an assignment after expansion, so a quoted
-				// one assigns too: export "t=$(mktemp)" (second review).
-				if mktempValue.MatchString(shView(r)) {
-					return true
+		if !child {
+			if assignsMktemp(raws[0]) {
+				return true
+			}
+			if declarationBuiltins[words[0]] {
+				// A declaration builtin assigns every NAME=value operand in
+				// this shell, after its options and plain names too: export
+				// PATH t=$(mktemp), local -r t=$(mktemp) (review of the guard
+				// branch: the loop had stopped at PATH and -r).
+				for i, r := range raws[1:] {
+					// Its operand is an assignment after expansion, so a quoted
+					// one assigns too: export "t=$(mktemp)" (second review).
+					if mktempValue.MatchString(shView(r)) {
+						return true
+					}
+					state.remember(r, words[i+1], conditional)
 				}
-				state.remember(r, words[i+1], conditional)
 			}
 		}
 		words, raws = words[1:], raws[1:]
+	}
+	if child {
+		return false
 	}
 	if len(words) == 0 {
 		// NAME=value before a regular command is only in that command's
@@ -684,7 +883,8 @@ func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 		}
 		return false
 	}
-	if words[0] == "unset" {
+	switch words[0] {
+	case "unset":
 		names := words[1:]
 		for len(names) > 0 && strings.HasPrefix(names[0], "-") {
 			option := names[0]
@@ -699,23 +899,46 @@ func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 			}
 		}
 		for _, name := range names {
+			state.wrote(name)
 			delete(state.vars, name)
-			if conditional {
+			if conditional || state.poisoned[name] {
 				state.unknown[name] = true
 			} else {
 				delete(state.unknown, name)
 			}
 		}
-	}
-	if words[0] == "eval" {
+		return false
+	case "read":
+		// Every operand that can be a name: an option's argument that looks
+		// like one is forgotten too, which costs nothing.
+		for _, word := range words[1:] {
+			if shellName.MatchString(word) {
+				state.forget(word)
+			}
+		}
+		return false
+	case "printf":
+		if len(words) > 2 && words[1] == "-v" && shellName.MatchString(words[2]) {
+			state.forget(words[2])
+		} else if len(words) > 1 && strings.HasPrefix(words[1], "-v") && shellName.MatchString(words[1][2:]) {
+			state.forget(words[1][2:])
+		}
+		return false
+	case "eval":
 		words, raws = words[1:], raws[1:]
 		if len(words) > 0 && words[0] == "--" {
 			words, raws = words[1:], raws[1:]
 		}
+		state.effects++
 		for i, raw := range raws {
+			state.evaluated(words[i])
 			if strings.Contains(words[i], "${!") {
 				// Indirection chooses a variable dynamically; do not interpret
 				// it as a harmless literal or assume the target is unset.
+				return true
+			}
+			if strings.Contains(words[i], "$(") || strings.Contains(words[i], "`") {
+				// What a command prints is not text this reader has.
 				return true
 			}
 			if value, ok := state.variableWord(raw); ok {
@@ -725,64 +948,148 @@ func (state *shellState) commandLeaks(cmd string, conditional bool) bool {
 				// this lint. They must not hide a remembered script from it.
 				return true
 			}
-			// Bound total expanded code before allocating it. Even without
-			// a cycle, one stored script can invoke the next twice.
-			state.evalBytesLeft -= len(words[i]) + 1
-			if state.evalBytesLeft < 0 {
+		}
+		return state.readStored(words)
+	case "trap":
+		state.effects++
+		words = words[1:]
+		if len(words) > 0 && words[0] == "--" {
+			words = words[1:]
+		}
+		// trap HANDLER SIGNAL...; a handler of "-" resets, and a bare signal
+		// list (trap EXIT) resets in POSIX sh too.
+		if len(words) < 2 || words[0] == "-" {
+			return false
+		}
+		for _, sig := range words[1:] {
+			if strings.ContainsAny(sig, "$`") || strings.EqualFold(sig, "EXIT") || strings.EqualFold(sig, "SIGEXIT") {
+				return true
+			}
+			// EXIT by number, however many zeros spell it.
+			if allDigitsWord(sig) && strings.Trim(sig, "0") == "" {
 				return true
 			}
 		}
-		script := strings.Join(words, " ")
-		if state.evaluating[script] {
-			return true
-		}
-		state.evaluating[script] = true
-		defer delete(state.evaluating, script)
-		// eval shares variables but parses an independent shell program.
-		// A fi/} in its string cannot close the caller's conditional scope.
-		nested := *state
-		nested.conditionalDepth = 0
-		nested.conditionalBraces = nil
-		nested.pendingConditional = false
-		nested.conditionalEval = conditional
-		nested.evalScope = true
-		nested.evalClosers = nil
-		leaks := nested.shellLeaks(script)
-		state.evalBytesLeft = nested.evalBytesLeft
-		return leaks || len(nested.evalClosers) != 0 || nested.conditionalDepth != 0 || len(nested.conditionalBraces) != 0 || nested.pendingConditional
-	}
-	if words[0] != "trap" {
 		return false
 	}
-	words = words[1:]
-	if len(words) > 0 && words[0] == "--" {
-		words = words[1:]
-	}
-	// trap HANDLER SIGNAL...; a handler of "-" resets, and a bare signal
-	// list (trap EXIT) resets in POSIX sh too.
-	if len(words) < 2 || words[0] == "-" {
+	return state.variableCommandLeaks(raws)
+}
+
+// variableCommandLeaks reads a command whose name comes out of a variable
+// this shell wrote -- $cleanup, "$dir/tool" -- as eval would read it: the
+// value is the command, a trap in it a trap. That is more than the shell does
+// with it (no keyword or assignment survives an expansion), so it errs loud.
+// A name never written here is somebody's environment and is left alone.
+func (state *shellState) variableCommandLeaks(raws []string) bool {
+	name := shView(raws[0])
+	state.evaluated(name)
+	if !state.unresolvedStoredVariable(name) {
 		return false
 	}
-	for _, sig := range words[1:] {
-		if strings.ContainsAny(sig, "$`") || strings.EqualFold(sig, "EXIT") || strings.EqualFold(sig, "SIGEXIT") || sig == "0" {
+	state.effects++
+	known := func(ref string) (string, bool) {
+		value, ok := state.vars[strings.Trim(ref, "${}")]
+		return value, ok
+	}
+	rest := plainReference.ReplaceAllStringFunc(name, func(ref string) string {
+		if _, ok := known(ref); ok {
+			return ""
+		}
+		return ref
+	})
+	if state.unresolvedStoredVariable(rest) {
+		// An unknown value, or a parameter operator around a known one.
+		return true
+	}
+	expanded := plainReference.ReplaceAllStringFunc(name, func(ref string) string {
+		if value, ok := known(ref); ok {
+			return value
+		}
+		return ref
+	})
+	// The arguments stay as written, quotes and all: sh -c '...' is still a
+	// child's script.
+	return state.readStored(append([]string{expanded}, raws[1:]...))
+}
+
+// readStored reads words, joined, as the program an eval runs: with the
+// shell's variables and a scope of its own.
+func (state *shellState) readStored(words []string) bool {
+	// Bound total expanded code before allocating it. Even without
+	// a cycle, one stored script can invoke the next twice.
+	for _, word := range words {
+		state.evalBytesLeft -= len(word) + 1
+		if state.evalBytesLeft < 0 {
 			return true
 		}
 	}
-	return false
+	script := strings.Join(words, " ")
+	if state.evaluating[script] {
+		return true
+	}
+	state.evaluating[script] = true
+	defer delete(state.evaluating, script)
+	saved, loops := state.shellScope, len(state.loops)
+	state.shellScope = shellScope{inEval: true, functionDepth: saved.functionDepth, loopBase: loops}
+	leaks := state.shellLeaks(script)
+	state.shellScope = saved
+	state.loops = state.loops[:loops]
+	return leaks
+}
+
+// wrote records that a command set or unset name here.
+func (state *shellState) wrote(name string) {
+	state.effects++
+	if state.deferred[name] {
+		state.replayed = true
+	}
+	for _, loop := range state.loops {
+		if loop[name] {
+			state.replayed = true
+		}
+	}
+	if state.functionDepth > 0 {
+		state.poisoned[name] = true
+	}
+}
+
+// forget records a write whose value this reader does not have.
+func (state *shellState) forget(name string) {
+	state.wrote(name)
+	delete(state.vars, name)
+	state.unknown[name] = true
+}
+
+// evaluated records the names a word hands to eval, or runs as a command,
+// where the read will happen again later: in a loop, in a function body.
+func (state *shellState) evaluated(word string) {
+	for _, ref := range shellVariableReference.FindAllStringSubmatch(word, -1) {
+		for _, loop := range state.loops {
+			loop[ref[1]] = true
+		}
+		if state.functionDepth > 0 {
+			state.deferred[ref[1]] = true
+		}
+	}
 }
 
 // remember records a statically known unconditional assignment. A branch
-// may not execute, so its reassignment cannot erase a possibly unsafe value.
+// may not execute, so its reassignment cannot erase a possibly unsafe value;
+// NAME+=value depends on what the name held.
 func (state *shellState) remember(raw, word string, conditional bool) {
 	if !assigns(raw) {
 		return
 	}
 	name, rawValue, _ := strings.Cut(raw, "=")
 	_, value, _ := strings.Cut(word, "=")
-	if conditional {
-		delete(state.vars, name)
-		state.unknown[name] = true
-	} else if expanded, ok := state.variableWord(rawValue); ok {
+	appends := strings.HasSuffix(name, "+")
+	name = strings.TrimSuffix(name, "+")
+	if conditional || appends || state.poisoned[name] {
+		state.forget(name)
+		return
+	}
+	state.wrote(name)
+	if expanded, ok := state.variableWord(rawValue); ok {
 		state.vars[name] = expanded
 		delete(state.unknown, name)
 	} else if !strings.ContainsAny(blankSingleQuoted(rawValue), "$`") {
@@ -795,6 +1102,9 @@ func (state *shellState) remember(raw, word string, conditional bool) {
 }
 
 var shellVariableReference = regexp.MustCompile(`\$(?:\{)?([A-Za-z_][A-Za-z0-9_]*)`)
+
+// plainReference is $NAME or ${NAME}, with no parameter operator.
+var plainReference = regexp.MustCompile(`\$(?:\{[A-Za-z_][A-Za-z0-9_]*\}|[A-Za-z_][A-Za-z0-9_]*)`)
 
 func (state *shellState) unresolvedStoredVariable(word string) bool {
 	for _, ref := range shellVariableReference.FindAllStringSubmatch(word, -1) {

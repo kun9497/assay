@@ -26,8 +26,9 @@ func TestInstallLeakGuardConditionalValuesAndEval(t *testing.T) {
 		`cleanup='trap "echo cleanup" EXIT'; eval "${cleanup:-}"`,
 		`cleanup='trap "echo cleanup" EXIT'; cleanup="$other"; eval "$cleanup"`,
 		`sig=EXIT; trap 'echo cleanup' $sig`,
-		// These remain conservative refusals: braces are not tracked and
-		// the last pipeline stage can run in the parent with bash lastpipe.
+		// These remain conservative refusals: a piped group's commands are
+		// read as the job shell's, so a trap in one is refused, and the
+		// last pipeline stage can run in the parent with bash lastpipe.
 		`{ trap 'echo cleanup' EXIT; } | cat`,
 		"true |\ntrap 'echo cleanup' EXIT",
 		`true | trap 'echo cleanup' EXIT`,

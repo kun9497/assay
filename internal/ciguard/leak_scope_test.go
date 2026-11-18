@@ -24,10 +24,12 @@ func TestInstallLeakGuardShellScopes(t *testing.T) {
 		{"mismatched-eval-brace-refused", `cleanup='trap "echo cleanup" EXIT'; eval '{ if true; then :; }; fi; cleanup="echo safe"' || :; eval "$cleanup"`, true},
 		{"direct-brace-unset", `cleanup='trap "echo cleanup" EXIT'; { unset cleanup; }; eval "$cleanup"`, false},
 		{"direct-brace-reassign", `cleanup='trap "echo cleanup" EXIT'; { cleanup='echo safe'; }; eval "$cleanup"`, false},
-		{"eval-assignment-persists", `cleanup='trap "echo cleanup" EXIT'; eval 'cleanup="echo safe"'; eval "$cleanup"`, false},
-		{"eval-block-is-balanced", `cleanup='trap "echo cleanup" EXIT'; eval 'if true; then :; fi; cleanup="echo safe"'; eval "$cleanup"`, false},
-		{"eval-nested-block-is-balanced", `cleanup='trap "echo cleanup" EXIT'; eval '{ while false; do :; done; }; cleanup="echo safe"'; eval "$cleanup"`, false},
-		{"eval-for-is-balanced", `cleanup='trap "echo cleanup" EXIT'; eval 'for item in x; do :; done; cleanup="echo safe"'; eval "$cleanup"`, false},
+		// What an eval string assigns is unknown whether or not the string
+		// parses: these four run in sh and clear the trap, and are refused.
+		{"eval-assignment-unknown", `cleanup='trap "echo cleanup" EXIT'; eval 'cleanup="echo safe"'; eval "$cleanup"`, true},
+		{"eval-assignment-after-block-unknown", `cleanup='trap "echo cleanup" EXIT'; eval 'if true; then :; fi; cleanup="echo safe"'; eval "$cleanup"`, true},
+		{"eval-assignment-after-nested-block-unknown", `cleanup='trap "echo cleanup" EXIT'; eval '{ while false; do :; done; }; cleanup="echo safe"'; eval "$cleanup"`, true},
+		{"eval-assignment-after-for-unknown", `cleanup='trap "echo cleanup" EXIT'; eval 'for item in x; do :; done; cleanup="echo safe"'; eval "$cleanup"`, true},
 		{"ordinary-command-prefix", `cleanup='echo safe'; cleanup='trap "echo cleanup" EXIT' true; eval "$cleanup"`, false},
 		{"indirect-text-is-not-eval", `cleanup='trap "echo cleanup" EXIT'; variable=cleanup; printf '%s' "${!variable}"`, false},
 		{"quoted-brace-is-not-a-group", `printf '%s' '}' | cat`, false},
