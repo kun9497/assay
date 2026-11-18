@@ -68,6 +68,54 @@ func TestArchiveMetadataRejectsSizeBeforeReadingPayload(t *testing.T) {
 	}
 }
 
+// The test above holds that the reader refuses on the header; this one holds
+// which limit Open hands it for each file, at the scan's own entry point. Each
+// archive ends at the header that declares one byte too many, so there is no
+// body: a reader given any larger limit goes on to read it and reports a
+// truncated archive instead, which is how the refusal is known to come first.
+func TestOpen_DockerArchiveMetadataLimitsAreTheDeclaredOnes(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		entries []archiveTestEntry
+		over    tar.Header
+		want    string
+	}{
+		{"manifest.json", nil,
+			tar.Header{Name: "manifest.json", Mode: 0600, Size: maxArchiveManifestBytes + 1},
+			"archive metadata manifest.json declares 104857601 bytes, past the 100 MiB limit (D112)"},
+		{"config", []archiveTestEntry{archiveTestFile("manifest.json", []byte(`[{"Config":"the-config.json","Layers":[]}]`))},
+			tar.Header{Name: "the-config.json", Mode: 0600, Size: MaxConfigBytes + 1},
+			"archive metadata the-config.json declares 16777217 bytes, past the 16 MiB limit (D112)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			w := tar.NewWriter(&buf)
+			for _, entry := range tc.entries {
+				if err := w.WriteHeader(&entry.header); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := w.Write(entry.data); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// Never closed: Close would refuse the missing body, and the
+			// header is flushed, with the padding before it, as it is written.
+			if err := w.WriteHeader(&tc.over); err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(t.TempDir(), "image.tar")
+			if err := os.WriteFile(file, buf.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Open(context.Background(), "docker-archive:"+file, "linux/amd64")
+			want := "read docker archive docker-archive:" + file + ": " + tc.want
+			if err == nil || err.Error() != want {
+				t.Fatalf("Open = %v\nwant   %s", err, want)
+			}
+		})
+	}
+}
+
 type archiveReadTrap struct{ reads int }
 
 func (r *archiveReadTrap) Read([]byte) (int, error) {

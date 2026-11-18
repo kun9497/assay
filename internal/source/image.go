@@ -225,7 +225,13 @@ func load(ctx context.Context, ref string, want v1.Platform, explicit bool) (v1.
 		// The layout's own index.json has no digest anyone pushed, so it is
 		// not recorded as the index: the zero parent.
 		img, choice, err := imageFromIndex(ctx, layoutIndex, ref, v1.Hash{}, want, explicit)
-		return img, loaded{choice: choice}, err
+		if err != nil {
+			// A nested index or the chosen image that the layout reader
+			// refused comes back from the walk bare; the walk's own errors
+			// name ref already.
+			return nil, loaded{}, nameLayoutError(ref, err)
+		}
+		return img, loaded{choice: choice}, nil
 
 	default:
 		r, err := name.ParseReference(ref)
