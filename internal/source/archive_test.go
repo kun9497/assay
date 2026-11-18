@@ -226,3 +226,91 @@ func TestArchiveMetadataCancellationWhileSkippingLayer(t *testing.T) {
 		t.Fatalf("metadata scan cancellation: %v", err)
 	}
 }
+
+type archiveCountingFile struct {
+	*bytes.Reader
+	readBytes int
+	seeks     int
+}
+
+func (r *archiveCountingFile) Close() error { return nil }
+
+func (r *archiveCountingFile) Read(b []byte) (int, error) {
+	n, err := r.Reader.Read(b)
+	r.readBytes += n
+	return n, err
+}
+
+func (r *archiveCountingFile) Seek(offset int64, whence int) (int64, error) {
+	r.seeks++
+	return r.Reader.Seek(offset, whence)
+}
+
+func TestDockerArchiveSkipsLargePrecedingEntries(t *testing.T) {
+	config := []byte(`{"os":"linux","architecture":"amd64","rootfs":{"type":"layers","diff_ids":[]}}`)
+	data := archiveTestBytes(t,
+		archiveTestFile("unrelated-layer", make([]byte, 4<<20)),
+		archiveTestFile("manifest.json", []byte(`[{"Config":"config","Layers":[]}]`)),
+		archiveTestFile("config", config),
+		archiveTestFile("after", []byte("found")),
+	)
+	var opens []*archiveCountingFile
+	open := func() (io.ReadCloser, error) {
+		file := &archiveCountingFile{Reader: bytes.NewReader(data)}
+		opens = append(opens, file)
+		return file, nil
+	}
+	guarded, err := dockerArchiveOpener(context.Background(), open)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// This lookup passes both the synthetic prefix and the large entry in
+	// the original tar, just as looking up a later layer does.
+	body, err := readArchiveMetadata(context.Background(), guarded, "after", 16)
+	if err != nil || string(body) != "found" {
+		t.Fatalf("body=%q error=%v", body, err)
+	}
+	for _, file := range opens {
+		if file.readBytes > 32<<10 || file.seeks == 0 {
+			t.Fatalf("read %d bytes, %d seeks while skipping 4 MiB", file.readBytes, file.seeks)
+		}
+	}
+	// tar's seek optimization must still detect a truncated unwanted entry.
+	truncated := data[:1024]
+	_, err = readArchiveMetadata(context.Background(), func() (io.ReadCloser, error) {
+		return &archiveCountingFile{Reader: bytes.NewReader(truncated)}, nil
+	}, "config", MaxConfigBytes)
+	if !errors.Is(err, io.ErrUnexpectedEOF) {
+		t.Fatalf("truncated preceding layer: %v", err)
+	}
+}
+
+func TestArchivePrefixSeeksAcrossBoundary(t *testing.T) {
+	file := &archiveCountingFile{Reader: bytes.NewReader([]byte("ghi"))}
+	r := &archivePrefixReader{file: file, prefix: [][]byte{[]byte("abc"), []byte("def")}}
+	for _, tc := range []struct {
+		offset int64
+		whence int
+		want   string
+	}{{1, io.SeekStart, "bcdef"}, {1, io.SeekCurrent, "hi"}, {-6, io.SeekEnd, "defghi"}, {0, io.SeekStart, "abcdefghi"}} {
+		if _, err := r.Seek(tc.offset, tc.whence); err != nil {
+			t.Fatal(err)
+		}
+		buf := make([]byte, len(tc.want))
+		if _, err := io.ReadFull(r, buf); err != nil || string(buf) != tc.want {
+			t.Fatalf("seek %+v: read %q, error=%v", tc, buf, err)
+		}
+	}
+	if _, err := r.Seek(-10, io.SeekEnd); err == nil {
+		t.Fatal("accepted a negative logical offset")
+	}
+	if r.pos != 9 {
+		t.Fatalf("failed seek changed position to %d", r.pos)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	guarded := &archiveContextReader{ctx: ctx, Reader: r, Closer: file}
+	if _, err := guarded.Seek(0, io.SeekStart); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled seek: %v", err)
+	}
+}

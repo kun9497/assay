@@ -79,11 +79,9 @@ func dockerArchiveOpener(ctx context.Context, open tarball.Opener) (tarball.Open
 		}
 		// No end-of-archive blocks between the captured entries and the
 		// original archive. Share their backing bytes across layer opens.
-		reader := io.MultiReader(
-			bytes.NewReader(manifestHeader), bytes.NewReader(manifest), archivePadding(len(manifest)),
-			bytes.NewReader(configHeader), bytes.NewReader(config), archivePadding(len(config)),
-			file,
-		)
+		prefix := [][]byte{manifestHeader, manifest, archivePadding(len(manifest)),
+			configHeader, config, archivePadding(len(config))}
+		reader := &archivePrefixReader{file: file, prefix: prefix}
 		return &archiveContextReader{ctx: ctx, Reader: reader, Closer: file}, nil
 	}, nil
 }
@@ -97,8 +95,8 @@ func archiveMetadataHeader(name string, data []byte) ([]byte, error) {
 	return header.Bytes(), nil
 }
 
-func archivePadding(size int) io.Reader {
-	return bytes.NewReader(make([]byte, (512-size%512)%512))
+func archivePadding(size int) []byte {
+	return make([]byte, (512-size%512)%512)
 }
 
 // Match the library's first clean-path match and relative link resolution.
@@ -161,8 +159,8 @@ func findArchiveMetadata(reader io.Reader, name string, limit int64) ([]byte, st
 	}
 }
 
-// Do not expose the file's Seek or WriterTo: tar's skip path must also check
-// cancellation, including while looking past a large preceding layer.
+// Both reading and seeking check cancellation. tar.Reader seeks over the
+// payload of unwanted entries, then reads the final byte to detect truncation.
 type archiveContextReader struct {
 	ctx context.Context
 	io.Reader
@@ -174,4 +172,75 @@ func (reader *archiveContextReader) Read(buf []byte) (int, error) {
 		return 0, err
 	}
 	return reader.Reader.Read(buf)
+}
+
+func (reader *archiveContextReader) Seek(offset int64, whence int) (int64, error) {
+	if err := reader.ctx.Err(); err != nil {
+		return 0, err
+	}
+	seeker, ok := reader.Reader.(io.Seeker)
+	if !ok {
+		return 0, errors.New("archive reader does not support seeking")
+	}
+	return seeker.Seek(offset, whence)
+}
+
+// Present the captured metadata followed by the original archive as one
+// seekable file. Without this, each layer lookup would reread all preceding
+// layers. The small prefix slices share the already-bounded metadata bytes.
+type archivePrefixReader struct {
+	file   io.ReadCloser
+	prefix [][]byte
+	pos    int64
+}
+
+func (r *archivePrefixReader) Read(buf []byte) (int, error) {
+	offset := r.pos
+	for _, part := range r.prefix {
+		if offset < int64(len(part)) {
+			n := copy(buf, part[offset:])
+			r.pos += int64(n)
+			return n, nil
+		}
+		offset -= int64(len(part))
+	}
+	n, err := r.file.Read(buf)
+	r.pos += int64(n)
+	return n, err
+}
+
+func (r *archivePrefixReader) Seek(offset int64, whence int) (int64, error) {
+	seeker, ok := r.file.(io.Seeker)
+	if !ok {
+		return 0, errors.New("archive file does not support seeking")
+	}
+	var prefixSize int64
+	for _, part := range r.prefix {
+		prefixSize += int64(len(part))
+	}
+	switch whence {
+	case io.SeekStart:
+	case io.SeekCurrent:
+		offset += r.pos
+	case io.SeekEnd:
+		end, err := seeker.Seek(0, io.SeekEnd)
+		if err != nil {
+			return 0, err
+		}
+		// Restore the backing position if the requested offset is invalid.
+		if _, err := seeker.Seek(max(0, r.pos-prefixSize), io.SeekStart); err != nil {
+			return 0, err
+		}
+		offset += prefixSize + end
+	default:
+		return 0, errors.New("invalid archive seek origin")
+	}
+	if offset < 0 {
+		return 0, errors.New("negative archive seek position")
+	}
+	if _, err := seeker.Seek(max(0, offset-prefixSize), io.SeekStart); err != nil {
+		return 0, err
+	}
+	r.pos = offset
+	return r.pos, nil
 }
