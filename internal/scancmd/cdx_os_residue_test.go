@@ -100,6 +100,7 @@ func TestRun_CDXBareListingJoinsItsQualifierOnlyUncoveredTwin(t *testing.T) {
 		return `{"bomFormat":"CycloneDX","components":[` + strings.Join(top, ",") + `],"metadata":{"component":` + subject + `}}`
 	}
 	const sidOS = `{"type":"operating-system","name":"debian","version":"sid"}`
+	const contradictoryOS = `{"type":"operating-system","name":"debian","version":"12","properties":[{"name":"syft:distro:versionID","value":"11"}]}`
 	for _, tc := range []struct {
 		name                           string
 		top                            []string
@@ -131,6 +132,15 @@ func TestRun_CDXBareListingJoinsItsQualifierOnlyUncoveredTwin(t *testing.T) {
 		// did.
 		{"bare top, bare child of a sid OS subject", []string{lib("")},
 			strings.TrimSuffix(sidOS, "}") + `,"components":[` + lib("") + `]}`, 2, 0, 2},
+		{"experimental top, bare child of a sid OS subject", []string{lib("distro=debian-experimental")},
+			strings.TrimSuffix(sidOS, "}") + `,"components":[` + lib("") + `]}`, 2, 0, 2},
+		// Nor is a listing beside a contradictory declaration, or beside
+		// two releases, silent about its release: it is not joined, and its
+		// presence leaves a bare listing elsewhere unplaced too.
+		{"bare top, sid subject over a bare child of a contradictory OS", []string{lib("")},
+			strings.TrimSuffix(lib("distro=debian-sid"), "}") + `,"components":[` + strings.TrimSuffix(contradictoryOS, "}") + `,"components":[` + lib("") + `]}]}`, 3, 0, 3},
+		{"sid top, bare subject child beside two OS releases", []string{lib("distro=debian-sid")},
+			`{"type":"container","name":"subject","components":[{"type":"operating-system","name":"debian","version":"12"},{"type":"operating-system","name":"ubuntu","version":"22.04"},` + lib("") + `]}`, 2, 0, 2},
 		// Two listings that each name a release are never one (the 6c975a3
 		// rule this must not undo).
 		{"sid top, debian-12 subject", []string{lib("distro=debian-sid")}, lib("distro=debian-12"), 2, 1, 1},
