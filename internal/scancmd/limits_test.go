@@ -262,10 +262,10 @@ func (c *cancelAfterChecks) Err() error {
 	return c.Context.Err()
 }
 
-// TestRun_CancelledContextStopsTheLayerWalk holds D112's third bound at Run. A
+// TestRun_CancelledContextStopsTheImageRead holds D112's third bound at Run. A
 // docker-archive target never reaches the network, so before D112 nothing on
 // this path consulted the context at all and a cancelled scan ran to its end.
-func TestRun_CancelledContextStopsTheLayerWalk(t *testing.T) {
+func TestRun_CancelledContextStopsTheImageRead(t *testing.T) {
 	dbPath := d112DB(t)
 	// Forty files no cataloger wants, so the walk has entries to stop between.
 	filler := map[string]string{}
@@ -281,22 +281,22 @@ func TestRun_CancelledContextStopsTheLayerWalk(t *testing.T) {
 		}
 	})
 
-	t.Run("cancelled before the walk: exit 2 with the context's error", func(t *testing.T) {
+	t.Run("cancelled before opening the archive: exit 2 with the context's error", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		cancel()
 		out, errOut, code := runD112(t, ctx, dbPath, target)
 		if code != 2 {
 			t.Fatalf("Run = %d, want 2\nstdout:\n%s\nstderr:\n%s", code, out, errOut)
 		}
-		if !strings.Contains(errOut, "read layer sha256:") || !strings.Contains(errOut, "context canceled") {
-			t.Errorf("stderr should name the layer and the cancellation:\n%s", errOut)
+		if !strings.Contains(errOut, "read docker archive "+target) || !strings.Contains(errOut, "context canceled") {
+			t.Errorf("stderr should name the archive and the cancellation:\n%s", errOut)
 		}
 		if out != "" {
 			t.Errorf("a cancelled scan wrote to stdout:\n%s", out)
 		}
 	})
 
-	t.Run("cancelled mid-layer: the walk stops at the next entry", func(t *testing.T) {
+	t.Run("cancelled while reading archive metadata: stops at the next check", func(t *testing.T) {
 		parent, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		ctx := &cancelAfterChecks{Context: parent, cancel: cancel, allowed: 5}
@@ -307,9 +307,7 @@ func TestRun_CancelledContextStopsTheLayerWalk(t *testing.T) {
 		if !strings.Contains(errOut, "context canceled") {
 			t.Errorf("stderr should carry the cancellation:\n%s", errOut)
 		}
-		// The check that saw the cancellation is the last one made: the walk
-		// returned there, rather than reading on to the end of a 42-entry
-		// layer and noticing afterwards.
+		// The read that observed cancellation is the last one attempted.
 		if ctx.calls != ctx.allowed+1 {
 			t.Errorf("context checked %d times, want %d -- the walk kept going after "+
 				"it was cancelled", ctx.calls, ctx.allowed+1)
@@ -489,7 +487,7 @@ func TestRun_ExpiredDeadlineIsNamedAsTheFlagsOnlyWhenItIs(t *testing.T) {
 		if code != 2 {
 			t.Fatalf("Run = %d, want 2\nstderr:\n%s", code, errOut.String())
 		}
-		want := "error: scan did not finish within 5m0s (--timeout): read layer sha256:"
+		want := "error: scan did not finish within 5m0s (--timeout): read docker archive " + target
 		if !strings.Contains(errOut.String(), want) {
 			t.Errorf("stderr does not say %q:\n%s", want, errOut.String())
 		}
@@ -510,9 +508,9 @@ func TestRun_ExpiredDeadlineIsNamedAsTheFlagsOnlyWhenItIs(t *testing.T) {
 		if strings.Contains(errOut.String(), "--timeout") {
 			t.Errorf("stderr names a flag that was not given:\n%s", errOut.String())
 		}
-		if !strings.Contains(errOut.String(), "error: read layer sha256:") ||
+		if !strings.Contains(errOut.String(), "error: read docker archive "+target) ||
 			!strings.Contains(errOut.String(), "context deadline exceeded") {
-			t.Errorf("stderr should carry the walk's own error:\n%s", errOut.String())
+			t.Errorf("stderr should carry the archive reader's own error:\n%s", errOut.String())
 		}
 	})
 }
