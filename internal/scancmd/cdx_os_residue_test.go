@@ -67,6 +67,18 @@ func TestRun_CDXVersionlessGenericOSCannotEraseCodenameConflict(t *testing.T) {
 			}
 		}
 	}
+	// The set-aside codename is under the version-less rule like any other:
+	// beside an OS of another vendor the document cannot say whose
+	// declaration it is, and it gives nothing -- no contradiction either,
+	// under a generic name as under Ubuntu's own.
+	const debian = `{"type":"library","purl":"pkg:npm/is-odd@3.0.1","components":[{"type":"operating-system","name":"debian","version":"12"}]}`
+	for _, name := range []string{"ubuntu", "linux"} {
+		for _, reverse := range []bool{false, true} {
+			if rc, findings, suppressed, evaluated := scan(t, topOS("jammy"), second(name, "noble", true)+","+debian, reverse); rc != 0 || findings != 0 || suppressed != 1 || evaluated != 1 {
+				t.Errorf("%q noble beside jammy and a Debian branch, reverse=%t: exit %d, findings %d, suppressed %d, evaluated %d; want 0, 0, 1, 1", name, reverse, rc, findings, suppressed, evaluated)
+			}
+		}
+	}
 }
 
 // Review of v0.18.5 (2026-11-18). With no operating-system component, a
@@ -109,6 +121,16 @@ func TestRun_CDXBareListingJoinsItsQualifierOnlyUncoveredTwin(t *testing.T) {
 		{"debian-12 and bare top, sid subject", []string{lib("distro=debian-12"), lib("")}, lib("distro=debian-sid"), 3, 1, 2},
 		{"bare top, sid subject over an experimental child", []string{lib("")},
 			strings.TrimSuffix(lib("distro=debian-sid"), "}") + `,"components":[` + lib("distro=debian-experimental") + `]}`, 3, 0, 3},
+		// Every bare listing of the name and version is that install, as
+		// all of them were one identity before the qualifier-only release.
+		{"bare top, sid subject over a bare child", []string{lib("")},
+			strings.TrimSuffix(lib("distro=debian-sid"), "}") + `,"components":[` + lib("") + `]}`, 1, 0, 1},
+		{"bare and sid top, bare subject", []string{lib(""), lib("distro=debian-sid")}, lib(""), 2, 0, 2},
+		// A release an OS declaration gives its branch is that branch's,
+		// not a qualifier's: the bare listing outside it stays apart, as it
+		// did.
+		{"bare top, bare child of a sid OS subject", []string{lib("")},
+			strings.TrimSuffix(sidOS, "}") + `,"components":[` + lib("") + `]}`, 2, 0, 2},
 		// Two listings that each name a release are never one (the 6c975a3
 		// rule this must not undo).
 		{"sid top, debian-12 subject", []string{lib("distro=debian-sid")}, lib("distro=debian-12"), 2, 1, 1},

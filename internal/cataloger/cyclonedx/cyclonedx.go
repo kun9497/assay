@@ -181,7 +181,7 @@ func catalogSubject(subject component, ctx osContext, target *pkgmeta.Target, st
 	// Before any identity is computed: the release a bare listing adopts is
 	// part of it (bareIdentity). all's base is a copy, so the top-level
 	// listing itself takes the release too.
-	for _, i := range adoptOwnRelease(all.Packages, base, own) {
+	for _, i := range adoptOwnRelease(all.Packages, own) {
 		if i < base {
 			target.Packages[i].UncoveredRelease = all.Packages[i].UncoveredRelease
 		}
@@ -1013,9 +1013,8 @@ func catalog(components []component, ctx osContext, target *pkgmeta.Target, stat
 type ownReleases map[int]bool
 
 // adoptOwnRelease gives a listing that states no release at all the
-// uncovered release its twin on the other side of the subject dedupe names
-// by qualifier alone, and returns the positions it changed. base is where
-// the subject tree's listings begin in pkgs.
+// uncovered release its twins name by qualifier alone, and returns the
+// positions it changed.
 //
 // The qualifier-only release identity (6c975a3) keeps a sid listing out of
 // its Debian 12 twin, and it also stopped the bare listing of the same name
@@ -1031,18 +1030,19 @@ type ownReleases map[int]bool
 // listing of the name and version must name that one release, by qualifier
 // alone. Beside a keyed twin, a second uncovered release, or a listing an
 // OS declaration or a contradiction placed, it could be any of them and
-// stays what it was -- a package of its own.
-func adoptOwnRelease(pkgs []pkgmeta.Package, base int, own ownReleases) []int {
-	if len(own) == 0 {
-		return nil
-	}
+// stays what it was -- a package of its own. Every bare listing of such a
+// name and version takes the release, on either side of the subject dedupe
+// and whatever architecture it states: the identity is then the one all of
+// them shared before the qualifier-only release was part of it, and the
+// dedupe's own rules (subject against bom.components, sameArch) decide what
+// joins what, as they did.
+func adoptOwnRelease(pkgs []pkgmeta.Package, own ownReleases) []int {
 	type listing struct{ typ, name, version string }
 	type statements struct {
 		release string
 		// mixed: a listing of this name and version is placed some other
 		// way, or two name different releases.
 		mixed bool
-		twins []int
 	}
 	of := func(p pkgmeta.Package) listing { return listing{p.Type, p.Name, p.Version} }
 	stated := map[listing]*statements{}
@@ -1060,23 +1060,12 @@ func adoptOwnRelease(pkgs []pkgmeta.Package, base int, own ownReleases) []int {
 		if !own[i] || p.UncoveredRelease != s.release {
 			s.mixed = true
 		}
-		s.twins = append(s.twins, i)
 	}
 	var changed []int
 	for _, i := range bare {
-		s := stated[of(pkgs[i])]
-		if s == nil || s.mixed {
-			continue
-		}
-		for _, j := range s.twins {
-			// The dedupe is the subject tree against bom.components and
-			// nothing else (catalogSubject): a twin on the listing's own
-			// side is never joined, so its release is not taken either.
-			if (i < base) != (j < base) && sameArch(pkgs[i], pkgs[j]) {
-				pkgs[i].UncoveredRelease = s.release
-				changed = append(changed, i)
-				break
-			}
+		if s := stated[of(pkgs[i])]; s != nil && !s.mixed {
+			pkgs[i].UncoveredRelease = s.release
+			changed = append(changed, i)
 		}
 	}
 	return changed
@@ -1597,9 +1586,7 @@ func documentCodename(doc bom, release string) string {
 			attributable = false
 		case e.version == "":
 			versionless = append(versionless, e.codename)
-			if e.unlent != "" {
-				unlent = append(unlent, e.unlent)
-			}
+			unlent = append(unlent, e.unlent)
 		case release == "" || ubuntuRelease(e.version) != release:
 			// Another release, a version that names none, or a target of
 			// no release that no version can be shown to be (fourth
