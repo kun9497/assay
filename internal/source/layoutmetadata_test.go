@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -179,6 +180,23 @@ func TestLayoutDescriptorIsRefusedBeforeBlobOpen(t *testing.T) {
 	}
 }
 
+func TestLayoutImageAndIndexBoundTheirBlobReads(t *testing.T) {
+	for _, mt := range []types.MediaType{types.OCIManifestSchema1, types.OCIImageIndex} {
+		r := strings.NewReader(strings.Repeat(" ", 1024))
+		d := v1.Descriptor{Digest: v1.Hash{Algorithm: "sha256", Hex: strings.Repeat("a", 64)}, MediaType: mt, Size: 1}
+		idx := &boundedLayoutIndex{ctx: t.Context(), manifest: v1.IndexManifest{Manifests: []v1.Descriptor{d}}, openBlob: func(v1.Hash) (io.ReadCloser, error) { return io.NopCloser(r), nil }}
+		var err error
+		if mt.IsIndex() {
+			_, err = idx.ImageIndex(d.Digest)
+		} else {
+			_, err = idx.Image(d.Digest)
+		}
+		if err == nil || 1024-r.Len() != 2 {
+			t.Fatalf("%s: err=%v bytesRead=%d, want rejection after 2 bytes", mt, err, 1024-r.Len())
+		}
+	}
+}
+
 func TestLayoutImageUsesCheckedManifestSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	lp, err := layout.Write(dir, empty.Index)
@@ -214,5 +232,78 @@ func TestLayoutImageUsesCheckedManifestSnapshot(t *testing.T) {
 	}
 	if _, err := img.Layers(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOpen_LayoutDuplicateDescriptorsAgree(t *testing.T) {
+	for _, shape := range []string{"images", "indexes", "different branches"} {
+		for _, conflict := range []string{"size", "media type", "none"} {
+			for _, reversed := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%s/reversed=%t", shape, conflict, reversed), func(t *testing.T) {
+					dir := t.TempDir()
+					lp, err := layout.Write(dir, empty.Index)
+					if err != nil {
+						t.Fatal(err)
+					}
+					img := platformImage(t, plat("linux/amd64"))
+					if err := lp.WriteImage(img); err != nil {
+						t.Fatal(err)
+					}
+					raw, err := img.RawManifest()
+					if err != nil {
+						t.Fatal(err)
+					}
+					first := v1.Descriptor{MediaType: types.OCIManifestSchema1, Digest: writeBlob(t, lp, raw), Size: int64(len(raw))}
+					wrap := func(d v1.Descriptor) v1.Descriptor {
+						b, err := json.Marshal(v1.IndexManifest{SchemaVersion: 2, MediaType: types.OCIImageIndex, Manifests: []v1.Descriptor{d}})
+						if err != nil {
+							t.Fatal(err)
+						}
+						return v1.Descriptor{MediaType: types.OCIImageIndex, Digest: writeBlob(t, lp, b), Size: int64(len(b))}
+					}
+					if shape != "images" {
+						first = wrap(first)
+					}
+					second := first
+					first.Platform = &v1.Platform{OS: "linux", Architecture: "arm64"}
+					second.Platform = &v1.Platform{OS: "linux", Architecture: "amd64"}
+					first.Annotations = map[string]string{"test": "first"}
+					second.Annotations = map[string]string{"test": "second"}
+					switch conflict {
+					case "size":
+						second.Size = 1
+					case "media type":
+						second.MediaType = types.DockerManifestSchema2
+						if shape != "images" {
+							second.MediaType = types.DockerManifestList
+						}
+					}
+					if shape == "different branches" {
+						first, second = wrap(first), wrap(second)
+					}
+					if reversed {
+						first, second = second, first
+					}
+					if err := lp.AppendDescriptor(first); err != nil {
+						t.Fatal(err)
+					}
+					if err := lp.AppendDescriptor(second); err != nil {
+						t.Fatal(err)
+					}
+					_, err = Open(t.Context(), "oci-dir:"+dir, "linux/amd64")
+					if conflict == "none" {
+						if err != nil {
+							t.Fatal(err)
+						}
+					} else if err == nil || !strings.Contains(err.Error(), "conflicting size or media type") {
+						// A smaller bad descriptor met first may be rejected on
+						// its own read before the other branch is reached.
+						if !(shape == "different branches" && conflict == "size" && reversed && err != nil && strings.Contains(err.Error(), "exceeds its declared size")) {
+							t.Fatalf("Open = %v, want contradictory descriptor refusal", err)
+						}
+					}
+				})
+			}
+		}
 	}
 }

@@ -19,9 +19,15 @@ import (
 // ceiling as registry and Docker archive manifests, before JSON decoding.
 // A checked file is never reopened by the library to construct the image.
 type boundedLayoutIndex struct {
-	ctx      context.Context
-	openBlob func(v1.Hash) (io.ReadCloser, error)
-	manifest v1.IndexManifest
+	ctx         context.Context
+	openBlob    func(v1.Hash) (io.ReadCloser, error)
+	manifest    v1.IndexManifest
+	descriptors map[v1.Hash]layoutDescriptor
+}
+
+type layoutDescriptor struct {
+	size      int64
+	mediaType types.MediaType
 }
 
 func openLayoutIndex(ctx context.Context, dir string) (*boundedLayoutIndex, error) {
@@ -59,7 +65,32 @@ func openLayoutIndex(ctx context.Context, dir string) (*boundedLayoutIndex, erro
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return nil, err
 	}
-	return &boundedLayoutIndex{ctx: ctx, openBlob: layout.Path(dir).Blob, manifest: manifest}, nil
+	idx := &boundedLayoutIndex{ctx: ctx, openBlob: layout.Path(dir).Blob, manifest: manifest}
+	if err := idx.rememberDescriptors(); err != nil {
+		return nil, err
+	}
+	return idx, nil
+}
+
+// A hash names one byte sequence and one type, even when several platform
+// declarations refer to it. Validate the whole index before first-match
+// lookup or visit-once can hide a contradictory later declaration. The map
+// is shared with nested indexes so another branch cannot repeat the bypass.
+func (idx *boundedLayoutIndex) rememberDescriptors() error {
+	if len(idx.manifest.Manifests) > maxIndexDescriptors {
+		return fmt.Errorf("layout exceeds the %d-descriptor image index limit", maxIndexDescriptors)
+	}
+	if idx.descriptors == nil {
+		idx.descriptors = make(map[v1.Hash]layoutDescriptor)
+	}
+	for _, d := range idx.manifest.Manifests {
+		value := layoutDescriptor{size: d.Size, mediaType: d.MediaType}
+		if old, ok := idx.descriptors[d.Digest]; ok && old != value {
+			return fmt.Errorf("layout indexes give %s conflicting size or media type declarations", d.Digest)
+		}
+		idx.descriptors[d.Digest] = value
+	}
+	return nil
 }
 
 func (idx *boundedLayoutIndex) IndexManifest() (*v1.IndexManifest, error) {
@@ -166,7 +197,11 @@ func (idx *boundedLayoutIndex) ImageIndex(h v1.Hash) (indexReader, error) {
 	if err := json.Unmarshal(raw, &manifest); err != nil {
 		return nil, err
 	}
-	return &boundedLayoutIndex{ctx: idx.ctx, openBlob: idx.openBlob, manifest: manifest}, nil
+	child := &boundedLayoutIndex{ctx: idx.ctx, openBlob: idx.openBlob, manifest: manifest, descriptors: idx.descriptors}
+	if err := child.rememberDescriptors(); err != nil {
+		return nil, err
+	}
+	return child, nil
 }
 
 // Only immutable, already-checked manifest bytes reach partial's image
