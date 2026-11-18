@@ -7,6 +7,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- CycloneDX: an Ubuntu operating-system declaration with no version and a generic name
+  (for example `linux` with `syft:distro:id` `ubuntu`) no longer loses a codename that
+  contradicts the document's. A codename-scoped VEX statement such as `distro=JAMMY` is
+  then not applied and the finding is reported, as it already was when the same
+  declaration was named `ubuntu`. Such a declaration still lends no codename of its own.
+- CycloneDX: with no OS component, a package listed once without a release and once with
+  an uncovered `distro=` qualifier such as `debian-sid` is one installation again. v0.18.5
+  counted it as two components and two skips. A `debian-sid` listing beside a `debian-12`
+  one stays two.
+- `oci-dir:` reads an `index.json` that is a symbolic link to a regular file again.
+  v0.18.5 refused it as "not a regular file" while still following links for blobs. The
+  regular-file requirement and the 100 MiB limit apply to the link's target. A link to a
+  directory or device, or a dangling link, is refused and says which.
+
+### Changed
+
+- `oci-dir:` refusals say what was wrong. A manifest or nested index longer than its
+  descriptor's size, including a size of 0 or an omitted one, reads "is longer than its
+  descriptor declares (size N)" where it named a "0 bytes limit" that does not exist.
+  Two descriptors that disagree about one digest name the digest and both declarations.
+  A refusal from a nested index or from the chosen image starts with
+  `read oci layout oci-dir:<dir>: ` like the others. Exit codes are unchanged.
+
 ## [0.18.5] - 2026-11-18
 
 The changes below ship in the Linux and macOS binaries for amd64 and arm64. The Windows installer defaults to the [v0.18.4 Windows release](https://github.com/kun9497/assay/releases/tag/v0.18.4).
