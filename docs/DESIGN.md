@@ -1104,6 +1104,10 @@ exited 0 while 24 findings went unmentioned.
 - [x] A CycloneDX distro package is keyed by the OS declared in its own branch (D166, revises
       D83) — siblings, else the nearest unambiguous OS above, none when two differ side by side;
       the purl qualifier as the fallback; QA 2026-11-10
+- [x] Contradictory or ambiguous OS evidence in a CycloneDX SBOM is reported, not resolved (D168,
+      extends D166) — `OSConflict` and `AmbiguousOS` are target-cause skips before coverage; an
+      uncovered release stays its own listing; a contradicted Ubuntu codename voids
+      codename-scoped VEX; v0.18.2 to v0.18.6
 - [x] A package listed in both `components` and the subject keeps its stated source version (D165)
       — whichever listing comes first; two stated versions or source names that contradict are judged
       on neither, as one target-cause skip naming both (exit 2 under the strict gate); QA 2026-11-10

@@ -43,7 +43,7 @@ v0.18.0 릴리스 자산에서 이를 확인했습니다. 현재 설치기는 �
 sudo가 없는 러너에서는 설치 명령의 `sudo sh "$t" -b /usr/local/bin`을
 `sh "$t" -b "$HOME/.local/bin"`으로 바꾸고, 스캔 스텝에서 `export PATH="$HOME/.local/bin:$PATH"`를 실행하세요.
 
-v0.18.5는 Linux와 macOS용 바이너리를 제공합니다. 이 버전의 Windows 설치기는 서명된 Windows 릴리스 v0.18.4를 기본으로 설치합니다. PowerShell 5.1 또는 7에서 다음 명령을 실행하세요.
+Windows에서는 PowerShell 5.1 또는 7에서 다음 명령을 실행합니다. v0.18.5는 Windows 바이너리를 제공하지 않았고, v0.18.6부터 다시 제공합니다.
 
 ```powershell
 & { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/996508fc1bbd8be806f937340568ab145ea2dc52/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=996508fc1bbd8be806f937340568ab145ea2dc52" }; & ([scriptblock]::Create($s)) }

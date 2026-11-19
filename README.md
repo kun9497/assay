@@ -48,7 +48,7 @@ installer creates the executable as the installing user.
 On a runner without sudo, replace `sudo sh "$t" -b /usr/local/bin` in the install line with
 `sh "$t" -b "$HOME/.local/bin"`. Run `export PATH="$HOME/.local/bin:$PATH"` in the scan step.
 
-The v0.18.5 release ships Linux and macOS binaries. Its Windows installer defaults to the signed v0.18.4 Windows release. Run the following command in PowerShell 5.1 or 7.
+On Windows, run the following command in PowerShell 5.1 or 7. v0.18.5 shipped no Windows binary; v0.18.6 ships one again.
 
 ```powershell
 & { $ErrorActionPreference = "Stop"; try { $s = irm -TimeoutSec 8 https://raw.githubusercontent.com/kun9497/assay/996508fc1bbd8be806f937340568ab145ea2dc52/install.ps1 } catch { $s = irm -TimeoutSec 8 -Headers @{Accept="application/vnd.github.raw+json"} "https://api.github.com/repos/kun9497/assay/contents/install.ps1?ref=996508fc1bbd8be806f937340568ab145ea2dc52" }; & ([scriptblock]::Create($s)) }

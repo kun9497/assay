@@ -2303,6 +2303,17 @@ Support is decided per language rather than promised as a category.
 
 Not deferred decisions — traps to handle when the relevant code is written.
 
+**A Windows x64 build was quarantined by AhnLab V3 Lite (2026-11-18).** The release candidate
+built from `3222370` was detected as `Trojan/Win.Generic.C5860390` on a developer machine. An
+independent rebuild on a second hosted runner produced the same SHA-256, so the candidate's
+bytes are reproducible from that commit and toolchain. The quarantined file's own hash was not
+computed, and whether the detection is a false positive is not established.
+v0.18.5 shipped without Windows binaries for that reason; v0.18.6 ships them again, by
+decision, with the vendor's analysis still not requested. Windows binaries are not
+Authenticode-signed: what is signed is the checksums file, which `install.ps1` verifies. If a
+user reports the binary quarantined, the things to check are that the file matches the signed
+checksum, and whether the vendor has been asked to re-analyse that release's hash.
+
 **~~Azure Linux and Photon feeds carry no usable epoch~~ — resolved by D153, measured
 2026-10-27 (found the same day).** Azure Linux's OVAL writes every fixed version with epoch
 `0:`, including packages whose spec has an Epoch (perl's is 4), and Photon's feed writes no

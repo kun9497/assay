@@ -4699,6 +4699,27 @@ The manifest is already in memory when the config is first wanted, so every conf
 a test declares a size past it in a forged manifest rather than lowering it) with
 `ConfigLimitError`, and never asks for the blob.
 
+**Revised 2026-11-18 (review of v0.18.4 and v0.18.5).** Local image metadata is bounded
+before it is parsed, where the entry above bounded files, layers and the registry path's
+config only.
+
+- A local OCI layout's `index.json`, each image manifest and each nested index is read under
+  100 MiB (`maxArchiveManifestBytes`), and a manifest or nested index is also held to the size
+  its descriptor declares: the read stops one byte past it, and a longer blob, a negative size
+  and a digest mismatch are refused. A descriptor that omits its size declares 0 and is
+  refused. The image spec requires the field, and it is what bounds the read.
+- A Docker archive's `manifest.json` is bounded at 100 MiB and its image config at 16 MiB
+  (`MaxConfigBytes`), from the tar header, before the body is read. The checked bytes are kept
+  and reused, so a later open of the archive cannot swap them.
+- An image index is walked to at most 4 levels and 4,096 descriptors (`maxIndexDepth`,
+  `maxIndexDescriptors`). Archive metadata links are followed for at most 40 hops.
+- `index.json` may be a symbolic link to a regular file; the bound and the regular-file
+  requirement apply to the target. v0.18.5 refused the link while still following links for
+  blobs, and v0.18.6 restored it.
+
+100 MiB is the registry library's own manifest limit, so a layout or an archive is held to
+what a registry pull of the same image already was.
+
 ---
 
 ### D113 — Data age is judged for the keys a scan uses, a frozen key is as old as its freeze, and ratings get their own gate
@@ -5198,6 +5219,14 @@ waits for a request: it changes the report from one target to many. Windows imag
 OS-version request are refused rather than half-supported. Host variant detection
 (`amd64/v3` from CPU flags, as docker does) is not done — the default asks for the base
 variant, which every amd64 index carries.
+
+**Revised 2026-11-18 (review of v0.18.4 and v0.18.5).** Two rules for a local layout's index
+walk. A nested index is expanded once: an index digest reached again through another index is
+not re-read. And descriptors that name one digest must agree on size and media type across every
+index read during the walk, including entries that are not selected. A disagreement is
+refused (exit 2) and the error names the digest and both declarations. The consequence is
+that a layout listing one manifest once with a media type and once without is refused, where
+v0.18.4 scanned it when the typed entry came first.
 
 ---
 
@@ -6274,6 +6303,12 @@ an unverified database exits as it would against a verified one, and whether CI 
 able to refuse that (`--fail-on-unverified-db`) is deferred until someone asks. The
 transparency log is off, so a signature's time cannot be proven independently of the
 registry; D127's artifact record carries the pull time, not the signing time.
+
+**Revised 2026-11-17 (shipped in v0.18.4).** "Unsigned" is established only by an HTTP 404
+answered to the GET of the signature tag's own manifest, on the artifact's own registry host
+(`internal/dbcmd/trust/verify.go`). A 404 from an auth request, from a child manifest, or from
+another host after a redirect is a fetch failure, not `ErrNotSigned`, so `--allow-unsigned`
+cannot reach it. Before this, any 404 during the signature fetch read as "not signed".
 
 ---
 
@@ -9226,6 +9261,46 @@ not the owned path and is unowned. dpkg's lists are read for every Debian-family
 or not a probe found anything there (a few hundred small files in one pass). An owned file whose
 package is in the inventory under a different name than the list's (a dpkg rename mid-upgrade)
 is unowned rather than guessed.
+
+---
+
+### D168 — Contradictory or ambiguous OS evidence in an SBOM is reported, not resolved (extends D166)
+
+*Decided 2026-11-19, recording what v0.18.2 through v0.18.6 built.*
+
+**Decision.** When a CycloneDX document's operating-system evidence does not place a package
+in one release, the package is reported not evaluated with the reason, and nothing is
+guessed. Five fields on `pkgmeta.Package` carry it, none of them in the JSON report:
+
+- `OSConflict` — the OS declaration beside or above the package contradicts itself, for
+  example with two version ids, two ids, a name against an id, or Ubuntu pretty names that
+  disagree on LTS.
+- `AmbiguousOS` — an unqualified package sits beside more than one OS release.
+- `UncoveredRelease` — the package is placed in a release no advisory key is built for
+  (`debian-sid`), by an OS declaration or by its own `distro=` qualifier. It is part of the
+  listing's identity, so it does not merge into a covered twin. A listing that states no
+  release at all joins such a twin when that is the only release its name and version state.
+- `VEXDebSource` — a deb listed once under a named vendor and once with none keeps a
+  VEX-only view of its source: only the named vendor's listing supplies it.
+- `MixedDebVendors` — a deb listed under two different vendors is identified by neither
+  purl, so no purl-scoped VEX statement is applied to it.
+
+`Package.Source` (D8) is unchanged and still drives advisory lookup.
+
+The matcher skips `OSConflict` and `AmbiguousOS` as target-incomplete, so
+`--fail-on-incomplete=target` reaches exit 2, before any coverage check.
+
+Ubuntu codenames follow the same rule. A codename that contradicts the declaration's own
+version, or another declaration's codename, voids codename evidence for the document, so a
+codename-scoped VEX statement (`distro=JAMMY`) is not applied. A generic display name
+(`linux`) lends no codename and can still contradict one.
+
+**Why.** A wrong release key is a silent false negative (D6), and a waiver applied on
+contradictory evidence hides a finding. Reporting the package as not evaluated is the only
+outcome that is loud in both directions.
+
+**Not decided here.** Whether these reasons should appear in the JSON report as a field of
+their own, which is a schema bump, rather than only as the skip reason.
 
 ---
 

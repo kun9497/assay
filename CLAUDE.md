@@ -145,7 +145,14 @@ an Ubuntu tracker that parses to nothing fails `db build`, and `db push` refuses
 which any Ubuntu release holds under 80% of its published fix states. Since D158
 SARIF carries an `assay/not-evaluated` result per cataloger skip counter. Since D150 a signature payload that could not
 be fetched is `ErrSignatureUnreadable`, not `ErrNoKeyVerifies`; since D151 `install.sh` reads
-the signature through base64's stdin and its harness runs on macOS CI. Not built: pep440 leniency (see
+the signature through base64's stdin and its harness runs on macOS CI. Since D168 a CycloneDX package whose
+OS evidence contradicts itself, names more than one release, or names a release no advisory
+key covers is reported not evaluated
+(`OSConflict`, `AmbiguousOS`, `UncoveredRelease` on `pkgmeta.Package`) rather than keyed, and
+a contradicted Ubuntu codename voids codename-scoped VEX; local OCI-layout and Docker-archive
+metadata is bounded at 100 MiB before it is parsed (D112 revised 2026-11-18). v0.18.5 shipped
+without Windows binaries after AhnLab V3 quarantined a candidate; v0.18.6 ships them again
+(`docs/deferred-decisions.md`, Known hazards). Not built: pep440 leniency (see
 `docs/DESIGN.md` and `docs/deferred-decisions.md`).
 
 **Check what exists before assuming — this paragraph has been wrong six times.** It claimed
