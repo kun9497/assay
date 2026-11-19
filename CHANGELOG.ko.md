@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+## [0.18.6] - 2026-11-19
+
+Windows용 amd64·arm64 바이너리를 다시 배포합니다. Linux와 macOS로만 배포됐던 0.18.5의 변경
+사항도 이 Windows 바이너리에 함께 들어 있습니다.
+
 ### Fixed
 
 - CycloneDX: 버전이 없고 이름이 일반적인(예: `syft:distro:id`는 `ubuntu`인데 이름은 `linux`)
@@ -30,6 +35,8 @@
   다른 디스크립터는 그 다이제스트와 두 선언을 모두 적습니다. 중첩 인덱스나 선택된 이미지에서
   나온 거부도 다른 것들처럼 `read oci layout oci-dir:<dir>: `로 시작합니다. 종료 코드는
   바뀌지 않습니다.
+- 두 설치기 모두 기본으로 v0.18.6을 설치합니다. `install.ps1`은 0.18.5 동안 v0.18.4에 머물러
+  있었습니다.
 
 ## [0.18.5] - 2026-11-18
 
@@ -1214,7 +1221,8 @@
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.5...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.6...main
+[0.18.6]: https://github.com/kun9497/assay/compare/v0.18.5...v0.18.6
 [0.18.5]: https://github.com/kun9497/assay/compare/v0.18.4...v0.18.5
 [0.18.4]: https://github.com/kun9497/assay/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/kun9497/assay/compare/v0.18.2...v0.18.3

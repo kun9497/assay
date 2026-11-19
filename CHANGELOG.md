@@ -7,6 +7,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.18.6] - 2026-11-19
+
+Windows binaries for amd64 and arm64 are published again. They also carry the changes listed
+under 0.18.5, which shipped for Linux and macOS only.
+
 ### Fixed
 
 - CycloneDX: an Ubuntu operating-system declaration with no version and a generic name
@@ -31,6 +36,7 @@ All notable changes to this project are documented here. The format follows
   Two descriptors that disagree about one digest name the digest and both declarations.
   A refusal from a nested index or from the chosen image starts with
   `read oci layout oci-dir:<dir>: ` like the others. Exit codes are unchanged.
+- Both installers default to v0.18.6. `install.ps1` had stayed on v0.18.4 through 0.18.5.
 
 ## [0.18.5] - 2026-11-18
 
@@ -1437,7 +1443,8 @@ The changes below ship in the Linux and macOS binaries for amd64 and arm64. The 
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.5...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.6...main
+[0.18.6]: https://github.com/kun9497/assay/compare/v0.18.5...v0.18.6
 [0.18.5]: https://github.com/kun9497/assay/compare/v0.18.4...v0.18.5
 [0.18.4]: https://github.com/kun9497/assay/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/kun9497/assay/compare/v0.18.2...v0.18.3
