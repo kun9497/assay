@@ -2305,8 +2305,9 @@ Not deferred decisions — traps to handle when the relevant code is written.
 
 **A Windows x64 build was quarantined by AhnLab V3 Lite (2026-11-18).** The release candidate
 built from `3222370` was detected as `Trojan/Win.Generic.C5860390` on a developer machine. An
-independent rebuild on a second hosted runner produced the same SHA-256, so the build was not
-tampered with, and the detection is most likely a heuristic on a statically linked Go binary.
+independent rebuild on a second hosted runner produced the same SHA-256, so the candidate's
+bytes are reproducible from that commit and toolchain. The quarantined file's own hash was not
+computed, and whether the detection is a false positive is not established.
 v0.18.5 shipped without Windows binaries for that reason; v0.18.6 ships them again, by
 decision, with the vendor's analysis still not requested. Windows binaries are not
 Authenticode-signed: what is signed is the checksums file, which `install.ps1` verifies. If a

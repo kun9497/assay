@@ -4700,7 +4700,8 @@ a test declares a size past it in a forged manifest rather than lowering it) wit
 `ConfigLimitError`, and never asks for the blob.
 
 **Revised 2026-11-18 (review of v0.18.4 and v0.18.5).** Local image metadata is bounded
-before it is parsed, where the entry above bounded files and layers only.
+before it is parsed, where the entry above bounded files, layers and the registry path's
+config only.
 
 - A local OCI layout's `index.json`, each image manifest and each nested index is read under
   100 MiB (`maxArchiveManifestBytes`), and a manifest or nested index is also held to the size
@@ -5220,12 +5221,12 @@ OS-version request are refused rather than half-supported. Host variant detectio
 variant, which every amd64 index carries.
 
 **Revised 2026-11-18 (review of v0.18.4 and v0.18.5).** Two rules for a local layout's index
-walk. A descriptor is visited once: a digest reached again through another index is not
-re-read. And descriptors that name one digest must agree on size and media type across every
+walk. A nested index is expanded once: an index digest reached again through another index is
+not re-read. And descriptors that name one digest must agree on size and media type across every
 index read during the walk, including entries that are not selected. A disagreement is
 refused (exit 2) and the error names the digest and both declarations. The consequence is
 that a layout listing one manifest once with a media type and once without is refused, where
-v0.18.4 scanned it.
+v0.18.4 scanned it when the typed entry came first.
 
 ---
 
@@ -6303,7 +6304,7 @@ able to refuse that (`--fail-on-unverified-db`) is deferred until someone asks. 
 transparency log is off, so a signature's time cannot be proven independently of the
 registry; D127's artifact record carries the pull time, not the signing time.
 
-**Revised 2026-11-18 (review of v0.18.4).** "Unsigned" is established only by an HTTP 404
+**Revised 2026-11-17 (shipped in v0.18.4).** "Unsigned" is established only by an HTTP 404
 answered to the GET of the signature tag's own manifest, on the artifact's own registry host
 (`internal/dbcmd/trust/verify.go`). A 404 from an auth request, from a child manifest, or from
 another host after a redirect is a fetch failure, not `ErrNotSigned`, so `--allow-unsigned`
@@ -9271,16 +9272,20 @@ is unowned rather than guessed.
 in one release, the package is reported not evaluated with the reason, and nothing is
 guessed. Five fields on `pkgmeta.Package` carry it, none of them in the JSON report:
 
-- `OSConflict` — the OS declaration beside or above the package contradicts itself: two
-  version ids, two ids, a name against an id, Ubuntu pretty names that disagree on LTS.
+- `OSConflict` — the OS declaration beside or above the package contradicts itself, for
+  example with two version ids, two ids, a name against an id, or Ubuntu pretty names that
+  disagree on LTS.
 - `AmbiguousOS` — an unqualified package sits beside more than one OS release.
 - `UncoveredRelease` — the package is placed in a release no advisory key is built for
   (`debian-sid`), by an OS declaration or by its own `distro=` qualifier. It is part of the
   listing's identity, so it does not merge into a covered twin. A listing that states no
   release at all joins such a twin when that is the only release its name and version state.
-- `MixedDebVendors`, `VEXDebSource` — a deb listed under two vendors keeps a VEX-only view of
-  its source, so a statement for one vendor does not waive the other. `Package.Source` (D8)
-  is unchanged and still drives advisory lookup.
+- `VEXDebSource` — a deb listed once under a named vendor and once with none keeps a
+  VEX-only view of its source: only the named vendor's listing supplies it.
+- `MixedDebVendors` — a deb listed under two different vendors is identified by neither
+  purl, so no purl-scoped VEX statement is applied to it.
+
+`Package.Source` (D8) is unchanged and still drives advisory lookup.
 
 The matcher skips `OSConflict` and `AmbiguousOS` as target-incomplete, so
 `--fail-on-incomplete=target` reaches exit 2, before any coverage check.
