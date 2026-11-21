@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-20T15:06:30.126163339Z",
+  "generatedAt": "2026-11-21T14:18:11.463417592Z",
   "lastRun": {
     "workflow": "db-publish",
     "result": "failure",
-    "finishedAt": "2026-11-20T15:06:30.126163339Z",
-    "url": "https://github.com/kun9497/assay/actions/runs/44749256775"
+    "finishedAt": "2026-11-21T14:18:11.463417592Z",
+    "url": "https://github.com/kun9497/assay/actions/runs/44908984841"
   },
   "lastSuccess": {
     "workflow": "db-publish",
@@ -22,6 +22,6 @@
     "dataAsOfSource": "Amazon Linux ALAS",
     "signed": true,
     "signedBy": "9b71ca8e11cf3bcf",
-    "observedAt": "2026-11-20T15:06:30.126163339Z"
+    "observedAt": "2026-11-21T14:18:11.463417592Z"
   }
 }
