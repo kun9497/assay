@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- CycloneDX: Trivy가 만든 SBOM의 Debian·Alpine 패키지를 이제 source 패키지를 통해 판정합니다.
+  Trivy는 source를 purl이 아니라 `aquasecurity:trivy:SrcName`과 버전 property에 적는데 이를
+  읽지 않아, `libssl3`(source `openssl`) 같은 패키지가 취약점 없음으로 보고되고 evaluated로
+  집계됐습니다. 이미지를 직접 스캔하는 경로는 영향이 없었습니다. Trivy의 SPDX 출력은 아직
+  다루지 않습니다(`docs/deferred-decisions.md`).
+
 ## [0.18.6] - 2026-11-19
 
 Windows용 amd64·arm64 바이너리를 다시 배포합니다. Linux와 macOS로만 배포됐던 0.18.5의 변경

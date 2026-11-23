@@ -3421,6 +3421,20 @@ at the caller or the cataloger; the tenth — the rpm branch setting the name wi
 — is caught at the cataloger and is an equivalent through `Run`, because the D153 pass
 recomputes the version from `Upstream`; the code says so.
 
+**Revised (QA 2026-11-20).** The qualifier is syft's spelling, and it was the only one read.
+Trivy states the source in its own CycloneDX properties (`aquasecurity:trivy:SrcName`,
+`SrcVersion`, `SrcRelease`, `SrcEpoch`) and never writes `upstream`, so a Trivy document's
+`libssl3` was keyed to its release, looked up under the binary name alone, judged clean and
+counted as evaluated. Measured on Trivy's own golden (`fluentd-multiple-lockfiles.cdx.json`,
+Debian 10.2): 105 deb packages, none with `upstream`, 69 whose source has another name; 70 of
+99 Debian findings were missing, exit code unaffected under every incompleteness gate. The
+CycloneDX cataloger now reads those properties for deb and apk when the purl named no source,
+joining the three version parts back into `[epoch:]version[-release]` for deb and keeping the
+name alone for apk, as D84 does. The purl's own statement is never overridden. Held through
+`Run`: source below the fix is found and the same document with the source at the fix is clean,
+an epoch-bearing source clears an epoch-less fix, and the apk join. Trivy's SPDX output and
+generators that state no source at all are a recorded gap (`docs/deferred-decisions.md`).
+
 ---
 
 ### D84 — SPDX, the format vendors actually publish

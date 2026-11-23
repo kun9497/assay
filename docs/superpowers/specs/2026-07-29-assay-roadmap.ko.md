@@ -3191,6 +3191,19 @@ perl fix `4:5.32.1-481.el9` 에 대해 깨끗하다; source 버전의 source 문
 없이 이름만 두는 것 — 는 카탈로거에서 잡히되 `Run` 을 통해서는 등가다. D153 패스가 `Upstream` 에서
 버전을 다시 계산하기 때문이며, 코드가 그렇게 말한다.
 
+**개정 (QA 2026-11-20).** 이 qualifier 는 syft 의 표기이고, 읽는 표기는 그것뿐이었다. Trivy 는
+source 를 자기 CycloneDX property(`aquasecurity:trivy:SrcName`, `SrcVersion`, `SrcRelease`,
+`SrcEpoch`)에 적고 `upstream` 은 쓰지 않으므로, Trivy 문서의 `libssl3` 는 릴리스에 키가 걸린 뒤
+바이너리 이름으로만 조회되어 깨끗하다고 판정되고 evaluated 로 집계되었다. Trivy 자체 golden
+(`fluentd-multiple-lockfiles.cdx.json`, Debian 10.2) 측정: deb 패키지 105 개 중 `upstream` 을 가진
+것은 0 개, source 이름이 다른 것은 69 개. Debian finding 99 건 중 70 건이 빠졌고 exit code 는 어떤
+불완전성 게이트에서도 변하지 않았다. 이제 CycloneDX 카탈로거는 purl 이 source 를 지목하지 않았을 때
+deb 와 apk 에 대해 이 property 를 읽는다. deb 는 버전의 세 조각을 `[epoch:]version[-release]` 로
+다시 잇고, apk 는 D84 와 같이 이름만 남긴다. purl 자신의 진술은 덮어쓰지 않는다. `Run` 을 통해
+지킨다: fix 아래의 source 는 발견되고 source 가 fix 에 있는 같은 문서는 깨끗하다, epoch 를 가진
+source 는 epoch 없는 fix 를 넘는다, 그리고 apk 의 join. Trivy 의 SPDX 출력과 source 를 아예 적지 않는
+생성기는 기록된 공백이다(`docs/deferred-decisions.md`).
+
 ---
 
 ### D84 — SPDX, 벤더가 실제로 발행하는 형식

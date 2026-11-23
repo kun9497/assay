@@ -2036,6 +2036,30 @@ scan gives and the image's SBOM does not.
 
 ---
 
+### The source package of a deb or apk in an SBOM that states it in no spelling assay reads
+
+Debian and Alpine advisories are keyed on source names (D8). On SBOM input the source is read
+from syft's spellings (the purl's `upstream` qualifier, `syft:metadata:originPackage`) and,
+since QA 2026-11-20, from Trivy's CycloneDX properties (`aquasecurity:trivy:SrcName` and its
+version parts). Two shapes are still not read:
+
+- **Trivy's SPDX output.** It is believed to state the source in the package's `sourceInfo`
+  text, which the SPDX reader does not parse. Not measured: Trivy's repository carries no SPDX
+  golden of an OS image, and no such document has been collected.
+- **Any generator that writes no source at all.** A deb or apk component with no source
+  statement cannot be told apart from one whose source has its own name, which is the common
+  case and is judged correctly.
+
+**Why deferred.** The second shape has no honest signal in the document: reporting every
+source-less deb as not evaluated would mark most of a correct syft SBOM unevaluated, because
+syft omits `upstream` when the names agree. The first needs a real document before a text
+format is parsed from memory.
+
+**Revisit when** a Trivy SPDX document of a Debian or Alpine image is collected, or a user
+reports a finding the image scan gives and the image's SBOM does not.
+
+---
+
 ### Scanning every platform of a multi-platform image in one run
 
 `--platform all`, as some scanners offer: resolve every platform an index carries and

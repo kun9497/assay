@@ -1958,6 +1958,28 @@ libnghttp2, sssd-krb5, nspr, keyutils-libs 등). 그중 185 개는 문서 다른
 
 ---
 
+### assay 가 읽는 어떤 표기로도 source 를 적지 않은 SBOM 의 deb·apk source 패키지
+
+Debian 과 Alpine 의 advisory 는 source 이름으로 키가 걸린다(D8). SBOM 입력에서 source 는 syft 의
+표기(purl 의 `upstream` 한정자, `syft:metadata:originPackage`)에서 읽고, QA 2026-11-20 부터는 Trivy 의
+CycloneDX property(`aquasecurity:trivy:SrcName` 과 그 버전 조각들)에서도 읽는다. 아직 읽지 않는 모양이
+둘 있다:
+
+- **Trivy 의 SPDX 출력.** 패키지의 `sourceInfo` 문장에 source 를 적는 것으로 알고 있으나 SPDX 리더는
+  그것을 파싱하지 않는다. 측정하지 않았다: Trivy 저장소에는 OS 이미지의 SPDX golden 이 없고, 그런 문서를
+  수집한 적도 없다.
+- **source 를 아예 적지 않는 생성기.** source 진술이 없는 deb·apk 컴포넌트는 source 이름이 자기 이름과
+  같은 컴포넌트와 구별할 수 없다. 후자가 흔한 경우이고 올바르게 판정된다.
+
+**보류 이유.** 두 번째 모양은 문서 안에 정직한 신호가 없다: source 없는 deb 를 모두 not evaluated 로
+보고하면 올바른 syft SBOM 의 대부분이 미평가로 표시된다. syft 는 이름이 같을 때 `upstream` 을 생략하기
+때문이다. 첫 번째는 기억에 의존해 문장 형식을 파싱하기 전에 실제 문서가 필요하다.
+
+**다시 볼 때.** Debian 또는 Alpine 이미지의 Trivy SPDX 문서를 수집했을 때, 또는 이미지 스캔은 내는
+finding 을 그 이미지의 SBOM 은 내지 않는다는 사용자 보고가 들어올 때.
+
+---
+
 ### 멀티 플랫폼 이미지의 모든 플랫폼을 한 번에 스캔하기
 
 일부 스캐너가 제공하는 `--platform all`: 인덱스가 담은 모든 플랫폼을 해석해 각각 보고합니다.
