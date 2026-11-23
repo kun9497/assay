@@ -7,8 +7,31 @@
 
 ## [Unreleased]
 
+### Changed
+
+- `assay db update`가 이미 설치된 데이터베이스보다 먼저 빌드된 아티팩트를 exit 2로 거부하고
+  설치된 데이터베이스를 그대로 둡니다(D169). 서명에는 만료가 없어서, 오래된 아티팩트를 내주는
+  레지스트리나 미러가 더 새로운 데이터베이스를 exit 0으로 교체할 수 있었습니다. 의도적으로
+  되돌리려면 `--allow-older`를 주거나 `--from <ref>@sha256:<digest>`로 아티팩트를 다이제스트로
+  지목하세요. `db build`로 로컬에서 빌드한 데이터베이스는 발행된 것보다 새로우므로, 발행된
+  아티팩트로 돌아갈 때도 이 플래그가 필요합니다.
+
 ### Fixed
 
+- CycloneDX: Trivy가 만든 SBOM의 Debian·Alpine 패키지를 이제 source 패키지를 통해 판정합니다.
+  Trivy는 source를 purl이 아니라 `aquasecurity:trivy:SrcName`과 버전 property에 적는데 이를
+  읽지 않아, `libssl3`(source `openssl`) 같은 패키지가 취약점 없음으로 보고되고 evaluated로
+  집계됐습니다. 이미지를 직접 스캔하는 경로는 영향이 없었습니다. Trivy의 SPDX 출력은 아직
+  다루지 않습니다(`docs/deferred-decisions.md`).
+- Red Hat provider: Red Hat 피드가 epoch 없이 적은 Hummingbird fix가 이제 피드의 다른 곳에 적힌
+  epoch를 받습니다. 피드는 같은 nginx 빌드를 어떤 문서에서는 purl의 `epoch` qualifier 없이, 다른
+  문서에서는 붙여서 적습니다. epoch 없는 fix는 설치된 모든 빌드보다 아래로 정렬되어 해당 CVE가
+  Hummingbird 이미지에서 보고되지 않았습니다. 이 버전부터 빌드한 데이터베이스에 적용됩니다.
+- Oracle provider: Oracle Linux major를 둘 이상 덮는 ELSA를 이제 레코드 하나로 저장합니다.
+  이전에는 major마다 같은 id의 레코드를 따로 냈는데 데이터베이스는 id마다 레코드 하나만 남기므로,
+  가장 높은 major의 레코드만 살아남고 낮은 major의 패키지는 취약점 없음으로 보고됐습니다(Oracle
+  아카이브 기준 affected 항목 4,838개, 그중 Oracle Linux 8이 1,507개). 이 버전부터 빌드한
+  데이터베이스에 적용됩니다.
 - `db build`: 상류가 일부만 남겨 서비스하는 지원 종료 키는, 상류가 그 키에 레코드를 더해도 carry된
   advisory를 유지합니다(D110 개정). 2026-11-20 이후 OSV Debian export의 그런 변경 하나가 매일 밤
   후보에서 Debian 11 advisory 43,600건을 떨어뜨렸고 발행 게이트가 그때마다 거부해서, 이 수정 전까지

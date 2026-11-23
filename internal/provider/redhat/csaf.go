@@ -725,6 +725,15 @@ type stats struct {
 	// collapse to zero while nginx is still shipped is the trace that the
 	// feed moved the epoch somewhere this reader does not look.
 	HummingbirdFixedWithEpoch int
+	// The epochs restored after the whole feed was read (hummingbirdHold,
+	// QA 2026-11-20): fixed builds written without an epoch that took the
+	// one another document states for the same build, or the single epoch
+	// the feed gives the package, and those left as written because the
+	// feed gives the package two. Non-zero FromBuild is the trace that Red
+	// Hat is writing one build both ways.
+	HummingbirdEpochFromBuild int
+	HummingbirdEpochFromName  int
+	HummingbirdEpochUnsettled int
 	// The delta pass (delta.go). Counted apart from the archive's numbers
 	// because they answer different questions: the archive's say what the
 	// snapshot held, these say how far behind it was.

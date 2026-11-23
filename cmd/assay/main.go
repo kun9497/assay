@@ -12,6 +12,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -195,6 +196,10 @@ db update flags:
                   Install an artifact that carries no signature, and record
                   the database as unverified (D137). A signature that is
                   present and does not verify is refused regardless.
+  --allow-older   Install an artifact built before the database it replaces.
+                  Refused by default, because a registry serving an old
+                  artifact looks the same (D169). Not needed when --from
+                  names the artifact by digest.
 
 db build flags:
   --seed <ref>    Layer onto a previously published database (D-seed): its
@@ -564,7 +569,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			if !ok {
 				return exitError
 			}
-			return dbcmd.Pull(context.Background(), path, ref, allowUnsigned, stdout, stderr)
+			return dbcmd.PullWith(context.Background(), path, ref, dbcmd.PullOptions{
+				AllowUnsigned: allowUnsigned,
+				// D169. Read here rather than returned by resolveUpdateRef,
+				// which has already refused every flag it does not know.
+				AllowOlder: slices.Contains(args[2:], "--allow-older"),
+			}, stdout, stderr)
 		case "status":
 			format, ok := resolveStatusFormat(args, stderr)
 			if !ok {
@@ -1138,8 +1148,11 @@ func resolveUpdateRef(args []string, stderr io.Writer) (ref string, allowUnsigne
 			i++
 		case "--allow-unsigned":
 			allowUnsigned = true
+		case "--allow-older":
+			// D169. Accepted here so it is not refused as unknown; the
+			// dispatch reads it (see case "update").
 		default:
-			fmt.Fprintf(stderr, "error: unknown db update flag %q (want --from <ref> or --allow-unsigned)\n", args[i])
+			fmt.Fprintf(stderr, "error: unknown db update flag %q (want --from <ref>, --allow-unsigned or --allow-older)\n", args[i])
 			return "", false, false
 		}
 	}

@@ -1250,6 +1250,15 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 			}
 		}
 	}
+	// QA 2026-11-20. Trivy states the source package in its own properties
+	// and never in the purl, so a reader of syft's spellings alone keyed a
+	// Trivy document's libssl3 to the release and then looked it up under
+	// the binary name only: the D8 false negative, silent and counted as
+	// evaluated. Trivy's statement fills in only where the purl named no
+	// source -- a document carrying both spellings keeps the purl's.
+	if pkg.Source == nil && (p.Type == "deb" || p.Type == "apk") {
+		pkg.Source = trivySource(c, p.Type)
+	}
 	switch p.Type {
 	case "deb":
 		// syft writes dpkg's source version twice: in the purl's upstream
@@ -1292,6 +1301,36 @@ func catalogOne(c component, ctx osContext, target *pkgmeta.Target, stats *Stats
 	}
 	target.Packages = append(target.Packages, pkg)
 	stats.Cataloged++
+}
+
+// trivySource is the source package a Trivy document states for an OS
+// package, or nil when it states none. Trivy splits what dpkg recorded into
+// three properties -- SrcVersion is the upstream version, SrcRelease the
+// Debian revision, SrcEpoch the epoch, the last two written only when they
+// exist (measured on Trivy's own fluentd golden, Debian 10.2: 105 packages,
+// 90 with a release, 10 with an epoch) -- and they are joined back into the
+// one string the deb comparer orders. The source is kept when it has the
+// binary's own name, as dpkgdb keeps it: the source version is what a
+// source-keyed fix is compared with (D41), binNMU or not. An apk source
+// carries no version for the reason given at the syft property below.
+func trivySource(c component, purlType string) *pkgmeta.SourcePackage {
+	name := propValue(c, "aquasecurity:trivy:SrcName")
+	if name == "" {
+		return nil
+	}
+	if purlType != "deb" {
+		return &pkgmeta.SourcePackage{Name: name}
+	}
+	version := propValue(c, "aquasecurity:trivy:SrcVersion")
+	if version != "" {
+		if release := propValue(c, "aquasecurity:trivy:SrcRelease"); release != "" {
+			version += "-" + release
+		}
+		if epoch := propValue(c, "aquasecurity:trivy:SrcEpoch"); epoch != "" && epoch != "0" {
+			version = epoch + ":" + version
+		}
+	}
+	return &pkgmeta.SourcePackage{Name: name, Version: version}
 }
 
 // propValue returns the value of the first property named name, or "" if the

@@ -3032,6 +3032,24 @@ decision Oracle still owes.
 
 ---
 
+**Revised (QA 2026-11-20).** "One `advisory.Advisory` per (ELSA, major)" put two records under
+one id, and the store keeps one record per id, the last written (D90's hazard, which this
+decision predates and was never checked against). An ELSA covering OL8 and OL9 kept its OL9
+record alone; the index rows for OL8's packages survived and pointed at it, the matcher
+filtered its entries on ecosystem and found none, and the package was judged clean with no
+skip. Measured on the live archive 2026-11-20: 759 ids emitted more than once, 841 records
+overwritten, 4,838 affected entries unreachable (OL8 1,507, OL9 299); `bpftool@5.15.0-0` on
+OL8, below ELSA-2026-500643's fix, returned no finding and exit 0. Nothing at record level
+differs between two majors of one ELSA, so `normalize` now emits one record per definition
+carrying every major's entries, the shape Red Hat's records have. After the change the same
+archive yields 10,038 records under 10,038 distinct ids. `SkippedNoPackages` is still counted
+per (definition, major). `Fetch` also refuses an archive that would emit an id twice (two
+definitions calling themselves one ELSA) instead of publishing it. The test that pinned the
+colliding shape now demands the joined one, and a second holds both majors through the store
+and the matcher. **Not done:** `dbcmd.Update` still accepts a repeated id from any provider.
+A general refusal there would also refuse Red Hat's and SUSE's deliberate second copy of a
+document (D129, D135), so it needs a rule for which repeats are intended.
+
 ### D75 — Fedora, shipped with its hazards counted
 
 **Decision.** Fedora's current releases are ingested from Bodhi's REST API (security
@@ -3420,6 +3438,20 @@ source version suppresses and one at the binary's version does not. Ten mutation
 at the caller or the cataloger; the tenth — the rpm branch setting the name without the version
 — is caught at the cataloger and is an equivalent through `Run`, because the D153 pass
 recomputes the version from `Upstream`; the code says so.
+
+**Revised (QA 2026-11-20).** The qualifier is syft's spelling, and it was the only one read.
+Trivy states the source in its own CycloneDX properties (`aquasecurity:trivy:SrcName`,
+`SrcVersion`, `SrcRelease`, `SrcEpoch`) and never writes `upstream`, so a Trivy document's
+`libssl3` was keyed to its release, looked up under the binary name alone, judged clean and
+counted as evaluated. Measured on Trivy's own golden (`fluentd-multiple-lockfiles.cdx.json`,
+Debian 10.2): 105 deb packages, none with `upstream`, 69 whose source has another name; 70 of
+99 Debian findings were missing, exit code unaffected under every incompleteness gate. The
+CycloneDX cataloger now reads those properties for deb and apk when the purl named no source,
+joining the three version parts back into `[epoch:]version[-release]` for deb and keeping the
+name alone for apk, as D84 does. The purl's own statement is never overridden. Held through
+`Run`: source below the fix is found and the same document with the source at the fix is clean,
+an epoch-bearing source clears an epoch-less fix, and the apk join. Trivy's SPDX output and
+generators that state no source at all are a recorded gap (`docs/deferred-decisions.md`).
 
 ---
 
@@ -4039,6 +4071,25 @@ the fix, `2:1.30.4-2.hum1` is clean. The published artifact's Hummingbird nginx 
 records are wrong until the next nightly rebuilds it; grype-only tuples on the `hummingbird`
 target in the weekly diff are the trace to look for. SUSE's reader, which this one was copied
 from, had the identical gap (D77's revision of the same date).
+
+**Revised (QA 2026-11-20).** The qualifier is read, and the feed stopped writing it on part of
+its documents. Fetched 2026-11-20: cve-2026-95101 and cve-2026-97629 (both revised 2026-11-06)
+list nginx `1.30.6-1.hum1` with no `epoch=` and `nginx-0:` in the product id, while
+cve-2026-120993 (revised 2026-11-19) lists the same build as `nginx-2:` with `epoch=2`. The
+installed build on the project's own differential target (`hummingbird/nginx:1.30.4`) reads
+`2:1.30.4-2.hum1`, so the epoch-less documents are the wrong ones, and each stored a fix every
+installed nginx sorts above: clean, no skip. The counter did not collapse to zero, which is all
+the tripwire above watched for. One document cannot settle its own epoch, so the provider now
+holds every record carrying a Hummingbird entry until the feed has been read and restores the
+epoch in two steps: the epoch another document states for the same name and version-release
+(a build is one rpm), then, failing that, the single epoch every epoch-carrying statement in
+the feed gives the package. A package seen at two epochs is left as written and counted.
+**Gives up:** the second step errs toward reporting. A package whose early builds truly had
+no epoch would have those fixes raised, and an installed epoch-less build reported against a
+fix it carries; whether the feed holds such a package was not measured. Three counters on the
+progress line say how often each step ran, and a second copy of a held document is held too,
+so two copies still reach the store in the order D129 and D135 emit them. Held through `Fetch`
+off an archive with all four shapes, and by eight mutations.
 
 ---
 
@@ -9333,6 +9384,51 @@ outcome that is loud in both directions.
 
 **Not decided here.** Whether these reasons should appear in the JSON report as a field of
 their own, which is a schema bump, rather than only as the skip reason.
+
+---
+
+### D169 — `db update` follows a tag forward only
+
+Decided 2026-11-23, from the 2026-11-20 QA audit. `db update` installed whatever the reference
+resolved to, provided it was signed. The signature (D137) is key-based with no transparency
+log and is made over the digest, so it says who built an artifact and nothing about when it
+stopped being the current one: every artifact ever signed verifies for ever. A registry or
+mirror serving last month's tag therefore passed every check and replaced a newer database with
+exit 0. D139's warning covers only part of it — a database more than seven days old, on stderr,
+at scan time.
+
+**Decision.** An artifact whose database was built before the one it would replace is refused,
+exit 2, with the previous database left in place and both build times in the message. Two
+things lift it, both named by the operator: `--allow-older`, or a `--from` reference that names
+the artifact by digest. A digest names one artifact, which is how a bad publish is rolled back,
+so that use keeps working without a flag. An equal build time is not older, a first install has
+nothing to be older than, and a database that states no build time on either side is not
+ordered at all.
+
+**Compared on** the two databases' own `Meta.BuiltAt`, after the download and the signature
+check, not on the manifest's `built-at` annotation before it. The same field is read on both
+sides, and an annotation is a second statement that a hand-packed artifact need not keep in
+step with what it holds. The cost is one download on the path that ends in a refusal.
+
+**Gives up.**
+
+- A database built locally (`db build`) is newer than the published one, so going back to the
+  published artifact needs `--allow-older`. That is the flag's ordinary use, and the message
+  names it.
+- `db build --ratings-only` rewrites `BuiltAt` (the audit's separate finding), so a database
+  refreshed that way reads as newer than an artifact holding newer advisories.
+- This is not freeze protection. A registry that keeps serving the artifact already installed
+  is not refused; `--db-max-age` and D139 are what notice that.
+- `db build --seed` is unchanged: a seed is a baseline to carry forward from, and D60's guard
+  compares what was built against what is published.
+
+Other tools, from memory and not re-read against their current source: grype replaces its
+database only with one built later, ClamAV's freshclam declines a mirror behind the local
+version, and TUF makes both rollback and freeze part of the metadata.
+
+**Held by** five tests through `Pull`/`PullWith` (refusal with the database and no temp file
+left; the flag; the digest; a newer and an identical artifact need no flag), one through
+`run` for the dispatch, and eight mutations.
 
 ---
 

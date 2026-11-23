@@ -48,7 +48,7 @@ func verdictsOf(t *testing.T, doc string, pkgs ...pkgmeta.Package) map[string]st
 	}
 	if err := w.SetMeta(store.Meta{
 		BuiltAt:   time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC),
-		Providers: map[string]store.Provenance{"oracle": {Ecosystems: []string{ol9}}},
+		Providers: map[string]store.Provenance{"oracle": {Ecosystems: []string{"Oracle Linux:8", ol9}}},
 	}); err != nil {
 		t.Fatalf("SetMeta: %v", err)
 	}
@@ -287,6 +287,11 @@ func TestA2_RHCKKernelKeepsTheDrop(t *testing.T) {
 	}
 	if st.AmbiguousGroups != 1 || st.WindowedGroups != 0 {
 		t.Errorf("AmbiguousGroups = %d, WindowedGroups = %d, want 1 and 0", st.AmbiguousGroups, st.WindowedGroups)
+	}
+	// Two definitions, each left with nothing on its one major: counted per
+	// (definition, major), the unit the progress line names.
+	if st.SkippedNoPackages != 2 {
+		t.Errorf("SkippedNoPackages = %d, want 2", st.SkippedNoPackages)
 	}
 }
 
