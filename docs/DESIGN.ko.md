@@ -15,13 +15,13 @@
 
 ## 현재 상태
 
-🚧 **활발히 개발 중입니다. 배포판 계열 15개와 언어 생태계 8개가 끝에서 끝까지 스캔되며,
+🚧 **활발히 개발 중입니다. README에 적힌 배포판 계열과 언어 생태계가 끝에서 끝까지 스캔되며,
 [로드맵](#로드맵) 체크박스가 가장 확실한 목록입니다.**
 
 `assay db update`가 배포된 데이터베이스를 받아옵니다 — OSV의 언어 생태계(Go, npm, PyPI,
 crates.io, Maven, RubyGems, NuGet, Packagist)와 함께 Alpine, Debian, Ubuntu, Rocky, Alma;
 fix 상태를 담은 Red Hat의 CSAF VEX; Amazon의 ALAS(core와 AL2 extras); Oracle의 ELSA;
-Fedora의 Bodhi; 그리고 SUSE의 CSAF VEX까지 — 중앙에서 빌드해 매일 갱신하고 NVD 등급까지
+Fedora의 Bodhi; SUSE의 CSAF VEX; Photon, Arch, Azure Linux 자체 피드까지 — 중앙에서 빌드해 매일 갱신하고 NVD 등급까지
 조인한 것입니다 — 그리고 `assay scan`이 컨테이너 이미지, Go 바이너리, 디렉터리, SBOM을
 거기에 매칭합니다. 컨테이너 이미지는 운영체제 패키지만 직접 읽으므로, 그 범위에서는 syft가
 필요 없습니다. 주간 차등 비교(D93)는 grype의 finding과 튜플 단위로 비교하며 — 개수만 같은
@@ -451,7 +451,7 @@ KISA 사이트는 공공누리 표시 없이 모든 권리를 보유하고 있�
 ```bash
 NVD_ENABLE=1 NVD_SINCE_DAYS=30 assay db build   # 27분, 측정값
 assay db status                                 # `ratings: NVD (…)`가 0이 아닌지 확인
-assay db push ghcr.io/kun9497/assay-db:v8       # 압축 약 6.8 MB, repo@sha256:… 를 찍음
+assay db push "$(assay db ref)"       # 압축 약 6.8 MB, repo@sha256:… 를 찍음
 gh workflow run db-sign.yml -f digest=sha256:…  # D137: db push 가 찍은 digest 에 서명
 ```
 
@@ -502,10 +502,10 @@ GitHub 은 예약 실행을 큐에 넣었다가 늦게 시작하며, cron 이 �
 # 각 슬라이스: [now-SINCE, now-UNTIL], 120일씩 뒤로 훑습니다.
 # --ratings-only(D66)는 시드의 advisory를 그대로 가져오고 NVD 창만 다시 돌리므로,
 # 슬라이스 비용은 그 자체의 NVD 시간뿐이고 전체 재빌드가 아닙니다.
-NVD_ENABLE=1 NVD_SINCE_DAYS=240 NVD_UNTIL_DAYS=120 assay db build --seed ghcr.io/kun9497/assay-db:v8 --ratings-only
-assay db push ghcr.io/kun9497/assay-db:v8
-NVD_ENABLE=1 NVD_SINCE_DAYS=360 NVD_UNTIL_DAYS=240 assay db build --seed ghcr.io/kun9497/assay-db:v8 --ratings-only
-assay db push ghcr.io/kun9497/assay-db:v8
+NVD_ENABLE=1 NVD_SINCE_DAYS=240 NVD_UNTIL_DAYS=120 assay db build --seed "$(assay db ref)" --ratings-only
+assay db push "$(assay db ref)"
+NVD_ENABLE=1 NVD_SINCE_DAYS=360 NVD_UNTIL_DAYS=240 assay db build --seed "$(assay db ref)" --ratings-only
+assay db push "$(assay db ref)"
 # ...db status의 COVERED 범위가 피드의 시작점에 닿을 때까지 반복합니다
 ```
 
@@ -597,10 +597,10 @@ D59는 의도적으로 등급을 `--db-max-age`에서 뺐으므로, 첫 번째 �
 | 인터페이스 | 책임 | 구현체 |
 |---|---|---|
 | `Source` | 타깃을 열어 파일 접근 제공, 레이어 출처를 담음 | **레지스트리**, **`docker save` tarball**, **OCI layout**, **dir**, **binary** |
-| `Cataloger` | 파일 → `[]Package` | **apk**, **os-release**, **cyclonedx**, **dpkg**, **rpmdb**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi 락파일들**, **cargo**, **gem**, **composer**, **nuget 락파일**, **jar** |
+| `Cataloger` | 파일 → `[]Package` | **apk**, **os-release**, **cyclonedx**, **spdx**, **dpkg**, **rpmdb**, **pacman**, **bitnami**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi 락파일들**, **cargo**, **gem**, **composer**, **nuget 락파일**, **jar** |
 | `Store` | 권고 조회 | **bbolt** |
-| `Comparer` | 한 생태계 안에서 `Compare(a, b string) (int, error)` | **semver**, **PEP 440**, **apk**, **deb**, **rpm**, **gem**, **composer**, **nuget**, **maven** |
-| `Provider` | 업스트림 피드 → `[]Advisory` | **OSV**, **Red Hat CSAF VEX** |
+| `Comparer` | 한 생태계 안에서 `Compare(a, b string) (int, error)` | **semver**, **PEP 440**, **apk**, **deb**, **rpm**, **pacman**, **gem**, **composer**, **nuget**, **maven**, **bitnami** |
+| `Provider` | 업스트림 피드 → `[]Advisory` | **OSV**, **Red Hat CSAF VEX**, **SUSE CSAF VEX**, **Amazon ALAS**, **Oracle OVAL**, **Fedora Bodhi**, **Photon**, **Arch**, **Azure Linux OVAL** |
 
 `Provider` 옆에는 두 인터페이스가 더 있습니다. `Provider` 안에 넣지 않은 이유는 이 둘이 finding에
 붙이는 것이 `Advisory`가 아니기 때문입니다. `Annotator`는 assay가 이미 매칭한 CVE의 점수를 매기고

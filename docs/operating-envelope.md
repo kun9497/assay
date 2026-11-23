@@ -63,8 +63,9 @@ EOF so its diff id can be checked (D123). `Files` costs one pass plus one per li
 41); the distroless `status.d` pass runs only when `/var/lib/dpkg/status` is absent; the
 pacman pass only when no apk, dpkg or rpm database was found; the two Bitnami passes
 (`FilesMatching` on `/opt/bitnami`, then `Files` for the legacy path) run on every image
-(`catalogFromImage` and `catalogBitnami` in `internal/scancmd/scancmd.go`). A minimal Alpine
-image therefore costs four full passes, which is why `--timeout` exists: the size limits bound
+(`catalogFromImage` and `catalogBitnami` in `internal/scancmd/scancmd.go`), and so does the
+application-probe pass (D160, `catalogApplicationProbes`). A minimal Alpine image therefore costs
+at least five full passes, which is why `--timeout` exists: the size limits bound
 what is kept, not how often a layer is decompressed.
 
 ## 2. What the registry library bounds
@@ -87,6 +88,8 @@ should re-read this section.
 | Redirect to the **same host** | **followed**, always | same function, compared against the first request's host (`via[0]`) |
 | Foreign-layer URL (`urls[]` in a manifest) | must be `https` for a secure registry; a private or link-local IP-literal host is refused | `pkg/v1/remote/fetcher.go` |
 | Proxy | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` honoured through `http.ProxyFromEnvironment` | `DefaultTransport`, `pkg/v1/remote/options.go` |
+| Scheme | https, except `localhost`, loopback and RFC 1918 addresses and `*.local`, where http is tried when https does not answer | `Scheme`, `pkg/name/registry.go`; `pkg/v1/remote/transport/ping.go` |
+| Credential | sent on every request to the target host, without waiting for a challenge: on the http fallback above it crosses the network in cleartext | `pkg/v1/remote/transport/basic.go` |
 | Connection | dial 30 s, TLS handshake 10 s, no response-header or body timeout | `DefaultTransport`, `pkg/v1/remote/options.go` |
 
 The redirect rule is narrower than it sounds, and the deferred-decisions entry spells it out:

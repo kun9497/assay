@@ -61,8 +61,9 @@ stays out"), 두 크기 한도가 패키지 수준 변수인 것은 테스트가
 더하고(최대 41); distroless `status.d` 패스는 `/var/lib/dpkg/status`가 없을 때만, pacman 패스는
 apk·dpkg·rpm 데이터베이스가 하나도 없을 때만 돌며, Bitnami 두 패스(`/opt/bitnami`에
 `FilesMatching`, 이어 레거시 경로에 `Files`)는 모든 이미지에서 돕니다
-(`internal/scancmd/scancmd.go`의 `catalogFromImage`와 `catalogBitnami`). 따라서 최소 Alpine
-이미지도 full pass 네 번이 들고, 그래서 `--timeout`이 존재합니다: 크기 한도는 보관하는 양을
+(`internal/scancmd/scancmd.go`의 `catalogFromImage`와 `catalogBitnami`). 애플리케이션 probe
+패스(D160, `catalogApplicationProbes`)도 그렇습니다. 따라서 최소 Alpine 이미지도 full pass 가 다섯 번
+이상 들고, 그래서 `--timeout`이 존재합니다: 크기 한도는 보관하는 양을
 한정하지, 레이어를 몇 번 압축 해제하는지는 한정하지 않습니다.
 
 ## 2. 레지스트리 라이브러리가 한정하는 것
@@ -85,6 +86,8 @@ apk·dpkg·rpm 데이터베이스가 하나도 없을 때만 돌며, Bitnami 두
 | **같은 호스트**로의 리다이렉트 | 항상 **따라감** | 같은 함수, 첫 요청의 호스트(`via[0]`)와 비교 |
 | foreign layer URL(매니페스트의 `urls[]`) | secure 레지스트리면 `https`여야 함; 사설·링크로컬 IP 리터럴 호스트는 거부 | `pkg/v1/remote/fetcher.go` |
 | 프록시 | `HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY`를 `http.ProxyFromEnvironment`로 존중 | `pkg/v1/remote/options.go`의 `DefaultTransport` |
+| scheme | https. 단 `localhost`, 루프백, RFC 1918 주소, `*.local`은 https가 답하지 않으면 http를 시도 | `Scheme`, `pkg/name/registry.go`; `pkg/v1/remote/transport/ping.go` |
+| 자격증명 | 챌린지를 기다리지 않고 대상 호스트로 가는 모든 요청에 실림: 위의 http fallback에서는 평문으로 네트워크를 지남 | `pkg/v1/remote/transport/basic.go` |
 | 연결 | dial 30초, TLS 핸드셰이크 10초, 응답 헤더·본문 타임아웃 없음 | `pkg/v1/remote/options.go`의 `DefaultTransport` |
 
 리다이렉트 규칙은 들리는 것보다 좁고, deferred-decisions 항목이 그것을 풀어 적습니다: 이

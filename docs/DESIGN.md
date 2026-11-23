@@ -16,13 +16,13 @@ affecting it.
 
 ## Status
 
-🚧 **Active development. Fifteen distro families and eight language ecosystems scan end to
-end; the [Roadmap](#roadmap) checkboxes are the authoritative list.**
+🚧 **Active development. The distro families and language ecosystems listed in the README scan end
+to end; the [Roadmap](#roadmap) checkboxes are the authoritative list.**
 
 `assay db update` downloads the published database — OSV's language ecosystems (Go, npm,
 PyPI, crates.io, Maven, RubyGems, NuGet, Packagist) alongside Alpine, Debian, Ubuntu, Rocky
 and Alma; Red Hat's CSAF VEX with fix states; Amazon's ALAS (core and AL2 extras); Oracle's
-ELSA; Fedora's Bodhi; and SUSE's CSAF VEX — built centrally and refreshed daily, with NVD
+ELSA; Fedora's Bodhi; SUSE's CSAF VEX; Photon's, Arch's and Azure Linux's own feeds — built centrally and refreshed daily, with NVD
 ratings joined on — and `assay scan` matches container images, Go binaries, directories and
 SBOMs against it. It reads a container image's operating-system packages directly, so syft is
 not in the loop for those; the weekly differential (D93) compares the findings with grype's
@@ -478,7 +478,7 @@ already exist, so the very first one is a one-time, manual step:
 ```bash
 NVD_ENABLE=1 NVD_SINCE_DAYS=30 assay db build   # 27 minutes, measured
 assay db status                                 # check `ratings: NVD (…)` is not zero
-assay db push ghcr.io/kun9497/assay-db:v8       # ~6.8 MB compressed, prints repo@sha256:…
+assay db push "$(assay db ref)"       # ~6.8 MB compressed, prints repo@sha256:…
 gh workflow run db-sign.yml -f digest=sha256:…  # D137: sign the digest db push printed
 ```
 
@@ -534,10 +534,10 @@ checkpoint, and a failed slice costs one slice instead of the whole pass:
 # each slice: [now-SINCE, now-UNTIL], walked backwards 120 days at a time.
 # --ratings-only (D66) carries the seed's advisories verbatim and re-runs just
 # the NVD window, so a slice costs its own NVD time and not a full rebuild.
-NVD_ENABLE=1 NVD_SINCE_DAYS=240 NVD_UNTIL_DAYS=120 assay db build --seed ghcr.io/kun9497/assay-db:v8 --ratings-only
-assay db push ghcr.io/kun9497/assay-db:v8
-NVD_ENABLE=1 NVD_SINCE_DAYS=360 NVD_UNTIL_DAYS=240 assay db build --seed ghcr.io/kun9497/assay-db:v8 --ratings-only
-assay db push ghcr.io/kun9497/assay-db:v8
+NVD_ENABLE=1 NVD_SINCE_DAYS=240 NVD_UNTIL_DAYS=120 assay db build --seed "$(assay db ref)" --ratings-only
+assay db push "$(assay db ref)"
+NVD_ENABLE=1 NVD_SINCE_DAYS=360 NVD_UNTIL_DAYS=240 assay db build --seed "$(assay db ref)" --ratings-only
+assay db push "$(assay db ref)"
 # ...until db status shows the COVERED range reaching the feed's start
 ```
 
@@ -628,10 +628,10 @@ ecosystem means writing one `Cataloger` and one `Comparer` — nothing else chan
 | Interface | Responsibility | Implementations |
 |---|---|---|
 | `Source` | Open a target for file access; carries layer provenance | **registry**, **`docker save` tarball**, **OCI layout**, **dir**, **binary** |
-| `Cataloger` | Files → `[]Package` | **apk**, **os-release**, **cyclonedx**, **dpkg**, **rpmdb**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi lockfiles**, **cargo**, **gem**, **composer**, **nuget lockfile**, **jar** |
+| `Cataloger` | Files → `[]Package` | **apk**, **os-release**, **cyclonedx**, **spdx**, **dpkg**, **rpmdb**, **pacman**, **bitnami**, **go-mod**, **go-binary**, **npm**, **yarn**, **pypi lockfiles**, **cargo**, **gem**, **composer**, **nuget lockfile**, **jar** |
 | `Store` | Advisory lookup | **bbolt** |
-| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, **deb**, **rpm**, **gem**, **composer**, **nuget**, **maven** |
-| `Provider` | Upstream feed → `[]Advisory` | **OSV**, **Red Hat CSAF VEX** |
+| `Comparer` | `Compare(a, b string) (int, error)` within one ecosystem | **semver**, **PEP 440**, **apk**, **deb**, **rpm**, **pacman**, **gem**, **composer**, **nuget**, **maven**, **bitnami** |
+| `Provider` | Upstream feed → `[]Advisory` | **OSV**, **Red Hat CSAF VEX**, **SUSE CSAF VEX**, **Amazon ALAS**, **Oracle OVAL**, **Fedora Bodhi**, **Photon**, **Arch**, **Azure Linux OVAL** |
 
 Two more interfaces sit beside `Provider` rather than inside it, because what they attach to
 a finding is not an `Advisory`: `Annotator` rates a CVE that assay already matched (**NVD**,
