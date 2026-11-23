@@ -18,6 +18,7 @@ func TestParse_ARegistryReleaseServedByAMirrorIsCataloged(t *testing.T) {
 		{"url dependency", "9.0", "'x@https://host.example/y@1.2.3'", "{integrity: sha512-x, tarball: https://host.example/y.tgz}", false},
 		{"v5 url dependency", "5.4", "'@host.example/some/path/1.2.3'", "{integrity: sha512-x, tarball: https://host.example/some/path/1.2.3}", false},
 		{"unscoped path", "5.4", "host.example/path/1.2.3", "{integrity: sha512-x, tarball: https://host.example/path/1.2.3}", false},
+		{"local tarball", "9.0", "'x@file:y@1.2.3'", "{integrity: sha512-x, tarball: 'file:y.tgz'}", false},
 		{"commit version", "9.0", "x@0abc123", "{integrity: sha512-x, tarball: https://host.example/x.tgz}", false},
 	} {
 		path := write(t, "lockfileVersion: '"+tc.lock+"'"+nl+nl+"packages:"+nl+nl+"  "+tc.key+":"+nl+"    resolution: "+tc.res+nl)

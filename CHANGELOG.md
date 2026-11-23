@@ -91,6 +91,14 @@ All notable changes to this project are documented here. The format follows
   skipped when another record leaves the window during the walk.
 - A truncated database is an `error:` with the `assay db update` remedy, exit 2 and the
   provenance sidecar. It crashed the process with a runtime fault.
+- Bitnami advisories are rated. OSV states their severity on each affected entry, which was not
+  read, so a CVSS 9.8 was reported unknown and did not trip `--fail-on`. A GitHub advisory with
+  no CVSS vector takes its stated severity word. **Both can make `--fail-on` fire where it did
+  not.** Takes effect in databases built from this version on.
+- A damaged BerkeleyDB rpm database is refused rather than read as a shorter package list.
+- An image is no longer refused because a dpkg, apk or pacman database line exceeds 64 KiB.
+- pnpm: a registry release whose lockfile entry names a mirror's or private registry's tarball is
+  evaluated; every package of such a lockfile was reported not evaluated.
 
 ## [0.18.6] - 2026-11-19
 

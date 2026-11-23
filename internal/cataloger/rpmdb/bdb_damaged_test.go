@@ -31,8 +31,12 @@ func TestReadBDB_ADamagedHashPageIsRefused(t *testing.T) {
 					edit(f, p)
 				}
 			}
+			want := "a hash page is damaged"
+			if name == "an odd count" {
+				want = "an unpaired key"
+			}
 			res, err := ReadBDB(b, "Red Hat:8", bdbPath)
-			if !errors.Is(err, ErrBDB) || !(strings.Contains(err.Error(), "a hash page is damaged") || strings.Contains(err.Error(), "an unpaired key")) {
+			if !errors.Is(err, ErrBDB) || !strings.Contains(err.Error(), want) {
 				t.Errorf("%s, %s: %d packages, err %v; want the damaged page refused", name, file, len(res.Packages), err)
 			}
 		}

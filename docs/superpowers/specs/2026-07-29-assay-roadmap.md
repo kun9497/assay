@@ -1810,6 +1810,12 @@ it, and there was no SUSE advisory provider for it to serve. The first half of t
 stopped holding — D76 reads it — while the second half (still no SUSE advisory provider) has
 not changed.
 
+**Revised (QA 2026-11-20).** A hash page that was zeroed, or lost its type byte or item count, took
+its records with it and the read returned a shorter list. Zero pages cannot be refused as such:
+an unused bucket is one. The reader now refuses an overflow page that no item and no page points
+at, and a page with an unpaired item. Five real images (ubi8, ubi8-minimal, amazonlinux:2,
+centos:7, oraclelinux:7) read unchanged. A record stored wholly inline leaves no chain and is
+still not detected by this.
 
 ### D45 — A write-ahead log or a damaged page is a hard error, and the guard reads the file, not the header
 
@@ -2978,6 +2984,11 @@ coverage holes — no advisory for regreSSHion at all, and 2023–24 output runn
 RHSA's. A Rocky scan's "clean" is clean-of-what-Rocky-published, a weaker statement than the
 RHEL verdict, and — like every feed this research measured — errata-only, so
 `--fail-on-unfixable` has nothing to gate on. The README's Rocky line says both.
+
+**Revised (QA 2026-11-20), the stated word.** Decision 2's rule now covers a GHSA record with no CVSS
+vector, whose word is `database_specific.severity`; no other database's word there is read. A
+record that rates nothing at its top level takes the ratings on its affected entries, where
+Bitnami publishes all of its own (D99).
 
 ---
 
@@ -4344,6 +4355,11 @@ guessed at — the old fall-back-to-v1 default was itself a silent-zero-packages
 Independent review: 8/8 mutations red (packages discarded, berry-as-v1, name-from-key,
 v5 suffix uncut, git-as-registry, local-counted, later-documents-dropped, dedupe-by-name),
 each caught by a caller-level or table test.
+
+**Revised (QA 2026-11-20).** The tarball's host alone decided registry from foreign, so every package
+of a lockfile written against a mirror was refused. An entry on another host is a registry release
+when it carries integrity, its key's version is a whole semver version, its name is a package
+name, and the host is not a git host.
 
 ### D104 — OpenVEX input: a producer's exoneration, applied with assay's discipline
 
