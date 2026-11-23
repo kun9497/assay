@@ -42,6 +42,24 @@ func Ref(base string) string {
 // cannot reach vulnerability data at all. A missing database is an exit 2
 // with instructions, never an implicit download.
 func Pull(ctx context.Context, dbPath, ref string, allowUnsigned bool, stdout, stderr io.Writer) int {
+	return PullWith(ctx, dbPath, ref, PullOptions{AllowUnsigned: allowUnsigned}, stdout, stderr)
+}
+
+// PullOptions are the two things an operator may waive on a pull, each named
+// on the command line and neither implied by the other.
+type PullOptions struct {
+	// AllowUnsigned installs an artifact that carries no signature (D137).
+	AllowUnsigned bool
+	// AllowOlder installs an artifact built before the database it replaces
+	// (D169). A reference that names its artifact by digest needs no flag:
+	// the operator chose that exact artifact, which is how a bad publish is
+	// rolled back.
+	AllowOlder bool
+}
+
+// PullWith is Pull with every waiver spelled out.
+func PullWith(ctx context.Context, dbPath, ref string, opts PullOptions, stdout, stderr io.Writer) int {
+	allowUnsigned := opts.AllowUnsigned
 	target, err := name.ParseReference(ref)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %q is not a valid reference: %v\n", ref, err)
@@ -135,7 +153,29 @@ func Pull(ctx context.Context, dbPath, ref string, allowUnsigned bool, stdout, s
 		fmt.Fprintf(stderr, "error: the downloaded file is not a usable database: %v\n", err)
 		return 2
 	}
+	incoming, metaErr := db.Meta()
 	db.Close()
+	// D169. A signature says who built an artifact, not when it stopped
+	// being the current one: every artifact ever signed verifies for ever
+	// (key-based, no transparency log, D137), so a registry or mirror that
+	// serves last month's tag passes every check above and would replace a
+	// newer database with exit 0. A tag is followed forward only. Compared
+	// on the two databases' own BuiltAt, the same field on both sides,
+	// rather than on the manifest's annotation: the download is spent
+	// either way on the rare refusal, and a hand-packed artifact's
+	// annotation need not agree with what it holds. A database that states
+	// no build time, on either side, is not refused -- there is nothing to
+	// order -- and neither is a first install.
+	if _, pinned := target.(name.Digest); !pinned && !opts.AllowOlder && metaErr == nil {
+		if installed := installedBuiltAt(dbPath); !incoming.BuiltAt.IsZero() && incoming.BuiltAt.Before(installed) {
+			os.Remove(tmp)
+			fmt.Fprintf(stderr, "error: %s was built %s, before the database already installed (%s); refusing to replace a newer database with an older one\n",
+				target, incoming.BuiltAt.UTC().Format(time.RFC3339), installed.UTC().Format(time.RFC3339))
+			fmt.Fprintln(stderr, "  a registry or mirror serving an old artifact looks exactly like this")
+			fmt.Fprintln(stderr, "  to install it anyway pass --allow-older, or name the artifact by digest: --from <repository>@sha256:<digest>")
+			return 2
+		}
+	}
 	// D127. The record of what was pulled goes INTO the verified database
 	// before it is installed, so the record and the database it names are
 	// one file and one rename: a scan that opens the database has the record
@@ -512,3 +552,22 @@ func (e *bodyReadError) Unwrap() error { return e.err }
 // transferRetryPause waits before download attempt n+1 (n is the attempt
 // that failed). A variable so tests do not sleep.
 var transferRetryPause = func(n int) { time.Sleep(time.Duration(n*n) * 2 * time.Second) }
+
+// installedBuiltAt is when the database at dbPath says it was built, or the
+// zero time when there is none, it cannot be read, or it does not say: every
+// one of those leaves a pull nothing to be older than.
+func installedBuiltAt(dbPath string) time.Time {
+	if _, err := os.Stat(dbPath); err != nil {
+		return time.Time{}
+	}
+	db, err := store.Open(dbPath)
+	if err != nil {
+		return time.Time{}
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		return time.Time{}
+	}
+	return m.BuiltAt
+}
