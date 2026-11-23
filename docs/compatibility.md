@@ -107,6 +107,10 @@ it relied on:
   whole finding to `suppressed[]`; it now leaves it in `findings[]` with that CVE listed here,
   until every bundled CVE is waived or a waiver names the errata id. A pipeline that waived
   such a finding by one CVE sees it reported again. (D171)
+- Schema 24 (additive; one behaviour change): `findings[].notices` — the USN, DSA or DLA ids that
+  announced the finding's fix and whose every CVE is reported for the package. Such a notice used
+  to be a finding of its own, unrated, so finding and unknown counts fall on Ubuntu and Debian;
+  no vulnerability leaves the report. (D172)
 
 ## The provenance sidecar, status.json and `db status`
 

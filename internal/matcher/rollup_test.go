@@ -33,6 +33,8 @@ func TestMatch_ANoticeIsFoldedOnlyWhenNothingIsLost(t *testing.T) {
 	usn := rollRec("USN-1-1", "2.0", "CVE-2023-1", "CVE-2023-2", "UBUNTU-CVE-2023-1", "UBUNTU-CVE-2023-2")
 	usn2 := rollRec("USN-2-1", "2.0", "UBUNTU-CVE-2023-1")
 	usnOpen := rollRec("USN-1-1", "", "CVE-2023-1", "CVE-2023-2")
+	aliased := rollRec("USN-6-1", "2.0", "CVE-2023-1")
+	aliased.Aliases = []string{"X-1"}
 	for _, tc := range []struct {
 		name string
 		advs []advisory.Advisory
@@ -44,6 +46,8 @@ func TestMatch_ANoticeIsFoldedOnlyWhenNothingIsLost(t *testing.T) {
 		{"one CVE does not match", []advisory.Advisory{usn, a, bNotHit}, "UBUNTU-CVE-2023-1[] USN-1-1[]"},
 		{"one CVE's finding has no fix", []advisory.Advisory{usn, a, bNoFix}, "UBUNTU-CVE-2023-1[] UBUNTU-CVE-2023-2[] USN-1-1[]"},
 		{"the notice has no fix either", []advisory.Advisory{usnOpen, a, bNoFix}, "UBUNTU-CVE-2023-1[USN-1-1] UBUNTU-CVE-2023-2[USN-1-1]"},
+		{"no fix anywhere and one CVE unreported", []advisory.Advisory{usnOpen, a}, "UBUNTU-CVE-2023-1[] USN-1-1[]"},
+		{"another record is the same vulnerability", []advisory.Advisory{aliased, rollRec("X-1", "2.0"), a}, "UBUNTU-CVE-2023-1[] USN-6-1[]"},
 		{"it names no CVE", []advisory.Advisory{rollRec("USN-3-1", "2.0"), a}, "UBUNTU-CVE-2023-1[] USN-3-1[]"},
 		{"it names something else too", []advisory.Advisory{rollRec("USN-4-1", "2.0", "CVE-2023-1", "LP-1"), a}, "UBUNTU-CVE-2023-1[] USN-4-1[]"},
 		{"another record naming the CVE upstream is not its finding", []advisory.Advisory{usn2, rollRec("USN-5-1", "2.0", "CVE-2023-1", "CVE-2023-9")}, "USN-2-1[] USN-5-1[]"},

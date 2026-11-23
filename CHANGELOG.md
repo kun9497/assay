@@ -18,6 +18,12 @@ All notable changes to this project are documented here. The format follows
   reported again.** JSON `schemaVersion` is 23: `findings[].waived` is added (additive). VEX
   statements about different CVEs of one errata no longer override each other by order.
 
+- An Ubuntu or Debian notice (USN, DSA, DLA) whose every CVE is already reported for the package
+  is no longer a second, unrated finding; it is named on those findings (D172). **Finding and
+  unknown counts fall on Ubuntu and Debian**; no vulnerability leaves the report. A notice that
+  remains is waived CVE by CVE, as an errata is (D171), and a waiver naming a folded USN matches
+  nothing. JSON `schemaVersion` is 24: `findings[].notices` (additive).
+
 - `assay db update` refuses an artifact built before the database already installed, with
   exit 2 and the installed database left in place (D169). A signature does not expire, so a
   registry or mirror serving an old artifact used to replace a newer database with exit 0.

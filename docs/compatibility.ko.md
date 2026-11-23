@@ -98,6 +98,9 @@
   전에는 finding 전체를 `suppressed[]`로 옮겼지만, 이제는 그 CVE를 여기에 적은 채 `findings[]`에
   남겨 둡니다. 묶인 CVE가 모두 waive되거나 waiver가 errata id를 지목해야 억제됩니다. 그런 finding을
   CVE 하나로 waive해 둔 파이프라인에서는 그 finding이 다시 보고됩니다. (D171)
+- 스키마 24 (추가; 동작 변경 하나): `findings[].notices` — finding의 수정을 알렸고 그 CVE가 모두 이
+  패키지에 대해 보고된 USN, DSA, DLA id입니다. 그런 공지는 전에는 등급 없는 별도 finding이었으므로
+  Ubuntu와 Debian에서 finding 수와 unknown 수가 줄어듭니다. 보고에서 빠지는 취약점은 없습니다. (D172)
 
 ## provenance sidecar, status.json, `db status`
 
