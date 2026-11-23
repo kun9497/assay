@@ -52,6 +52,12 @@
   데이터베이스는 읽지 않음으로 보고합니다(stderr, JSON `unread[]`, SARIF, `--fail-on-incomplete`).
 - 이미지 스캔: Fedora의 `dpkg` 패키지가 설치하는 빈 `/var/lib/dpkg/status`를 가진 RPM 이미지를
   "none of [...] holds an rpm database"로 실패시키지 않고 rpm 데이터베이스에서 스캔합니다.
+- 디렉터리 스캔: `Pipfile.lock`의 `default`와 `develop` 이외의 패키지 카테고리를 읽습니다.
+  pipenv는 Pipfile 자신의 카테고리(`[docs]`, `[prod]`)를 lock에 자기 이름으로 기록하는데, 거기에
+  있는 패키지가 집계 없이 버려졌습니다.
+- Packagist와 crates.io 패키지 이름을 대소문자 구분 없이 매칭합니다. lockfile은 소문자 이름을
+  싣고 일부 advisory는 대문자로 등록되어 있어(`KnpLabs/knp-snappy`, `SurrealDB`), 그 패키지들이
+  취약점 없음으로 보고됐습니다. 이 버전부터 빌드한 데이터베이스에 적용됩니다.
 
 ## [0.18.6] - 2026-11-19
 

@@ -56,6 +56,13 @@ All notable changes to this project are documented here. The format follows
 - Image scans: an RPM image with an empty `/var/lib/dpkg/status`, which Fedora's `dpkg`
   package installs, is scanned from its rpm database instead of failing with "none of [...]
   holds an rpm database".
+- Directory scans: `Pipfile.lock` package categories other than `default` and `develop` are
+  read. pipenv writes a Pipfile's own categories (`[docs]`, `[prod]`) to the lock under their
+  own names, and packages there were dropped without a count.
+- Packagist and crates.io package names are matched case-insensitively. A lockfile carries the
+  lower-case name and some advisories are filed under capitals (`KnpLabs/knp-snappy`,
+  `SurrealDB`), so those packages were reported clean. Takes effect with a database built from
+  this version on.
 
 ## [0.18.6] - 2026-11-19
 

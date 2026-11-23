@@ -180,8 +180,22 @@ func EcosystemForPURLType(typ string) (string, bool) {
 // in the live NuGet dump are mixed-case. A lowercase fold is enough; NuGet has
 // no PEP 503-style separator folding to also apply.
 //
-// Go and npm names are case-sensitive in their own registries and OSV preserves
-// them, so they — and every other ecosystem — are returned unchanged.
+// Packagist and crates.io names are case-insensitive too, and canonically
+// lower-case where it matters here: Composer requires a lower-case
+// vendor/name and composer.lock records it that way, and crates.io refuses a
+// name that differs from an existing one only by case. OSV's records are not
+// consistent about it -- measured 2026-11-20, GHSA files KnpLabs/knp-snappy,
+// WWBN/AVideo, SurrealDB, Deno, Tauri and mdBook under capitals -- so a
+// lockfile's own lower-case name reached none of those advisories: evaluated,
+// no skip, clean. A lower-case fold on both sides joins them. crates.io also
+// treats '-' and '_' as one for uniqueness, which is NOT folded: a lockfile
+// and an advisory both carry the crate's one published spelling.
+//
+// Go, RubyGems and Maven names are case-sensitive in their own registries.
+// npm's are lower-case by rule since 2017 but its registry still holds legacy
+// mixed-case packages that are distinct from their lower-case namesakes
+// (JSONStream and jsonstream), so a fold there would join two packages. They
+// — and every other ecosystem — are returned unchanged.
 func NormalizeName(ecosystem, name string) string {
 	switch ecosystem {
 	case "PyPI":
@@ -200,7 +214,7 @@ func NormalizeName(ecosystem, name string) string {
 			b.WriteRune(r)
 		}
 		return b.String()
-	case "NuGet":
+	case "NuGet", "Packagist", "crates.io":
 		return strings.ToLower(name)
 	default:
 		return name
