@@ -9355,6 +9355,51 @@ their own, which is a schema bump, rather than only as the skip reason.
 
 ---
 
+### D169 — `db update` follows a tag forward only
+
+Decided 2026-11-23, from the 2026-11-20 QA audit. `db update` installed whatever the reference
+resolved to, provided it was signed. The signature (D137) is key-based with no transparency
+log and is made over the digest, so it says who built an artifact and nothing about when it
+stopped being the current one: every artifact ever signed verifies for ever. A registry or
+mirror serving last month's tag therefore passed every check and replaced a newer database with
+exit 0. D139's warning covers only part of it — a database more than seven days old, on stderr,
+at scan time.
+
+**Decision.** An artifact whose database was built before the one it would replace is refused,
+exit 2, with the previous database left in place and both build times in the message. Two
+things lift it, both named by the operator: `--allow-older`, or a `--from` reference that names
+the artifact by digest. A digest names one artifact, which is how a bad publish is rolled back,
+so that use keeps working without a flag. An equal build time is not older, a first install has
+nothing to be older than, and a database that states no build time on either side is not
+ordered at all.
+
+**Compared on** the two databases' own `Meta.BuiltAt`, after the download and the signature
+check, not on the manifest's `built-at` annotation before it. The same field is read on both
+sides, and an annotation is a second statement that a hand-packed artifact need not keep in
+step with what it holds. The cost is one download on the path that ends in a refusal.
+
+**Gives up.**
+
+- A database built locally (`db build`) is newer than the published one, so going back to the
+  published artifact needs `--allow-older`. That is the flag's ordinary use, and the message
+  names it.
+- `db build --ratings-only` rewrites `BuiltAt` (the audit's separate finding), so a database
+  refreshed that way reads as newer than an artifact holding newer advisories.
+- This is not freeze protection. A registry that keeps serving the artifact already installed
+  is not refused; `--db-max-age` and D139 are what notice that.
+- `db build --seed` is unchanged: a seed is a baseline to carry forward from, and D60's guard
+  compares what was built against what is published.
+
+Other tools, from memory and not re-read against their current source: grype replaces its
+database only with one built later, ClamAV's freshclam declines a mirror behind the local
+version, and TUF makes both rollback and freeze part of the metadata.
+
+**Held by** five tests through `Pull`/`PullWith` (refusal with the database and no temp file
+left; the flag; the digest; a newer and an identical artifact need no flag), one through
+`run` for the dispatch, and eight mutations.
+
+---
+
 ## 6. Benchmarking notes
 
 Design elements taken from existing tools, and what was left behind.

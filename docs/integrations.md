@@ -118,6 +118,12 @@ provenance; a signature that is present and does not verify is refused regardles
 that is the case the signature exists for. `db build --seed` applies the same check with no
 opt-out.
 
+A signature does not expire, so `db update` also follows a tag forward only (D169): an artifact
+built before the database already installed is refused with exit 2, since a mirror that has
+fallen behind looks the same as one serving an old artifact on purpose. To go back
+deliberately, pass `--allow-older` or name the artifact by digest
+(`--from <mirror>/assay-db@sha256:<digest>`).
+
 **Is the published database current?** The publish job writes [`status.json`](https://raw.githubusercontent.com/kun9497/assay/status/status.json)
 after every nightly run, from the live tag rather than from the run's own log:
 

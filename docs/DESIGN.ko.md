@@ -1045,6 +1045,8 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
 - [x] CycloneDX SBOM의 모순되거나 모호한 OS 증거는 해소하지 않고 보고함 (D168, D166 확장) —
       `OSConflict`와 `AmbiguousOS`는 coverage보다 앞선 target 원인 skip; 미지원 릴리스는 별도 나열로 남음;
       모순된 Ubuntu 코드네임은 코드네임 범위의 VEX를 무효로 함; v0.18.2부터 v0.18.6
+- [x] `db update`는 태그를 앞으로만 따라감 (D169) — 설치된 데이터베이스보다 먼저 빌드된 아티팩트는
+      exit 2로 거부; `--allow-older` 또는 다이제스트 참조로 해제
 - [x] `components`와 subject에 함께 나열된 패키지는 명시된 소스 버전을 지킴 (D165) — 어느 기록이 먼저든;
       서로 어긋나는 두 소스 버전이나 소스 이름은 어느 쪽으로도 판정하지 않고, 둘을 이름 붙인 target 원인 skip
       하나로 남김(엄격 모드에서 종료 2); QA 2026-11-10
