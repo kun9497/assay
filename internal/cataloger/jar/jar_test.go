@@ -875,3 +875,21 @@ func TestReadEntry_ReadsNoFurtherThanTheBudgetLeaves(t *testing.T) {
 			"the budget allowed, not run to the entry's end or the cap", p.budget)
 	}
 }
+
+// QA 2026-11-20: the budget running out while a nested archive is read fails
+// the whole parse. Returned as a skip, it left a partial inventory.
+func TestParse_InflateBudgetInANestedArchiveIsAnError(t *testing.T) {
+	inner := buildZip(t, []zipEntry{{"META-INF/maven/com.example/in/pom.properties", pomProps("com.example", "in", "1.0.0")}})
+	outer := pomProps("com.example", "out", "1.0.0")
+	path := writeZip(t, "outer.jar", []zipEntry{
+		{"META-INF/maven/com.example/out/pom.properties", outer},
+		{"lib/a.jar", inner},
+		{"lib/b.jar", inner},
+	})
+	lowerScanLimit(t, int64(len(outer)+len(inner)/2))
+	pkgs, stats, err := Parse(path)
+	var be *budgetError
+	if !errors.As(err, &be) || len(pkgs) != 0 || !strings.Contains(err.Error(), "lib/a.jar") {
+		t.Errorf("%d packages, %+v, %v; want the budget's error at lib/a.jar", len(pkgs), stats, err)
+	}
+}
