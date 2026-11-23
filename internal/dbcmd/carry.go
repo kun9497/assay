@@ -229,6 +229,11 @@ func keyFreezeDate(p store.Provenance, key string) time.Time {
 //     is the upstream correcting itself (Canonical's tracker, D85), measured
 //     as every live-key entry removal but Debian:11's in 28 days.
 //
+//     A key that DID gain a record is restored all the same when this run
+//     holds fewer than half the seed's records under it (revised
+//     2026-11-23, at the judgement below): a remnant the upstream is not
+//     serving, whatever it added that night.
+//
 //     Known limit, accepted: a live key that gains no record on some night
 //     and narrows a record that same night reads as flat, so that narrowing
 //     is restored and the key marked Frozen for the night. The next night it

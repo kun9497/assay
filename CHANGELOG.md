@@ -7,6 +7,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `db build`: a past-end-of-life key the upstream serves only a remnant of keeps its carried
+  advisories when the upstream adds a record to it (D110 revised). Since 2026-11-20 one such
+  change to OSV's Debian export had dropped 43,600 Debian 11 advisories from every nightly
+  candidate, and the publish gate refused each one; the published database stayed at
+  2026-11-19 until this fix.
+
 ## [0.18.6] - 2026-11-19
 
 Windows binaries for amd64 and arm64 are published again. They also carry the changes listed
