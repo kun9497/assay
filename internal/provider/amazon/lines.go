@@ -3,6 +3,7 @@ package amazon
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/kun9497/assay/internal/advisory"
 	"github.com/kun9497/assay/internal/version"
@@ -40,7 +41,10 @@ type span struct{ lo, hi string }
 //
 // Only a span wholly below. Repositories that ship one line side by side
 // (docker, ecs and aws-nitro-enclaves-cli all carry docker 25) overlap, and
-// neither says the other's builds are fixed.
+// neither says the other's builds are fixed. Nor one that ends at the upstream
+// version this one's starts at: core ships each kernel-livepatch's 1.0-0 and the
+// livepatch topic its 1.0-2 and later, one line in two repositories, and cutting
+// 1.0-0 out would report that build clean of every fix the topic has for it.
 func separateLines(recs []collected) (narrowed int, err error) {
 	cmp := version.RPM{}
 	type key struct{ eco, name string }
@@ -90,7 +94,7 @@ func separateLines(recs []collected) (narrowed int, err error) {
 			}
 			var below []span
 			for repo, s := range byRepo {
-				if repo != recs[i].repo && less(s.hi, own.lo) {
+				if repo != recs[i].repo && less(s.hi, own.lo) && upstream(s.hi) != upstream(own.lo) {
 					below = append(below, s)
 				}
 			}
@@ -123,6 +127,14 @@ func windows(spans []span, fixed string, less func(a, b string) bool) []advisory
 		from = hi + "^"
 	}
 	return append(out, advisory.Event{Introduced: from}, advisory.Event{Fixed: fixed})
+}
+
+// upstream is an EVR without its release.
+func upstream(evr string) string {
+	if i := strings.IndexByte(evr, '-'); i >= 0 {
+		return evr[:i]
+	}
+	return evr
 }
 
 // fixedOf is the fixed version of the one range buildAffected writes.
