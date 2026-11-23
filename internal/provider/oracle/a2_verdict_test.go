@@ -48,7 +48,7 @@ func verdictsOf(t *testing.T, doc string, pkgs ...pkgmeta.Package) map[string]st
 	}
 	if err := w.SetMeta(store.Meta{
 		BuiltAt:   time.Date(2026, 10, 26, 0, 0, 0, 0, time.UTC),
-		Providers: map[string]store.Provenance{"oracle": {Ecosystems: []string{ol9}}},
+		Providers: map[string]store.Provenance{"oracle": {Ecosystems: []string{"Oracle Linux:8", ol9}}},
 	}); err != nil {
 		t.Fatalf("SetMeta: %v", err)
 	}

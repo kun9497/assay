@@ -135,6 +135,17 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	advs := normalize(defs, &st)
 	fmt.Fprintln(p.progress, "oracle: "+st.String())
 
+	// The store keeps one record per id, the last written (D90). A second
+	// record under an id would silently replace the first and leave its
+	// packages pointing at a record that says nothing about them -- how an
+	// ELSA covering two majors lost the lower one until QA 2026-11-20. A
+	// build that would do that fails instead of publishing it.
+	if id, ok := repeatedID(advs); ok {
+		return store.Provenance{}, fmt.Errorf(
+			"oracle: %s was emitted more than once; the store keeps one record per id, "+
+				"so every entry of the earlier one would be lost", id)
+	}
+
 	// D20's coverage guard, the same shape redhat.Fetch and amazon.Fetch
 	// both end on: a parse that read real definitions but somehow emitted no
 	// advisories at all must fail the build rather than write a database
@@ -184,4 +195,16 @@ func (p *Provider) get(ctx context.Context, url string) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("oracle: fetch %s: %s", url, resp.Status)
 	}
 	return resp.Body, nil
+}
+
+// repeatedID is the first id that appears twice in advs.
+func repeatedID(advs []advisory.Advisory) (string, bool) {
+	seen := make(map[string]bool, len(advs))
+	for _, a := range advs {
+		if seen[a.ID] {
+			return a.ID, true
+		}
+		seen[a.ID] = true
+	}
+	return "", false
 }

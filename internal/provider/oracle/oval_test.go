@@ -231,7 +231,12 @@ func TestParseOVAL_SinglePlatformPackageFix(t *testing.T) {
 // ELSA-2026-42887) -- if the platform guard were not honored, each major
 // would see both EVRs (this test) or the wrong one (a plain swap bug), and
 // dropAmbiguous would silently eat the whole package as "ambiguous" instead
-// of correctly emitting two clean per-major advisories.
+// of correctly emitting each major its own entry.
+//
+// QA 2026-11-20: the two majors are ONE record. This test used to demand two
+// records under one id (D74's first shape), which is the shape the store
+// collapses to its last writer; TestOracleRecord_EveryMajorSurvivesTheStore
+// holds what that cost.
 func TestParseOVAL_MultiPlatformAttributesEachMajorItsOwnFix(t *testing.T) {
 	o := &ovalBuilder{}
 	branch8 := o.platformCriterion(8) + o.fixCriterion("java-17-openjdk", "1:17.0.20.0.8-1.1.0.1.el8")
@@ -246,21 +251,18 @@ func TestParseOVAL_MultiPlatformAttributesEachMajorItsOwnFix(t *testing.T) {
 		t.Fatalf("parseOVAL: %v", err)
 	}
 	advs := normalize(defs, &st)
-	// One definition, two majors -> two advisories (D74's "one
-	// advisory.Advisory per (ELSA, major)").
+	// One definition, two majors -> one advisory with an entry per major.
 	var got []advisory.Advisory
 	for _, a := range advs {
 		if a.ID == "ELSA-2026-42887" {
 			got = append(got, a)
 		}
 	}
-	if len(got) != 2 {
-		t.Fatalf("got %d advisories for ELSA-2026-42887, want 2 (one per major): %+v", len(got), got)
+	if len(got) != 1 {
+		t.Fatalf("got %d advisories for ELSA-2026-42887, want 1: two records under one id overwrite each other in the store: %+v", len(got), got)
 	}
-	for _, a := range got {
-		if len(a.Affected) != 1 {
-			t.Fatalf("advisory %+v has %d Affected entries, want exactly 1 (a flat parse would cross-assign a second)", a, len(a.Affected))
-		}
+	if len(got[0].Affected) != 2 {
+		t.Fatalf("advisory %+v has %d Affected entries, want exactly 2, one per major (a flat parse would cross-assign more)", got[0], len(got[0].Affected))
 	}
 	a8, ok8 := findAffectedAmong(got, "Oracle Linux:8", "java-17-openjdk")
 	a9, ok9 := findAffectedAmong(got, "Oracle Linux:9", "java-17-openjdk")

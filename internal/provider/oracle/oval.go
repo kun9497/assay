@@ -1153,11 +1153,21 @@ func sameEvents(a, b []advisory.Event) bool {
 	return true
 }
 
-// normalize turns every resolved definition into advisory.Advisory records,
-// one per (definition, major) that still has at least one package left after
-// dropAmbiguous -- the shape D74 calls for so each record's Affected list is
-// homogeneous in ecosystem, the same property every other provider's
-// single-Advisory-per-record shape gets for free. D81 adds a per-stream
+// normalize turns every resolved definition into ONE advisory.Advisory
+// carrying the entries of every major that still has a package left after
+// dropAmbiguous.
+//
+// D74 emitted one record per (definition, major), all under the ELSA's own
+// id, so each record's Affected list was homogeneous in ecosystem. The store
+// keys records by id and the last one written wins (D90), so an ELSA
+// covering OL8 and OL9 kept its OL9 record alone while the index still
+// pointed OL8's packages at it: looked up, filtered on ecosystem, nothing
+// left, no finding and no skip. Measured on the live archive 2026-11-20: 759
+// ids emitted more than once, 841 records overwritten, 4,838 affected
+// entries unreachable (QA 2026-11-20). Nothing at record level differs
+// between two majors of one ELSA -- id, CVEs, title and severity are the
+// definition's -- so the entries are joined, the shape Red Hat's records
+// have always had. D81 adds a per-stream
 // inner loop: one (definition, major, package) can now contribute MORE than
 // one Affected entry, one per surviving module stream (plus a stream-less
 // one when the package has an ordinary, non-modular fix too, though 0 were
@@ -1176,14 +1186,15 @@ func normalize(defs []resolvedDef, st *stats) []advisory.Advisory {
 		}
 		sort.Ints(majors)
 
+		var affected []advisory.Affected
 		for _, major := range majors {
+			before := len(affected)
 			pkgNames := make([]string, 0, len(d.perMajor[major]))
 			for name := range d.perMajor[major] {
 				pkgNames = append(pkgNames, name)
 			}
 			sort.Strings(pkgNames)
 
-			var affected []advisory.Affected
 			for _, name := range pkgNames {
 				streamsOf := d.perMajor[major][name]
 				streamKeys := make([]string, 0, len(streamsOf))
@@ -1247,23 +1258,27 @@ func normalize(defs []resolvedDef, st *stats) []advisory.Advisory {
 					affected = append(affected, aff)
 				}
 			}
-			if len(affected) == 0 {
+			// Counted per (definition, major), as it always was: a major
+			// whose every package was dropped is the unit the number names.
+			if len(affected) == before {
 				st.SkippedNoPackages++
-				continue
 			}
-			out = append(out, advisory.Advisory{
-				ID:       d.id,
-				Database: d.database,
-				Related:  d.cves,
-				Source:   SourceName,
-				Kind:     advisory.KindVulnerability,
-				Summary:  d.title,
-				Severity: sev,
-				Affected: affected,
-			})
-			st.Advisories++
-			st.Affected += len(affected)
 		}
+		if len(affected) == 0 {
+			continue
+		}
+		out = append(out, advisory.Advisory{
+			ID:       d.id,
+			Database: d.database,
+			Related:  d.cves,
+			Source:   SourceName,
+			Kind:     advisory.KindVulnerability,
+			Summary:  d.title,
+			Severity: sev,
+			Affected: affected,
+		})
+		st.Advisories++
+		st.Affected += len(affected)
 	}
 	st.DistinctModuleStreams = len(streamsSeen)
 	return out
