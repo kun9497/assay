@@ -58,6 +58,14 @@
 - Packagist와 crates.io 패키지 이름을 대소문자 구분 없이 매칭합니다. lockfile은 소문자 이름을
   싣고 일부 advisory는 대문자로 등록되어 있어(`KnpLabs/knp-snappy`, `SurrealDB`), 그 패키지들이
   취약점 없음으로 보고됐습니다. 이 버전부터 빌드한 데이터베이스에 적용됩니다.
+- 디렉터리 스캔: Java 아카이브를 그것이 쓰는 모든 확장자로 읽습니다(`.jar`, `.war` 외에 `.ear`,
+  `.par`, `.sar`, `.nar`, `.hpi`, `.jpi`, `.kar`, `.lpkg`). 디렉터리 안의 `.ear`는 지나쳤고, 같은
+  파일을 대상으로 직접 지목하면 읽었습니다.
+- 디렉터리 스캔: `requirements-*.txt`, `requirements_*.txt`, `requirements.*.txt`를
+  `requirements.txt`와 같은 방식으로 읽습니다.
+- 디렉터리 스캔: `pom.xml`, `gradle.lockfile`, 옆이나 위에 lockfile이 없는 `package.json`을 읽지
+  않았다고 이유와 함께 stderr에 적습니다. 이 파일들은 읽지 않으며 exit code에도 영향이 없습니다.
+  전에는 그런 파일이 있다는 말이 어디에도 없었습니다.
 
 ## [0.18.6] - 2026-11-19
 

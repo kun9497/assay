@@ -2684,6 +2684,18 @@ evaluated로 셉니다. 이것으로 D69가 닫지 못했던 Maven checkout 경�
 설치된 npm 패키지와 표준 bin 디렉터리의 Go 바이너리 — 를 한 레이어 패스로 읽는다. 이미지 안의 jar와
 이름 대지 않은 경로의 모든 것은 읽지 않은 채 공개된다.
 
+**개정 (QA 2026-11-20).** "jar 또는 war"는 확장자 둘이었고, 그것을 묻는 세 곳이 결과적으로 서로
+어긋났다: 디렉터리 워크는 이름으로 `.jar` 와 `.war` 를 맞추고 나머지는 모두 지나쳤으며, 대상으로 직접
+지목된 파일은 내용(ZIP 매직과 `META-INF/` 항목)으로 읽었다. log4j-core 2.14.1 을 담은 `app.ear` 는
+디렉터리 안에서는 깨끗하다고 스캔되었고 직접 지목하면 올바르게 읽혔다. 이제 목록 하나가 셋 모두에
+답한다(`.jar`, `.war`, `.ear`, `.par`, `.sar`, `.nar`, `.hpi`, `.jpi`, `.kar`, `.lpkg`). 대소문자를
+구분하지 않으며, 워크와 중첩 아카이브와 대상의 이름 검사에 쓰인다. `.rar` 은 뺐다: JCA 어댑터는 ZIP 이
+아닌 RAR 아카이브와 확장자를 공유한다. 같은 패스에서 워크는 `requirements-*.txt`,
+`requirements_*.txt`, `requirements.*.txt` 를 `requirements.txt` 처럼 읽고(D38), 알아보지만 리더가 없는
+매니페스트 — `pom.xml`, `gradle.lockfile`, 옆이나 위에 lockfile 이 없는 `package.json` — 를 읽지 않음으로
+stderr 에 이름 붙인다. 이 안내는 불완전성이 아니다(`Unread.Failed` 가 false): 어떤 게이트도 읽지 않고
+JSON `unread[]` 에도 들어가지 않는다. D38 이전에 `requirements.txt` 가 가졌던 지위다.
+
 ---
 
 ### D71 — Rocky Linux, 그리고 RPM계 조사가 확정한 다섯 결정
