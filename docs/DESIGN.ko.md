@@ -56,7 +56,7 @@ finding은 처음 매칭된 하나가 아니라 **모든** 데이터베이스의
 assay가 라우팅하지 않는 배포판을 가진 이미지 — CentOS 7(D50)이나 인식하지 못하는
 `/etc/os-release` — 도 여전히 읽습니다: 그 안의 모든 OS 패키지를 카탈로그화하고 원인
 `coverage`로 미평가 보고합니다. assay가 라우팅은 하지만 데이터베이스에 그 키가 없는
-릴리스도 마찬가지입니다 — Fedora provider가 F43과 F44만 가져오므로 Fedora 42가 그렇습니다.
+릴리스도 마찬가지입니다 — Fedora provider가 F43부터 F45까지만 가져오므로 Fedora 42가 그렇습니다.
 이미지 안에서 그 밖에 평가할 수 있는 것이 전혀 없으면 둘 다 검사한 적 없는 이미지를
 깨끗하다고 보고하는 대신 2를 반환합니다("none of the N component(s) could be evaluated;
 this result cannot be trusted").

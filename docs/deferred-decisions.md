@@ -2336,6 +2336,12 @@ Support is decided per language rather than promised as a category.
 
 Not deferred decisions — traps to handle when the relevant code is written.
 
+**The Fedora release list is kept by hand.** `fedora.DefaultReleases` changes about twice a year
+and nothing compares it with Bodhi; it missed Fedora 45 until QA 2026-11-20. Check it against
+`https://bodhi.fedoraproject.org/releases/` when a Fedora release ships or reaches end of life
+(F43 does on 2026-12-02). Revisit: read the current releases from Bodhi at build time if the list
+is missed again.
+
 **A Windows x64 build was quarantined by AhnLab V3 Lite (2026-11-18).** The release candidate
 built from `3222370` was detected as `Trojan/Win.Generic.C5860390` on a developer machine. An
 independent rebuild on a second hosted runner produced the same SHA-256, so the candidate's

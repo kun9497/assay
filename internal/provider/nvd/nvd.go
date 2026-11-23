@@ -470,7 +470,7 @@ func (p *Provider) ResumeFrom(seed store.Provenance) error {
 // annotateWindow syncs one API window. The int is how many returned records
 // carried no score and were withdrawn (D136).
 func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating) error, withdraw func(cve string) error, since, until time.Time) (store.Provenance, int, error) {
-	var startIndex, total, records, unscored int
+	var startIndex, total, records, unscored, rewinds int
 	var asOf time.Time
 	first := true
 	// A do-while shape: the total is unknown before the first response, so
@@ -504,6 +504,34 @@ func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating
 		page, pageAsOf, err := p.fetchPageRetrying(ctx, startIndex, since, until)
 		if err != nil {
 			return store.Provenance{}, 0, err
+		}
+		// A total that SHRANK since the last page means records left the
+		// window while it was being walked: the end date is pinned, so
+		// nothing enters, but a record NVD modifies mid-walk gets a
+		// lastModified past that end and leaves. If it sat at an offset
+		// already consumed, every later record slid down by one and the
+		// page just fetched began one record too late -- the record that
+		// crossed the cursor was never emitted or withdrawn, the walk
+		// ended clean and the window was recorded as covered (QA
+		// 2026-11-20; a nightly's overlapping windows mostly heal it, a
+		// backfill slice or a reconciliation build does not).
+		//
+		// So the page is not used: the cursor steps back by the shrink and
+		// the page is asked for again. Where the departed record sat is
+		// not knowable, so the step assumes the worst; when it sat ahead of
+		// the cursor instead, the cost is that many records read twice,
+		// which emit and withdraw both absorb.
+		if shrink := total - page.TotalResults; shrink > 0 && startIndex > 0 {
+			rewinds++
+			if rewinds > maxRewinds {
+				return store.Provenance{}, 0, fmt.Errorf(
+					"nvd: totalResults shrank on %d pages of one window (now %d at startIndex %d) - the window will not hold still, refusing to record it as covered",
+					rewinds, page.TotalResults, startIndex)
+			}
+			startIndex = max(0, startIndex-shrink)
+			total = page.TotalResults
+			fmt.Fprintf(p.progress, nlFmt("nvd: totalResults fell by %d mid-walk; stepping back to startIndex %d"), shrink, startIndex)
+			continue
 		}
 		total = page.TotalResults
 		// The earliest page timestamp wins, mirroring OSV's "the oldest
@@ -682,3 +710,8 @@ func sleepCtx(ctx context.Context, d time.Duration) error {
 		return nil
 	}
 }
+
+// maxRewinds bounds how often one window's walk may step back for a
+// shrinking total. A record or two leaving mid-walk is ordinary; a window
+// that shrinks on page after page is not being walked at all.
+const maxRewinds = 50

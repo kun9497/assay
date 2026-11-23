@@ -82,6 +82,13 @@ All notable changes to this project are documented here. The format follows
 - The table, `--explain` and the `not read:` lines on stderr print the target's own text
   (package names, versions, paths, waiver reasons) with control characters spelled out, so an
   SBOM cannot write terminal escape sequences and an image cannot start a line of stderr.
+- Fedora 45 is fetched; its packages were reported not evaluated.
+- Azure Linux 3 scans are no longer refused under `--db-max-age` for CBL-Mariner 2.0's date.
+- Database builds: a 5xx or 429 on the Red Hat or SUSE archive is retried. A build now fails,
+  rather than succeeding with less, when an OSV archive yields nothing for its ecosystem, a
+  Photon major yields no advisory, a Fedora release's pages end more than 2% short of Bodhi's
+  total, or endoflife.date drops a distribution `--fail-on-eol` gates. NVD records are no longer
+  skipped when another record leaves the window during the walk.
 
 ## [0.18.6] - 2026-11-19
 

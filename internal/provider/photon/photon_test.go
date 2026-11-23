@@ -485,3 +485,32 @@ func TestFetch_NameIsStable(t *testing.T) {
 		t.Errorf("Name() = %q, want %q", got, "Photon OS CVE metadata")
 	}
 }
+
+// QA 2026-11-20. The zero guard was across the three files together, while
+// every major was declared covered whatever its own file held: one file
+// answering [] left "Photon OS:4" in the coverage set with nothing under it,
+// and every Photon 4 scan read clean.
+func TestFetch_AMajorThatYieldsNothingIsRefused(t *testing.T) {
+	for name, four := range map[string][]rawRow{
+		"an empty file":          {},
+		"rows that all drop out": {{CVEID: "", Pkg: "krb5", ResVer: "1.0-1.ph4", Status: "Fixed"}},
+		"only not-affected rows": {{CVEID: "CVE-2026-10002", Pkg: "krb5", Status: "Not Affected"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := photonServer(t, map[string][]rawRow{
+				"3.0": {{CVEID: "CVE-2026-10001", Pkg: "krb5", ResVer: "1.20.2-9.ph3", Status: "Fixed"}},
+				"4.0": four,
+				"5.0": {{CVEID: "CVE-2026-99999", Pkg: "curl", ResVer: "8.4.0-2.ph5", Status: "Fixed"}},
+			}, nil)
+			defer srv.Close()
+
+			advisories, _, err := runFetch(t, srv, threeMajors)
+			if err == nil || !strings.Contains(err.Error(), "photon: Photon OS:4 yielded no advisories") {
+				t.Fatalf("err = %v, want Photon OS:4 refused", err)
+			}
+			if len(advisories) != 0 {
+				t.Errorf("%d advisories were emitted before the refusal, want none", len(advisories))
+			}
+		})
+	}
+}

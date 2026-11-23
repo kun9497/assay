@@ -86,6 +86,10 @@ func TestFetch_UnknownTimestampMakesAggregateUnknown(t *testing.T) {
 	body := zipWith(t, map[string]string{
 		"GHSA-a.json": `{"id":"GHSA-a","affected":[{"package":{"name":"x","ecosystem":"Go"},
 			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
+		// One body is served for both archives, so it holds a record of
+		// each: an archive yielding nothing for its own ecosystem is refused.
+		"GHSA-b.json": `{"id":"GHSA-b","affected":[{"package":{"name":"y","ecosystem":"npm"},
+			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/Go/all.zip" {
@@ -288,6 +292,10 @@ func TestFetch_DebianUbuntuRockyAlmaChainguardMinimOSEchoAndAlpaquitaZeroRecords
 func TestFetch_OldestOfTwoDatedTimestampsWins(t *testing.T) {
 	body := zipWith(t, map[string]string{
 		"GHSA-a.json": `{"id":"GHSA-a","affected":[{"package":{"name":"x","ecosystem":"Go"},
+			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
+		// One body is served for both archives, so it holds a record of
+		// each: an archive yielding nothing for its own ecosystem is refused.
+		"GHSA-b.json": `{"id":"GHSA-b","affected":[{"package":{"name":"y","ecosystem":"npm"},
 			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1004,5 +1012,34 @@ func TestFetch_D115_DeclaresEchoRenameOnlyWhenTheSuccessorIsCovered(t *testing.T
 				}
 			}
 		})
+	}
+}
+
+// QA 2026-11-20. The zero-record refusal named the distro families and left
+// the language archives out. Since D110 a key the seed declared and a run
+// did not is carried forward and frozen, so an npm archive that came back
+// holding nothing for npm -- empty, or with its ecosystem respelled -- built
+// and published green while npm stopped receiving advisories.
+func TestFetch_AnArchiveYieldingNothingForItsEcosystemIsRefused(t *testing.T) {
+	goOnly := zipWith(t, map[string]string{
+		"GHSA-a.json": `{"id":"GHSA-a","affected":[{"package":{"name":"x","ecosystem":"Go"},
+			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
+	})
+	respelled := zipWith(t, map[string]string{
+		"GHSA-b.json": `{"id":"GHSA-b","affected":[{"package":{"name":"y","ecosystem":"NPM"},
+			"ranges":[{"type":"SEMVER","events":[{"introduced":"0"}]}]}]}`,
+	})
+	for _, eco := range []string{"npm", "PyPI", "crates.io", "Maven", "RubyGems", "NuGet", "Packagist", "Bitnami", "Debian"} {
+		for name, body := range map[string][]byte{"another ecosystem's records": goOnly, "a respelled key": respelled} {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Last-Modified", "Tue, 29 Jul 2026 00:00:00 GMT")
+				w.Write(body)
+			}))
+			_, err := New([]string{eco}, srv.URL).Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+			srv.Close()
+			if err == nil || !strings.Contains(err.Error(), "fetch "+eco+": archive yielded no "+eco+" records") {
+				t.Errorf("%s, %s: err = %v, want the archive refused", eco, name, err)
+			}
+		}
 	}
 }

@@ -221,6 +221,26 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 				"the feed's shape may have changed or the status/id filters no longer match",
 			st.Records, len(p.majors))
 	}
+	// The same guard per major (QA 2026-11-20). The one above fires only
+	// when the three files TOGETHER yield nothing, while every major was
+	// declared covered whatever its own file held: one file answering []
+	// or null, or with its field names changed, left "Photon OS:4" in the
+	// coverage set with no record under it, and every Photon 4 scan read
+	// clean. amazon, fedora and azurelinux guard per repo, release and
+	// file; this is that guard here.
+	has := map[string]bool{}
+	for _, adv := range advisories {
+		for _, aff := range adv.Affected {
+			has[aff.Ecosystem] = true
+		}
+	}
+	for _, eco := range majorEco {
+		if !has[eco] {
+			return store.Provenance{}, fmt.Errorf(
+				"photon: %s yielded no advisories while other majors did; "+
+					"its file is empty or its shape changed, and declaring it covered would make every scan of it read clean", eco)
+		}
+	}
 	for _, adv := range advisories {
 		if err := emit(adv); err != nil {
 			return store.Provenance{}, err

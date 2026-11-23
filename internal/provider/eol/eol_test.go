@@ -108,6 +108,7 @@ func rowFor(t *testing.T, rows []store.EOLRelease, distroID, release string) sto
 // mapping is NOT the identity function for amzn/ol (their whole reason to be
 // a mandatory static table rather than reading v1's own "aliases").
 func TestFetch_EmitsTypedRowsFromRealShapedCatalog(t *testing.T) {
+	onlySlugs(t, "debian", "amazon-linux", "oracle-linux", "alpine-linux")
 	srv := serveJSON(t, realShapedFixture)
 	defer srv.Close()
 
@@ -355,6 +356,7 @@ func TestFetch_AnHTTPErrorPropagatesAfterRetrying(t *testing.T) {
 // shrunk to 1, the loop has no second attempt left after the first 503 and
 // Fetch returns an error instead of succeeding.
 func TestFetch_RetriesATransientFailureThenSucceeds(t *testing.T) {
+	onlySlugs(t, "debian", "amazon-linux", "oracle-linux", "alpine-linux")
 	defer fetchBackoffForTest()()
 
 	var calls int
@@ -417,5 +419,44 @@ func TestFetch_RefusesAMalformedGeneratedAt(t *testing.T) {
 	p := New(Options{URL: srv.URL})
 	if _, _, err := p.Fetch(context.Background()); err == nil {
 		t.Fatal("Fetch with an unparseable generated_at = nil error, want a refusal")
+	}
+}
+
+// onlySlugs narrows the wanted products to the ones a trimmed fixture
+// carries, for the length of one test: every wanted product must yield a
+// release, and realShapedFixture holds four of the twelve.
+func onlySlugs(t *testing.T, slugs ...string) {
+	t.Helper()
+	orig := wantSlugs
+	narrowed := map[string]string{}
+	for _, s := range slugs {
+		id, ok := orig[s]
+		if !ok {
+			t.Fatalf("%q is not a wanted slug", s)
+		}
+		narrowed[s] = id
+	}
+	wantSlugs = narrowed
+	t.Cleanup(func() { wantSlugs = orig })
+}
+
+// QA 2026-11-20. The coverage guard fired only when all twelve products
+// were gone, so one renamed slug or one emptied product built green, and
+// --fail-on-eol stopped gating that distro: an end-of-life image got a
+// warning and exit 0.
+func TestFetch_RefusesACatalogMissingOneWantedProduct(t *testing.T) {
+	for name, edit := range map[string][2]string{
+		"a renamed slug":            {`{"name": "rhel",`, `{"name": "red-hat-enterprise-linux",`},
+		"a product with no release": {`"releases": [{"name": "rhel-release"`, `"releases": [], "was": [{"name": "rhel-release"`},
+	} {
+		if strings.Count(allSlugsFixture, edit[0]) != 1 {
+			t.Fatalf("%s: the fixture does not hold %q exactly once", name, edit[0])
+		}
+		srv := serveJSON(t, strings.Replace(allSlugsFixture, edit[0], edit[1], 1))
+		rows, _, err := New(Options{URL: srv.URL}).Fetch(context.Background())
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), "returned no release for rhel (of 12 wanted") {
+			t.Errorf("%s: err = %v with %d rows, want the catalog refused for rhel alone", name, err, len(rows))
+		}
 	}
 }

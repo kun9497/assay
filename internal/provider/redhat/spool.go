@@ -62,6 +62,9 @@ func (p *Provider) spool(ctx context.Context, url, name string) (*os.File, error
 		last     error
 	)
 
+	// tried is how many requests were made, for the message: the loop can
+	// stop early on an error that will not get better.
+	tried := archiveAttempts
 	for attempt := 1; attempt <= archiveAttempts; attempt++ {
 		if attempt > 1 {
 			if err := sleepOrDone(ctx, archiveBackoff[min(attempt-2, len(archiveBackoff)-1)]); err != nil {
@@ -116,12 +119,13 @@ func (p *Provider) spool(ctx context.Context, url, name string) (*os.File, error
 			continue
 		}
 		last = rerr
-		if !retryable(rerr, 0) {
+		if !retryable(rerr, statusOf(rerr)) {
+			tried = attempt
 			break
 		}
 	}
 
-	return nil, fmt.Errorf("redhat: read %s: %d attempts: %w", name, archiveAttempts, last)
+	return nil, fmt.Errorf("redhat: read %s: %d attempt(s): %w", name, tried, last)
 }
 
 // download runs one request and returns how many bytes are on disk afterwards
@@ -194,7 +198,7 @@ func (p *Provider) download(ctx context.Context, url string, f *os.File, from in
 			whole = from + resp.ContentLength
 		}
 	default:
-		return from, 0, modified, fmt.Errorf("redhat: fetch %s: %s", url, resp.Status)
+		return from, 0, modified, &statusError{code: resp.StatusCode, msg: fmt.Sprintf("redhat: fetch %s: %s", url, resp.Status)}
 	}
 
 	if _, err := f.Seek(from, io.SeekStart); err != nil {
@@ -208,3 +212,25 @@ func (p *Provider) download(ctx context.Context, url string, f *os.File, from in
 // Last-Modified than the bytes already on disk: the server rebuilt the
 // archive mid-transfer (D135).
 var errArchiveRegenerated = errors.New("archive regenerated during the download")
+
+// statusError is a response the server chose to send with a status the
+// download does not accept. It carries the code so the retry loop can tell
+// a 503 from a 404: formatted into a plain error, as it was until QA
+// 2026-11-20, every status reached retryable() as 0, which is "no response
+// at all" and not retried -- so one 5xx from the CDN failed the night's
+// build on the first request, under a message that claimed four attempts.
+type statusError struct {
+	code int
+	msg  string
+}
+
+func (e *statusError) Error() string { return e.msg }
+
+// statusOf is the HTTP status err carries, 0 when it carries none.
+func statusOf(err error) int {
+	var se *statusError
+	if errors.As(err, &se) {
+		return se.code
+	}
+	return 0
+}

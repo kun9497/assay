@@ -60,7 +60,7 @@ this, 14 verdicts turned on which record the package index happened to list firs
 An image whose distro assay does not route — CentOS 7 (D50), or an `/etc/os-release` it does
 not recognise — is still read: every OS package in it is cataloged and reported not
 evaluated, with the cause `coverage`. So is a release assay does route but whose key the
-database lacks — Fedora 42, since the Fedora provider fetches F43 and F44 only. When nothing
+database lacks — Fedora 42, since the Fedora provider fetches F43 to F45 only. When nothing
 else in the image could be evaluated, either one exits 2 ("none of the N component(s) could be
 evaluated; this result cannot be trusted") rather than reporting a clean image it never
 checked.

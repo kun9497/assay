@@ -173,6 +173,17 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	var asOf time.Time
 	haveAsOf := false
 	covered := map[string]bool{}
+	// keyAsOf dates each key by the file it came from (D113 revised). The
+	// two files feed two keys and are not equally alive: Microsoft stopped
+	// regenerating cbl-mariner-2.0-oval.xml on 2026-05-06 while the Azure
+	// Linux 3 file is regenerated daily, and the one DataAsOf below is the
+	// older of the two. Without a date of its own "Azure Linux:3" read as
+	// six months stale everywhere a key's date is read: --db-max-age
+	// refused every Azure Linux 3 scan for CBL-Mariner's date, with the
+	// remedy "run assay db update", which could not help (QA 2026-11-20;
+	// amazon and osv were given this on 2026-11-09 and this provider was
+	// left out).
+	keyAsOf := map[string]time.Time{}
 	sources := make([]string, 0, len(p.families))
 
 	for _, fam := range p.families {
@@ -202,6 +213,9 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		for _, a := range advs {
 			for _, aff := range a.Affected {
 				covered[aff.Ecosystem] = true
+				if !fileAsOf.IsZero() {
+					keyAsOf[aff.Ecosystem] = fileAsOf
+				}
 			}
 			if err := emit(a); err != nil {
 				return store.Provenance{}, err
@@ -231,6 +245,7 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		DataAsOf:   asOf,
 		Records:    st.Advisories,
 		Ecosystems: ecos,
+		KeyAsOf:    keyAsOf,
 	}, nil
 }
 

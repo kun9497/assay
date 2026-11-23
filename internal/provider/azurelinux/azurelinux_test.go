@@ -231,3 +231,42 @@ func TestFetch_LeavesNoSpoolFileBehind(t *testing.T) {
 		}
 	}
 }
+
+// QA 2026-11-20 (D113 revised, applied here). The two files feed two keys
+// and are not equally alive: CBL-Mariner 2.0's stopped being regenerated on
+// 2026-05-06 and Azure Linux 3's is regenerated daily. With one DataAsOf for
+// both, the older, "Azure Linux:3" was dated six months stale and
+// --db-max-age refused every scan of it. Each key carries its own file's
+// date.
+func TestFetch_EachKeyIsDatedByItsOwnFile(t *testing.T) {
+	azl3Builder := &ovalBuilder{}
+	azl3Srv := serveDoc(t, azl3Builder.doc("2026-11-19T13:07:55.105138033Z",
+		definitionXML("97575", "python-webob fix", "CVE-2026-54770", "", "Medium",
+			azl3Builder.fixedCriterion("python-webob", "0:1.8.11-1.azl3"))))
+	defer azl3Srv.Close()
+	m2Builder := &ovalBuilder{}
+	m2Srv := serveDoc(t, m2Builder.doc("2026-05-06T13:07:20.548723963Z",
+		definitionXML("13293", "pesign no patch", "CVE-2022-3560", "false", "Medium",
+			m2Builder.lastAffectedCriterion("pesign", "0:0.112-32.cm2"))))
+	defer m2Srv.Close()
+
+	prov, err := New(Options{AZL3URL: azl3Srv.URL, Mariner2URL: m2Srv.URL}).
+		Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	day := func(key string) string { return prov.KeyAsOf[key].UTC().Format("2006-01-02") }
+	if got := day("Azure Linux:3"); got != "2026-11-19" {
+		t.Errorf("Azure Linux:3 dated %s, want its own file's 2026-11-19", got)
+	}
+	if got := day("Azure Linux:2"); got != "2026-05-06" {
+		t.Errorf("Azure Linux:2 dated %s, want its own file's 2026-05-06", got)
+	}
+	if len(prov.KeyAsOf) != 2 {
+		t.Errorf("KeyAsOf = %v, want exactly the two keys", prov.KeyAsOf)
+	}
+	// The provider's one date is still the stalest (D12).
+	if got := prov.DataAsOf.UTC().Format("2006-01-02"); got != "2026-05-06" {
+		t.Errorf("DataAsOf = %s, want the older file's", got)
+	}
+}

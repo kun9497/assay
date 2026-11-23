@@ -2726,6 +2726,15 @@ the rate-limit pause is 20 minutes of a seven-hour unbounded pass — the time i
 2,000-record pages, and no key changes that. And each backfill slice still rebuilds OSV and
 Red Hat (~77 minutes) today; a ratings-only build mode is the next slice, not this one.
 
+**Revised (QA 2026-11-20).** The pinned end stops records entering the window during a walk but
+not leaving it: a record NVD modifies mid-walk moves past the end. If it sat at an offset
+already read, the next page began one record late and the record that crossed the cursor was
+never emitted or withdrawn, under a window recorded as covered. When `totalResults` falls
+between pages, the page just read is discarded and the cursor steps back by the difference;
+a window that shrinks more than 50 times is refused. A departure and an arrival are not
+confused, because nothing can arrive. A record the walk reads twice is written twice, which
+both `emit` and `withdraw` absorb.
+
 ---
 
 ### D66 — A build that re-rates without re-fetching
@@ -3115,6 +3124,14 @@ carries the rest (D71 decision 2).
 
 This closes the buildable RPM family: Rocky, Alma, Amazon, Oracle, Fedora (D71–D75).
 SLES remained behind the ndb rpmdb backend until D76.
+
+**Revised (QA 2026-11-20).** Two gaps. (1) The release list is kept by hand and had fallen
+behind: Fedora 45 was current in Bodhi (with F43 and F44, read 2026-11-23) and was not fetched,
+so its packages were reported not evaluated. F45 is added, and the build log no longer calls the
+list Bodhi's own. Reading Bodhi's release list at build time was not chosen here; the revisit is
+in `docs/deferred-decisions.md`. (2) The walk stopped on each response's own `pages`, so an
+empty or reshaped page ended the release early with the release declared covered. Page 1's
+`total` is now compared with what the walk received, and more than 2% short is refused.
 
 ---
 
@@ -3705,6 +3722,11 @@ mutations of the two comparisons were all caught. D110's carry-forward (`pastEOL
 comment said it made the same comparison, made the same off-by-one, and keyed a release on its
 EOLFrom day as past EOL; it now begins the day after too, held by a test of the build itself.
 
+**Revised (QA 2026-11-20).** The coverage guard fired only when every wanted product was gone.
+One renamed slug, or one product with no releases, built green, and `--fail-on-eol` then
+answered that distribution with a warning and exit 0. Each wanted product must now yield at
+least one release, or the build fails naming it.
+
 ---
 
 ### D88 — Wolfi and Chainguard: one feed, two keys, and the first release-less distro
@@ -4024,6 +4046,10 @@ seeded at **perfect parity** — 22/22/22 and 7/7/7 agree/assay/grype, zero one-
 on either image, the cleanest first differential any provider in this project has posted.
 Independent review mutations 5/5 red (bare-CVE ID, Not-Affected-wins, EOL reshape prefix,
 full-VERSION_ID key, dropped aliases).
+
+**Revised (QA 2026-11-20).** The zero guard was across the three files together while all three
+majors were declared covered. Each major must now yield an advisory or the build fails, before
+anything is emitted.
 
 ---
 
@@ -4667,6 +4693,12 @@ brought them back; the per-key count lines show it either way.
 record that gained the key keeping its own entry) beside the existing row at exactly half,
 which stays live and holds the comparison strict; five mutations.
 
+**Revised (QA 2026-11-20).** "A provider whose fetch failed freezes nothing" did not hold for the
+eight language archives. The OSV zero-record refusal named the distribution families only, so an
+npm archive that came back empty, or with its ecosystem respelled, looked like a retired key and
+was carried forward as frozen under a green build. Every fetched archive that yields no record
+for its own ecosystem is now refused.
+
 ---
 
 ### D111 — A scan states what it covered, per key, whether or not it found anything
@@ -4947,6 +4979,11 @@ is core (never closed) and publishes only when a kernel CVE warrants a livepatch
 when measured on 2026-11-09 — so it dates the release and a 168h gate still refuses AL2023
 on a livepatch-quiet week; whether an event-driven core channel should date its release is a
 decision this revision does not take.
+
+**Revised (QA 2026-11-20).** Azure Linux was left out of `KeyAsOf`. Its two files feed two keys,
+and CBL-Mariner 2.0's stopped being regenerated on 2026-05-06 while Azure Linux 3's is daily, so
+`--db-max-age` refused Azure Linux 3 scans for CBL-Mariner's date. Each key now carries its own
+file's date.
 
 ---
 
@@ -6297,6 +6334,11 @@ pre-existing window D129 had, a day at most. When the archive copy is the newer 
 converts to nothing, the delta's record stands until the next build (the inverse of the
 D129 hole, reachable only through a stale cache). A non-zero `ArchiveNewerThanDelta` on a
 nightly is the signal to look.
+
+**Revised (QA 2026-11-20).** The archive download did not retry a 5xx or 429 in either CSAF
+provider: the status was lost in formatting, so one 503 failed the build on the first request
+under a message that claimed four attempts. The status now reaches the retry decision, and the
+message counts the requests made. A 404 is still not retried.
 
 ### D136 — A rating the source withdraws is removed, and the publish guard tolerates exactly that many
 

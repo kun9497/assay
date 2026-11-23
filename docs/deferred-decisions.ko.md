@@ -2250,6 +2250,11 @@ Go가 먼저입니다. 표준 라이브러리 `debug/buildinfo`가 모듈 목록
 
 미룬 결정이 아니라, 해당 코드를 쓸 때 처리해야 할 덫입니다.
 
+**Fedora 릴리스 목록은 손으로 관리된다.** `fedora.DefaultReleases` 는 한 해에 두 번쯤 바뀌는데
+Bodhi 와 비교하는 것이 없다. QA 2026-11-20 까지 Fedora 45 를 놓쳤다. Fedora 릴리스가 나오거나 수명이
+끝날 때(F43 은 2026-12-02) `https://bodhi.fedoraproject.org/releases/` 와 대조할 것. 재검토: 목록을 또
+놓치면 빌드 시점에 Bodhi 에서 현행 릴리스를 읽는다.
+
 **Windows x64 빌드가 AhnLab V3 Lite에 격리된 적이 있다 (2026-11-18).** `3222370`에서 빌드한
 릴리스 후보가 개발자 PC에서 `Trojan/Win.Generic.C5860390`으로 탐지됐습니다. 두 번째 호스팅 러너에서
 독립적으로 다시 빌드한 결과가 같은 SHA-256이었으므로, 후보의 바이트는 그 커밋과

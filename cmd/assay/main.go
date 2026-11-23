@@ -284,8 +284,8 @@ Environment (db build only):
                         REDHAT_ENABLE=0 does.
                         Set this to 0 for a local build that does not scan
                         Oracle Linux.
-  FEDORA_ENABLE=0       Skip Fedora's Bodhi updates feed (F43 and F44, its
-                        current stable releases). ON BY DEFAULT (D75), for
+  FEDORA_ENABLE=0       Skip Fedora's Bodhi updates feed (F43, F44 and
+                        F45). ON BY DEFAULT (D75), for
                         the same reason as Red Hat, Amazon Linux and Oracle
                         Linux: the published artifact carries it, so a build
                         without it produces a narrower database than
