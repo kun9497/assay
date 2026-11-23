@@ -93,7 +93,71 @@ func TestOpen_LayoutThatIsNotATie(t *testing.T) {
 	if err != nil || img.Platform.ManifestDigest != oneDigest {
 		t.Fatalf("Open = %v, %v; want the one amd64 image", img, err)
 	}
+	if img, err := Open(context.Background(), "oci-dir:"+dir+"@"+oneDigest, ""); err != nil || img.Platform.ManifestDigest != oneDigest {
+		t.Errorf("one image listed twice, by digest: %v", err)
+	}
 	if _, err := Open(context.Background(), "oci-dir:"+dir+"@latest", ""); err == nil || !strings.Contains(err.Error(), "select one by digest") {
 		t.Errorf("@latest names two entries: err = %v, want a refusal", err)
+	}
+}
+
+// The entry of the layout is the unit of the tie: two different images inside
+// one index are that index's own order, the same image inside two indexes is
+// one image, and a registry index is not a layout.
+func TestOpen_LayoutTieIsBetweenTopLevelEntries(t *testing.T) {
+	setHostPlatform(t, "linux/amd64")
+	one, oneDigest := labelled(t, "1")
+	two, _ := labelled(t, "2")
+	index := func(imgs ...v1.Image) v1.ImageIndex {
+		var idx v1.ImageIndex = empty.Index
+		for _, img := range imgs {
+			p := plat("linux/amd64")
+			idx = mutate.AppendManifests(idx, mutate.IndexAddendum{Add: img, Descriptor: v1.Descriptor{Platform: &p}})
+		}
+		return idx
+	}
+	for name, tc := range map[string]struct {
+		roots []v1.ImageIndex
+		tie   bool
+	}{
+		"two images in one index":                {[]v1.ImageIndex{index(one, two)}, false},
+		"one image in two indexes":               {[]v1.ImageIndex{index(one), index(one, one)}, false},
+		"different images in two indexes":        {[]v1.ImageIndex{index(one), index(two)}, true},
+		"three indexes, two of them one image's": {[]v1.ImageIndex{index(one), index(two), index(two, two)}, true},
+	} {
+		dir := filepath.Join(t.TempDir(), "layout")
+		lp, err := layout.Write(dir, empty.Index)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range tc.roots {
+			if err := lp.AppendIndex(r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		img, err := Open(context.Background(), "oci-dir:"+dir, "")
+		if tc.tie {
+			if err == nil || !strings.Contains(err.Error(), "holds 2 different linux/amd64 images") {
+				t.Errorf("%s: err = %v, want a tie between two images", name, err)
+				continue
+			}
+			// What the refusal names is what the selector takes.
+			d, _ := tc.roots[0].Digest()
+			if !strings.Contains(err.Error(), d.String()) {
+				t.Errorf("%s: %q does not name %s", name, err, d)
+			}
+			if img, err := Open(context.Background(), "oci-dir:"+dir+"@"+d.String(), ""); err != nil || img.Platform.ManifestDigest != oneDigest {
+				t.Errorf("%s: selecting %s: %v", name, d, err)
+			}
+			continue
+		}
+		if err != nil || img.Platform.ManifestDigest != oneDigest {
+			t.Errorf("%s: err = %v, want the first image", name, err)
+		}
+	}
+
+	parent, _ := index(one, two).Digest()
+	if _, choice, err := imageFromIndex(context.Background(), v1Index{idx: index(one, two)}, "registry", parent, plat("linux/amd64"), false); err != nil || choice.ManifestDigest != oneDigest {
+		t.Errorf("a registry index: %v, %v; want its first image", choice, err)
 	}
 }
