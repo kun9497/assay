@@ -89,6 +89,8 @@ All notable changes to this project are documented here. The format follows
   Photon major yields no advisory, a Fedora release's pages end more than 2% short of Bodhi's
   total, or endoflife.date drops a distribution `--fail-on-eol` gates. NVD records are no longer
   skipped when another record leaves the window during the walk.
+- A truncated database is an `error:` with the `assay db update` remedy, exit 2 and the
+  provenance sidecar. It crashed the process with a runtime fault.
 
 ## [0.18.6] - 2026-11-19
 

@@ -5489,6 +5489,12 @@ not affected. Separately, an SBOM file holding anything but whitespace after its
 is refused (`cyclonedx.DecodeOne`, shared with the SPDX reader): two concatenated documents
 were scanned as the first alone while `target.sha256` hashed both.
 
+**Revised (QA 2026-11-20), the truncated database.** "On every exit path" did not hold for a
+database file cut short: bbolt reads through a memory map and checks only its two meta pages, so
+the first page past the end was a Go runtime fault inside `store.Open`, with no error line and no
+sidecar. The file's size is now compared with the extent its meta page records before a bucket is
+read. This catches a short file only; a page overwritten in place is not detected by it.
+
 ---
 
 ### D121 — An image's OS packages carry purls, and a VEX statement that names an image applies only to that image
