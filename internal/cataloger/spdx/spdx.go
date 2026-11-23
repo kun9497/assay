@@ -367,6 +367,13 @@ func catalogPackage(p pkg, relSource pkgmeta.SourcePackage, target *pkgmeta.Targ
 	if len(candidates) > 0 {
 		target.Packages = append(target.Packages, candidates...)
 		stats.Cataloged += len(candidates)
+		// One SPDX package whose purls name several packages is several
+		// components: each is judged on its own. Counted as one, every extra
+		// candidate cancelled a component that was NOT evaluated (the report
+		// derives that number by subtraction), so --fail-on-incomplete passed
+		// over unevaluated packages and the count could go negative (QA
+		// 2026-11-20).
+		stats.Components += len(candidates) - 1
 		return
 	}
 	if anyNoVersion {

@@ -250,7 +250,7 @@ with no stated reason is skipped with a warning rather than honoured. `affected`
 `under_investigation` statements never suppress anything.
 
 ```sh
-assay scan my-image.tar --vex vendor.openvex.json --fail-on high
+assay scan docker-archive:my-image.tar --vex vendor.openvex.json --fail-on high
 ```
 
 ## Reading the results

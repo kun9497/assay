@@ -665,7 +665,7 @@ func closesWindow(e advisory.Event) bool {
 // checked alone: if it reads against itself, the bound is the advisory's
 // defect. The bound is named either way.
 func unreadablePackageVersion(c Comparer, v, role, bound string, err error) error {
-	if _, own := c.Compare(v, v); own == nil {
+	if _, own := c.Compare(v, v); own == nil && !unorderable(c, v) {
 		return withCause(CauseAdvisoryData,
 			fmt.Errorf("the advisory's %s bound %q does not order against this package's version %q: %w",
 				role, bound, v, err))
@@ -673,6 +673,20 @@ func unreadablePackageVersion(c Comparer, v, role, bound string, err error) erro
 	return withCause(CauseTargetVersion,
 		fmt.Errorf("this package's own version %q could not be read, comparing it against the advisory's %s bound %q: %w",
 			v, role, bound, err))
+}
+
+// unorderable reports whether v equals itself and orders against nothing: a
+// Composer dev- branch, which refuses every number. Reading against itself
+// cleared it, so a package installed from a branch blamed the advisory's
+// well-formed bound and --fail-on-incomplete=target did not fire over the
+// target's own version (QA 2026-11-20). Composer only: no other comparer has a
+// version that is valid and has no position.
+func unorderable(c Comparer, v string) bool {
+	if _, ok := c.(Composer); !ok {
+		return false
+	}
+	_, err := c.Compare(v, "1.0.0")
+	return err != nil
 }
 
 // atLeast reports whether v >= bound, resolving the OSV sentinel first.

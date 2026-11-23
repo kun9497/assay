@@ -1557,7 +1557,12 @@ Now:
 - both third-party actions are pinned by commit;
 - cosign's installer already was.
 
-Two things are left, each with its own trigger:
+Since QA 2026-11-20 the release job also names an exact GoReleaser version; `~> v2` had let the
+newest v2 binary run beside the key with no change here.
+
+What is left, each with its own trigger:
+- **GoReleaser's and trivy's binaries are pinned by version, not by a committed checksum** as
+  grype's is. Revisit if either project's release assets are ever replaced in place.
 - **GitHub's own `actions/*`** stay tag-pinned. Revisit when the repository gains a tool that
   keeps SHA pins current, or if GitHub's tags are ever shown to move.
 - **The gate job and the signing job stay one job.** Splitting them would keep the comparison
