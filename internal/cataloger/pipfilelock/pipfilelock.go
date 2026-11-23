@@ -17,12 +17,34 @@ import (
 	"github.com/kun9497/assay/internal/pkgmeta"
 )
 
-// lockDoc is the part of Pipfile.lock this parser reads. "_meta" carries the
-// hash of the Pipfile it was resolved from and names no packages, so it is
-// not declared at all.
-type lockDoc struct {
-	Default map[string]entry `json:"default"`
-	Develop map[string]entry `json:"develop"`
+// lockDoc is a Pipfile.lock: one object per package category, keyed by the
+// category's name, beside "_meta", which carries the hash of the Pipfile it
+// was resolved from and names no packages.
+//
+// The categories are not a fixed pair. pipenv has let a Pipfile declare its
+// own since 2022.10.9 -- a [docs] or [prod] table, installed with
+// `pipenv install --categories` -- and writes each to the lock under its own
+// name. This parser declared "default" and "develop" alone, so every package
+// in any other category was dropped without a count: a vulnerable pin there
+// scanned clean, exit 0 (QA 2026-11-20). Every key but "_meta" is read.
+type lockDoc map[string]json.RawMessage
+
+// metaKey is the one top-level key that is not a package category.
+const metaKey = "_meta"
+
+// categories is the lock's package categories in the order they are read:
+// default, then develop, then every other in name order, so the returned
+// slice does not vary between runs and a package two categories share is
+// attributed as it always was.
+func (d lockDoc) categories() []string {
+	var rest []string
+	for name := range d {
+		if name != metaKey && name != "default" && name != "develop" {
+			rest = append(rest, name)
+		}
+	}
+	sort.Strings(rest)
+	return append([]string{"default", "develop"}, rest...)
 }
 
 // entry is one resolved dependency. Version is absent for dependencies pinned
@@ -60,10 +82,21 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, error) {
 		seen = map[string]bool{}
 	)
 
-	// default before develop, each in sorted key order, so the returned slice
-	// does not vary between runs of the same file - a map range here would
-	// reach the report.
-	for _, section := range []map[string]entry{doc.Default, doc.Develop} {
+	// Each category in sorted key order, so the returned slice does not vary
+	// between runs of the same file - a map range here would reach the
+	// report.
+	for _, category := range doc.categories() {
+		raw, ok := doc[category]
+		if !ok {
+			continue
+		}
+		var section map[string]entry
+		if err := json.Unmarshal(raw, &section); err != nil {
+			// A top-level key that is not an object of packages. Refused
+			// rather than passed over: what it holds was not read, and the
+			// caller reports the file unread instead of a shorter inventory.
+			return nil, cyclonedx.Stats{}, fmt.Errorf("parse %s: category %q: %w", path, category, err)
+		}
 		for _, name := range sortedKeys(section) {
 			e := section[name]
 

@@ -197,3 +197,46 @@ func TestParse_EmptySectionsAreNotAnError(t *testing.T) {
 		t.Errorf("pkgs = %+v, stats = %+v; want nothing", pkgs, stats)
 	}
 }
+
+// QA 2026-11-20. pipenv writes a Pipfile's own categories ([docs], [prod],
+// installed with --categories) to the lock under their own names. Only
+// "default" and "develop" were read, so a pin in any other category was
+// dropped without a count and scanned clean.
+func TestParse_EveryCategoryIsRead(t *testing.T) {
+	path := write(t, `{
+  "_meta": {"hash": {"sha256": "x"}, "pipfile-spec": 6, "requires": {"python_version": "3.12"}},
+  "default": {"default-fixture": {"version": "==1.0.0"}},
+  "develop": {"develop-fixture": {"version": "==2.0.0"}},
+  "prod": {"prod-fixture": {"version": "==4.0.0"}, "unpinned-fixture": {"git": "https://example.test/x.git", "ref": "abc"}},
+  "docs": {"docs-fixture": {"version": "==3.0.0"}, "default-fixture": {"version": "==1.0.0"}}
+}`)
+
+	pkgs, stats, err := Parse(path)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	var got []string
+	for _, p := range pkgs {
+		got = append(got, p.Name+"@"+p.Version)
+	}
+	// default, develop, then the rest by name; the package docs shares with
+	// default is one component; "_meta" is not a category.
+	want := "default-fixture@1.0.0,develop-fixture@2.0.0,docs-fixture@3.0.0,prod-fixture@4.0.0"
+	if strings.Join(got, ",") != want {
+		t.Errorf("packages = %v, want %s", got, want)
+	}
+	if stats.Components != 5 || stats.Cataloged != 4 || stats.SkippedNoVersion != 1 {
+		t.Errorf("stats = %d components, %d cataloged, %d without a version; want 5, 4 and 1 (prod's git pin is counted)",
+			stats.Components, stats.Cataloged, stats.SkippedNoVersion)
+	}
+}
+
+// A top-level key that is not an object of packages was not read, and the
+// file says so rather than returning a shorter inventory.
+func TestParse_ACategoryThatIsNotAnObjectIsRefused(t *testing.T) {
+	path := write(t, `{"default": {"a": {"version": "==1.0.0"}}, "extras": ["b"]}`)
+	_, _, err := Parse(path)
+	if err == nil || !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), `category "extras"`) {
+		t.Fatalf("err = %v, want it to name the file and the category", err)
+	}
+}
