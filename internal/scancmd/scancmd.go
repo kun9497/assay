@@ -570,7 +570,7 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 		// target's to fix, D36) all see it without a second mechanism.
 		for _, u := range unresolved {
 			manifests.Unread = append(manifests.Unread, dirscan.Unread{Path: u.Path, Reason: u.Reason, Failed: true})
-			fmt.Fprintf(stderr, "not read: %s (%s)\n", u.Path, u.Reason)
+			fmt.Fprintf(stderr, "not read: %s (%s)\n", report.Text(u.Path), report.Text(u.Reason))
 		}
 		// D141. The D70 gap, said where a person reading the scan sees it:
 		// before this only the JSON's inventoryScope carried it, and the
@@ -689,10 +689,14 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 		// as its own list so it is not read as a claim that the file went
 		// unread, which is the opposite of what happened.
 		for _, u := range manifests.Unusable {
-			fmt.Fprintf(stderr, "not pinned: %s: %s (%s)\n", u.Path, u.Line, u.Reason)
+			fmt.Fprintf(stderr, "not pinned: %s: %s (%s)\n", report.Text(u.Path), report.Text(u.Line), report.Text(u.Reason))
 		}
 		for _, u := range manifests.Unread {
-			fmt.Fprintf(stderr, "not read: %s (%s)\n", u.Path, u.Reason)
+			// A tar entry's name may hold a newline, and a line of stderr
+			// that begins "error: " is what the provenance sidecar records
+			// as the cause of an exit 2 (QA 2026-11-20): the path is the
+			// image's text, not this program's.
+			fmt.Fprintf(stderr, "not read: %s (%s)\n", report.Text(u.Path), report.Text(u.Reason))
 		}
 	}
 
@@ -887,6 +891,24 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	// no answer needs to know their gate is not doing anything.
 	if opts.FailOnEOL && !eolStatus.Known {
 		fmt.Fprintf(stderr, "warning: EOL unknown: %s\n", eolStatus.Reason)
+	}
+	// D87's rule for the two gates beside it (QA 2026-11-20): a gate the
+	// caller armed that this database cannot answer says so. A database
+	// built with KEV_ENABLE=0 or EPSS_ENABLE=0 holds no such source, no
+	// finding can be KEV-listed or carry a probability, and --fail-on-kev or
+	// --fail-on-epss then passed every scan with nothing on stderr. Gated on
+	// the flag, for the reason the EOL warning is; a warning, as there,
+	// because "no source" is the database's state, not a verdict on the
+	// target, and --db-max-rating-age is the flag that refuses it.
+	if opts.FailOnKEV {
+		if _, ok := m.Ratings[kevSource]; !ok {
+			fmt.Fprintln(stderr, "warning: --fail-on-kev given, but this database carries no KEV catalog, so the gate cannot fire; run `assay db update`, or build with KEV_ENABLE=1")
+		}
+	}
+	if opts.FailOnEPSS != nil {
+		if _, ok := m.Ratings[epssSource]; !ok {
+			fmt.Fprintln(stderr, "warning: --fail-on-epss given, but this database carries no EPSS scores, so the gate cannot fire; run `assay db update`, or build with EPSS_ENABLE=1")
+		}
 	}
 	// D47's debt, paid on stderr so `--output json | jq` stays clean.
 	//
@@ -1330,6 +1352,9 @@ func decodeSBOM(path string, r io.Reader) (pkgmeta.Target, cyclonedx.Stats, erro
 	}
 	t, stats, err := parse(cr)
 	if err == nil {
+		// Drained for the size bound: the readers stop at the end of the
+		// document's JSON value (and refuse anything but whitespace after
+		// it, cyclonedx.DecodeOne), and the decoder has buffered ahead.
 		if _, derr := io.Copy(io.Discard, cr); derr != nil {
 			err = fmt.Errorf("read: %w", derr)
 		}
@@ -2058,3 +2083,11 @@ func redHatFindings(findings []matcher.Finding) bool {
 	}
 	return false
 }
+
+// The rating sources two gates read, as their providers name them in
+// Meta.Ratings (kev.SourceName, epss.SourceName; spelled here because the scan
+// path imports no provider, D14).
+const (
+	kevSource  = "KEV"
+	epssSource = "EPSS"
+)

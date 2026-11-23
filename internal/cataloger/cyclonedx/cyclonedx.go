@@ -7,6 +7,7 @@ package cyclonedx
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -68,9 +69,36 @@ type property struct {
 	Value string `json:"value"`
 }
 
+// ErrTrailingContent is DecodeOne's refusal of a file that holds more than
+// one JSON value.
+var ErrTrailingContent = errors.New("content follows the document's JSON value: a second document or stray bytes that were not read, so this would not be a scan of the whole file")
+
+// DecodeOne decodes the one JSON value an SBOM file is, into v, and refuses
+// anything but whitespace after it.
+//
+// json.Decoder.Decode reads a value and stops. Two documents in one file --
+// two SBOMs concatenated, `>>` where a CI step meant `>` -- were therefore
+// scanned as the first alone: neither parsed nor counted, exit 0, while the
+// provenance record hashed the whole file (QA 2026-11-20). D103 refuses the
+// same shape in a pnpm lockfile. Shared with the SPDX reader, which decodes
+// the same way.
+func DecodeOne(r io.Reader, v any) error {
+	dec := json.NewDecoder(r)
+	if err := dec.Decode(v); err != nil {
+		return err
+	}
+	// Token skips whitespace and reports io.EOF at the end of input; any
+	// other outcome -- a token, or a syntax error on bytes that are not
+	// JSON at all -- is content.
+	if _, err := dec.Token(); err != io.EOF {
+		return ErrTrailingContent
+	}
+	return nil
+}
+
 func Parse(r io.Reader) (pkgmeta.Target, Stats, error) {
 	var doc bom
-	if err := json.NewDecoder(r).Decode(&doc); err != nil {
+	if err := DecodeOne(r, &doc); err != nil {
 		return pkgmeta.Target{}, Stats{}, fmt.Errorf("decode CycloneDX: %w", err)
 	}
 	if doc.BOMFormat != "CycloneDX" {

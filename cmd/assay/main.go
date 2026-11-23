@@ -1352,7 +1352,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		switch {
 		case a == "--fail-on":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf("--fail-on requires a value")
 			}
 			if err := setFailOn(&opts, args[i]); err != nil {
@@ -1383,7 +1383,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		case a == "--db-max-age":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf(
 					"--db-max-age needs a duration, e.g. --db-max-age=48h")
 			}
@@ -1405,7 +1405,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		case a == "--db-max-rating-age":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf(
 					"--db-max-rating-age needs a duration, e.g. --db-max-rating-age=168h")
 			}
@@ -1420,7 +1420,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		// work.
 		case a == "--timeout":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf("--timeout requires a value")
 			}
 			if err := setTimeout(&opts, args[i]); err != nil {
@@ -1436,7 +1436,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		// `--platform <platform>`, and that is the form people copy (D18).
 		case a == "--platform":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf("--platform requires a value")
 			}
 			if err := setPlatform(&opts, args[i]); err != nil {
@@ -1479,7 +1479,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		case a == "--fail-on-epss":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf("--fail-on-epss requires a value")
 			}
 			if err := setFailOnEPSS(&opts, args[i]); err != nil {
@@ -1511,7 +1511,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		case a == "--output":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf("--output requires a value")
 			}
 			if err := setOutput(&opts, args[i]); err != nil {
@@ -1525,7 +1525,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		case a == "--config":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf("--config requires a value")
 			}
 			if err := setConfig(&opts, args[i]); err != nil {
@@ -1542,7 +1542,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		// given, one after another (applyVEX's own doc comment).
 		case a == "--vex":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf("--vex requires a value")
 			}
 			opts.VEXFiles = append(opts.VEXFiles, args[i])
@@ -1555,7 +1555,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		// first one's reader with no record and no error.
 		case a == "--provenance":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf("--provenance requires a value")
 			}
 			if err := setProvenance(&opts, args[i]); err != nil {
@@ -1569,7 +1569,7 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		case a == "--explain":
 			i++
-			if i >= len(args) {
+			if valueMissing(args, i) {
 				return "", scancmd.Options{}, fmt.Errorf("--explain requires a value")
 			}
 			if err := setExplain(&opts, args[i]); err != nil {
@@ -1616,7 +1616,29 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 		return "", scancmd.Options{}, fmt.Errorf(
 			"--explain cannot be combined with --output %s: pick one renderer", opts.Output)
 	}
+	// --provenance writes its file. Named the same as the target it would
+	// overwrite the document being scanned -- `--provenance sbom.json` with
+	// the target forgotten, or typed twice (QA 2026-11-20).
+	if opts.ProvenanceFile != "" && target != "" && filepath.Clean(opts.ProvenanceFile) == filepath.Clean(target) {
+		return "", scancmd.Options{}, fmt.Errorf(
+			"--provenance %s names the scan target itself: the sidecar would overwrite it", opts.ProvenanceFile)
+	}
 	return target, opts, nil
+}
+
+// valueMissing reports whether the flag before args[i] has no value there:
+// the arguments ended, or the next one is another flag.
+//
+// Every valued flag took args[i] whatever it was. For most a swallowed flag
+// then failed downstream -- "--fail-on-incomplete" is not a file, a band or
+// a duration -- but --provenance accepts any path, so
+// `--provenance $OUT --fail-on-incomplete` with OUT empty wrote a sidecar
+// named "--fail-on-incomplete" and ran without the gate: exit 0 where the
+// caller asked for 2 (QA 2026-11-20). `db update --from` already refuses
+// this shape. A value that really begins with "--" is given as
+// --flag=value, which is not refused.
+func valueMissing(args []string, i int) bool {
+	return i >= len(args) || strings.HasPrefix(args[i], "--")
 }
 
 // parseMaxAge reads an age gate's value (--db-max-age, D59; --db-max-rating-age,

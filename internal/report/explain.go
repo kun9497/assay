@@ -38,12 +38,15 @@ import (
 // renderer shows the suppression with its source (D102). The line comes
 // first so nobody reads the explanation as an active finding.
 func Explain(w io.Writer, res matcher.Result, id string) (int, error) {
+	// Matched on the identifiers as stored; each finding is then printed
+	// from a terminal-safe copy (Text): an advisory summary or a package
+	// name is not this program's text.
 	n := 0
 	for _, f := range res.Findings {
 		if !identifiesFinding(f, id) {
 			continue
 		}
-		if err := explainOne(w, f); err != nil {
+		if err := explainOne(w, terminalSafe(f)); err != nil {
 			return n, err
 		}
 		n++
@@ -52,6 +55,7 @@ func Explain(w io.Writer, res matcher.Result, id string) (int, error) {
 		if !identifiesFinding(s.Finding, id) {
 			continue
 		}
+		s = terminalSafe(s)
 		if _, err := fmt.Fprintf(w, "suppressed: not counted toward the verdict (%s: %s)\n", suppressionSource(s), s.Reason); err != nil {
 			return n, err
 		}
