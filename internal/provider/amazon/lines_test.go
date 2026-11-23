@@ -106,3 +106,44 @@ func TestFetch_AL2VersionLinesAreJudgedByTheirOwnRepository(t *testing.T) {
 		t.Errorf("the build log does not say what was narrowed:\n%s", log.String())
 	}
 }
+
+func lineRec(repo int, eco, fixed string) collected {
+	return collected{repo: repo, adv: advisory.Advisory{Affected: []advisory.Affected{{Ecosystem: eco, Name: "x",
+		Ranges: []advisory.Range{{Events: []advisory.Event{{Introduced: "0"}, {Fixed: fixed}}}}}}}}
+}
+
+// Spans that overlap are cut as one, in any order the repositories were read.
+func TestSeparateLines_OverlappingSpansBelow(t *testing.T) {
+	for n := 0; n < 20; n++ { // the spans are held in a map
+		recs := []collected{
+			lineRec(0, linesKey, "9.0-1"),
+			lineRec(1, linesKey, "4.0-1"), lineRec(1, linesKey, "2.0-1"), // [2, 4]
+			lineRec(2, linesKey, "3.0-1"), lineRec(2, linesKey, "5.0-1"), // [3, 5]
+			lineRec(3, linesKey, "3.5-1"),                                // inside both
+			lineRec(4, linesKey, "7.0-1"),                                // apart
+			lineRec(5, linesKey, "1.5-1"),                                // apart, lowest
+		}
+		if _, err := separateLines(recs); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, e := range recs[0].adv.Affected[0].Ranges[0].Events {
+			got = append(got, e.Introduced+e.LastAffected+e.Fixed)
+		}
+		if s := strings.Join(got, " "); s != "0 1.5-1~ 1.5-1^ 2.0-1~ 5.0-1^ 7.0-1~ 7.0-1^ 9.0-1" {
+			t.Fatalf("events %s", s)
+		}
+	}
+}
+
+// Only AL2, and a record a comparison cannot read is an error.
+func TestSeparateLines_Scope(t *testing.T) {
+	recs := []collected{lineRec(0, "Amazon Linux:2023", "9.0-1"), lineRec(1, "Amazon Linux:2023", "2.0-1")}
+	if n, err := separateLines(recs); err != nil || n != 0 || len(recs[0].adv.Affected[0].Ranges[0].Events) != 2 {
+		t.Errorf("AL2023: %d narrowed, %v", n, err)
+	}
+	one := []collected{lineRec(0, linesKey, "9.0-1"), lineRec(0, linesKey, "2.0-1")}
+	if n, err := separateLines(one); err != nil || n != 0 {
+		t.Errorf("one repository: %d narrowed, %v", n, err)
+	}
+}

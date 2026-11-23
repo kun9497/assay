@@ -14,6 +14,10 @@ type collected struct {
 	repo int
 }
 
+// linesKey is the one release this applies to. AL2023's repositories overlap
+// on some names too, and whether those are separate lines was not examined.
+const linesKey = "Amazon Linux:2"
+
 // span is the versions one repository has published fixes for under a name,
 // first to last.
 type span struct{ lo, hi string }
@@ -44,7 +48,7 @@ func separateLines(recs []collected) (narrowed int, err error) {
 	for _, r := range recs {
 		for _, a := range r.adv.Affected {
 			fixed := fixedOf(a)
-			if fixed == "" {
+			if fixed == "" || a.Ecosystem != linesKey {
 				continue
 			}
 			k := key{a.Ecosystem, a.Name}
