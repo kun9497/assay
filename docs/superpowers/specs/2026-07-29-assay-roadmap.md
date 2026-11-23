@@ -5826,6 +5826,9 @@ or not affected — key under a name no installed rpm carries. Pre-existing sinc
 false-negative class of its own and is listed in deferred-decisions (resolved the same day
 by D126).
 
+**Revised (QA 2026-11-20).** An SLE entry holding both a fix and a no-fix statement lost its whole
+mirror. Only the no-fix range is declined now; the fix still crosses to Leap.
+
 ---
 
 ### D126 — A bare SUSE status id is named by its product_id; only a recommended build is named by its purl
@@ -6623,6 +6626,10 @@ the dead-feed hazard above, because endoflife.date is live and a current databas
 forever. Undated data is not called old, and a database with no rows is the "EOL unknown" case.
 Verified at the caller (ten days old warns and exits 0 with clean JSON stdout; two days, no flag,
 no provenance are silent) and at the boundary (seven days silent, seven days and an hour warns).
+
+**Revised (QA 2026-11-20).** A `--ratings-only` build stamps its own `BuiltAt` over its seed's
+advisories, so a chain of them kept the warning quiet at any age. `Meta.AdvisoriesBuiltAt` carries
+the seed's date through such a build and the warning reads it.
 
 ### D140 — A layer download cut mid-stream is retried, three attempts
 
@@ -7730,6 +7737,9 @@ Seven more mutations were run on the review's fixes, and all were caught:
 - -0 restored;
 - High's edge made exclusive;
 - the last v2 taken, or the first.
+
+**Revised (QA 2026-11-20).** Red Hat's reader stores `cvss_v2` and, where no v3 or v4 vector is, the
+`impact` threat as the vendor's word (D71). Documents from before v3 were stored unrated.
 
 ---
 

@@ -1556,11 +1556,9 @@ func TestConvert_ReadsV2AndRedHatsWord(t *testing.T) {
 		{"[" + v3 + "]", threat, "CVSS_V3"},
 	} {
 		d := buildDoc(t, "CVE-2015-1", map[string]string{"BaseOS-9": "cpe:/o:redhat:enterprise_linux:9::baseos"}, []string{"BaseOS-9:openssh-0:8.7p1-38.el9_4.1.x86_64"}, nil)
+		d.Vulnerabilities[0].Scores = nil // buildDoc's own v3 vector
 		if err := json.Unmarshal([]byte(tc.scores), &d.Vulnerabilities[0].Scores); err != nil {
 			t.Fatal(err)
-		}
-		if tc.scores == "[]" {
-			d.Vulnerabilities[0].Scores = nil
 		}
 		if err := json.Unmarshal([]byte(tc.threats), &d.Vulnerabilities[0].Threats); err != nil {
 			t.Fatal(err)

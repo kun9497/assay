@@ -123,6 +123,17 @@ All notable changes to this project are documented here. The format follows
 - `oci-dir:` refuses (exit 2) a layout holding two different images of the platform, and takes
   `oci-dir:<path>@<ref name or digest>` to name one. The first was scanned silently.
 - A Go binary built by Red Hat's toolchain has its standard library evaluated.
+- Red Hat advisories with only a CVSS v2 vector or Red Hat's own word are rated. **`--fail-on` can
+  fire where it did not.** Applies to databases built from this version on.
+- The age warning counts from when the advisories were built, not from a `--ratings-only` rebuild.
+- The table no longer calls a scan clean when a path could not be read, and SARIF's
+  `executionSuccessful` is false for a directory in which nothing could be.
+- A scan root that is a symbolic link or a Windows junction is walked; it exited 2.
+- SPDX `documentDescribes` is read, so a root it names is not a package without a purl (exit 2
+  under `--fail-on-incomplete=target`). A Bitnami package without a version is counted skipped.
+- RubyGems prereleases with a zero before a later letter compare as rubygems does.
+- openSUSE Leap keeps the fix of an SLE entry that also carries a no-fix statement.
+- NVD: a 200 response that is not a CVE page fails the sync instead of ending it as complete.
 - CycloneDX: the order of siblings under `metadata.component` no longer decides whether a listing
   is keyed to its release.
 

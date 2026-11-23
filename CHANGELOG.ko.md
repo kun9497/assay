@@ -119,6 +119,17 @@
   `oci-dir:<경로>@<ref 이름 또는 digest>`로 하나를 지목할 수 있습니다. 전에는 조용히 첫 번째를
   스캔했습니다.
 - Red Hat 툴체인으로 빌드한 Go 바이너리의 표준 라이브러리를 평가합니다.
+- CVSS v2 벡터나 Red Hat 자체 단어만 있는 Red Hat 권고에 등급이 매겨집니다. **전에는 걸리지 않던
+  `--fail-on`이 걸릴 수 있습니다.** 이 버전 이후에 빌드한 데이터베이스부터 적용됩니다.
+- 오래됨 경고는 `--ratings-only` 재빌드가 아니라 권고가 빌드된 때부터 셉니다.
+- 읽지 못한 경로가 있으면 테이블이 깨끗하다고 하지 않고, 아무것도 읽지 못한 디렉터리에서 SARIF의
+  `executionSuccessful`은 false입니다.
+- 스캔 루트가 심볼릭 링크나 Windows junction이어도 순회합니다. 전에는 exit 2였습니다.
+- SPDX `documentDescribes`를 읽으므로 거기 적힌 루트는 purl 없는 패키지가 아닙니다(전에는
+  `--fail-on-incomplete=target`에서 exit 2). 버전 없는 Bitnami 패키지는 건너뛴 것으로 셉니다.
+- 뒤쪽 문자 앞에 0이 있는 RubyGems 프리릴리스를 rubygems와 같게 비교합니다.
+- openSUSE Leap은 수정 없음 진술도 함께 가진 SLE 항목의 수정 버전을 유지합니다.
+- NVD: CVE 페이지가 아닌 200 응답은 완료로 끝내지 않고 동기화를 실패시킵니다.
 - CycloneDX: `metadata.component` 아래 형제의 순서가 목록이 릴리스에 키로 묶이는지를 정하지 않습니다.
 
 ## [0.18.6] - 2026-11-19
