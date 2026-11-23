@@ -18,6 +18,12 @@
   23입니다: `findings[].waived`가 추가됐습니다(추가). 한 errata의 서로 다른 CVE에 대한 VEX
   statement가 순서에 따라 서로를 덮어쓰지 않습니다.
 
+- Amazon Linux 2: 빌드는 그 버전 라인을 발행하는 저장소가 판정합니다(D174). 패치된 core kernel이 kernel
+  5.4, 5.10, 5.15의 권고 367건으로 보고됐고 postgresql, php, ruby도 마찬가지로 다른 라인의 수정 버전을
+  지목했습니다. **권고를 내는 라인에서 Amazon이 다른 라인에서만 고친 CVE는 더 이상 보고되지 않습니다.**
+  권고를 내지 않는 topic(php 7.4, kernel-ng)의 빌드는 보고를 유지합니다. 이 버전 이후에 빌드한
+  데이터베이스부터 적용됩니다.
+
 - CVE가 모두 같은 패키지에 대해 보고된 Ubuntu·Debian 공지(USN, DSA, DLA)는 더 이상 등급 없는 두 번째
   finding이 아니며, 그 finding들에 이름이 적힙니다(D172). **Ubuntu와 Debian에서 finding 수와 unknown 수가
   줄어듭니다.** 보고에서 빠지는 취약점은 없습니다. 남는 공지는 errata처럼 CVE별로 waive되고(D171), 접힌

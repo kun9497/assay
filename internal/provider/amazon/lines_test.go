@@ -119,9 +119,9 @@ func TestSeparateLines_OverlappingSpansBelow(t *testing.T) {
 			lineRec(0, linesKey, "9.0-1"),
 			lineRec(1, linesKey, "4.0-1"), lineRec(1, linesKey, "2.0-1"), // [2, 4]
 			lineRec(2, linesKey, "3.0-1"), lineRec(2, linesKey, "5.0-1"), // [3, 5]
-			lineRec(3, linesKey, "3.5-1"),                                // inside both
-			lineRec(4, linesKey, "7.0-1"),                                // apart
-			lineRec(5, linesKey, "1.5-1"),                                // apart, lowest
+			lineRec(3, linesKey, "3.5-1"), // inside both
+			lineRec(4, linesKey, "7.0-1"), // apart
+			lineRec(5, linesKey, "1.5-1"), // apart, lowest
 		}
 		if _, err := separateLines(recs); err != nil {
 			t.Fatal(err)
