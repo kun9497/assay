@@ -298,7 +298,7 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 	// that reads invocations gets the same summary the table prints, and the
 	// exitSignalling one below is what says whether the run is worth trusting.
 	run.Invocations = []sarifInvocation{{
-		ExecutionSuccessful: sum.Trustworthy(),
+		ExecutionSuccessful: sum.Trustworthy() && !cov.NothingRead,
 		// D87: nil when there is no EOL answer (Properties' own doc
 		// comment), which Go's json package then drops entirely under
 		// sarifInvocation.Properties' own "properties,omitempty" tag — the
@@ -306,7 +306,7 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		// D111's coverage sits beside it (invocationProperties).
 		Properties: invocationProperties(eol, cov),
 		ToolExecutionNotifications: append([]sarifNotification{{
-			Level: summaryLevel(sum),
+			Level: summaryLevelOf(sum, cov),
 			Message: sarifText{Text: fmt.Sprintf(
 				"%d component(s) seen, %d evaluated, %d finding(s), %d not evaluated, "+
 					"%d unknown severity, %d with no fix available (%d will not be fixed)",
@@ -829,4 +829,13 @@ func catalogSkips(cat cyclonedx.Stats) []catalogSkip {
 			fmt.Sprintf("%d package(s) in an unsupported ecosystem were not evaluated", cat.SkippedUnsupportedEcosystem)})
 	}
 	return out
+}
+
+// summaryLevelOf is summaryLevel, and "error" for the directory scan Summary
+// takes for an empty one (Coverage.NothingRead).
+func summaryLevelOf(sum Summary, cov Coverage) string {
+	if cov.NothingRead {
+		return "error"
+	}
+	return summaryLevel(sum)
 }

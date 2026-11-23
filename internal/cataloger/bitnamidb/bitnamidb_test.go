@@ -38,7 +38,7 @@ const realPostgresDoc = `{"SPDXID":"SPDXRef-DOCUMENT","spdxVersion":"SPDX-2.3",
 // unfiltered) would let the Maven pljava entry through too, which the
 // second half of this test catches.
 func TestParseSPDXMarker_BundledLibAlongsideMainApp(t *testing.T) {
-	pkgs, err := ParseSPDXMarker(strings.NewReader(realPostgresDoc), "opt/bitnami/postgresql/.spdx-postgresql.spdx")
+	pkgs, _, err := ParseSPDXMarker(strings.NewReader(realPostgresDoc), "opt/bitnami/postgresql/.spdx-postgresql.spdx")
 	if err != nil {
 		t.Fatalf("ParseSPDXMarker: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestParseSPDXMarker_BundledLibAlongsideMainApp(t *testing.T) {
 }
 
 func TestParseSPDXMarker_MalformedDocument(t *testing.T) {
-	if _, err := ParseSPDXMarker(strings.NewReader("not json"), "opt/bitnami/x/.spdx-x.spdx"); err == nil {
+	if _, _, err := ParseSPDXMarker(strings.NewReader("not json"), "opt/bitnami/x/.spdx-x.spdx"); err == nil {
 		t.Error("ParseSPDXMarker(malformed) = nil error, want one")
 	}
 }

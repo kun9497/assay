@@ -1543,3 +1543,40 @@ func TestConvert_HummingbirdMissingPurlIsCountedNotSilent(t *testing.T) {
 		t.Errorf("SkippedNoPurl = %d, want 1 — a component with no purl leaf must be counted, not silently dropped", st.SkippedNoPurl)
 	}
 }
+
+// QA 2026-11-20. A document from before CVSS v3 was stored unrated.
+func TestConvert_ReadsV2AndRedHatsWord(t *testing.T) {
+	v2 := `{"cvss_v2":{"vectorString":"AV:N/AC:L/Au:N/C:P/I:P/A:P"}}`
+	v3 := `{"cvss_v3":{"vectorString":"CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:H/A:H"}}`
+	threat := `[{"category":"exploit_status","details":"None"},{"category":"impact","details":"Important"}]`
+	for _, tc := range []struct{ scores, threats, want string }{
+		{"[" + v2 + "]", "[]", "CVSS_V2"},
+		{"[" + v2 + "]", threat, "CVSS_V2 VENDOR_WORD=Important"},
+		{"[]", threat, "VENDOR_WORD=Important"},
+		{"[" + v3 + "]", threat, "CVSS_V3"},
+	} {
+		d := buildDoc(t, "CVE-2015-1", map[string]string{"BaseOS-9": "cpe:/o:redhat:enterprise_linux:9::baseos"}, []string{"BaseOS-9:openssh-0:8.7p1-38.el9_4.1.x86_64"}, nil)
+		if err := json.Unmarshal([]byte(tc.scores), &d.Vulnerabilities[0].Scores); err != nil {
+			t.Fatal(err)
+		}
+		if tc.scores == "[]" {
+			d.Vulnerabilities[0].Scores = nil
+		}
+		if err := json.Unmarshal([]byte(tc.threats), &d.Vulnerabilities[0].Threats); err != nil {
+			t.Fatal(err)
+		}
+		var st stats
+		adv, _ := convert(d, &st)
+		var got []string
+		for _, s := range adv.Severity {
+			if s.Type == "VENDOR_WORD" {
+				got = append(got, s.Type+"="+s.Score)
+			} else {
+				got = append(got, s.Type)
+			}
+		}
+		if strings.Join(got, " ") != tc.want {
+			t.Errorf("%s %s: severity %v, want %s", tc.scores, tc.threats, got, tc.want)
+		}
+	}
+}

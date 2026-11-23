@@ -75,7 +75,15 @@ type document struct {
 			// against no data to test with would be the worse trade.
 			GroupIDs []string `json:"group_ids"`
 		} `json:"remediations"`
+		// Threats carries Red Hat's own word (category "impact").
+		Threats []struct {
+			Category string `json:"category"`
+			Details  string `json:"details"`
+		} `json:"threats"`
 		Scores []struct {
+			CVSSv2 struct {
+				VectorString string `json:"vectorString"`
+			} `json:"cvss_v2"`
 			CVSSv3 struct {
 				VectorString string `json:"vectorString"`
 			} `json:"cvss_v3"`
@@ -920,6 +928,23 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 					remedy[k] = map[string]bool{}
 				}
 				remedy[k][r.Category] = true
+			}
+		}
+		// A document from before CVSS v3 carries a v2 vector, Red Hat's word,
+		// or both, and was stored unrated (QA 2026-11-20). The word enters
+		// only where no v3 or v4 vector is, since it would otherwise compete
+		// with the vector (D71); v2 is a fallback by itself (D156).
+		scored := false
+		for _, s := range v.Scores {
+			scored = scored || s.CVSSv3.VectorString != "" || s.CVSSv4.VectorString != ""
+			if s.CVSSv2.VectorString != "" {
+				sev = append(sev, advisory.Severity{Type: "CVSS_V2", Score: s.CVSSv2.VectorString})
+			}
+		}
+		for _, th := range v.Threats {
+			if !scored && th.Category == "impact" && th.Details != "" {
+				sev = append(sev, advisory.Severity{Type: "VENDOR_WORD", Score: th.Details})
+				break
 			}
 		}
 		for _, s := range v.Scores {

@@ -197,3 +197,22 @@ func TestFor_RoutesEveryKeyToItsComparer(t *testing.T) {
 		}
 	}
 }
+
+// QA 2026-11-20. rubygems drops the leftmost zero run that precedes ANY
+// letter; this dropped only one before the first.
+func TestGem_TheZeroRunBeforeALaterLetter(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want int
+	}{
+		{"1.a.0.b", "1.a.b", 0},
+		{"1.0.0.pre.2", "1.pre.2", 0},
+		{"1.0.1.pre", "1.1.pre", -1},
+		// One substitution each: 1.a.0.0.b and 1.a.b.
+		{"1.0.0.a.0.0.b", "1.a.0.0.b", 1},
+	} {
+		if got, err := (Gem{}).Compare(tc.a, tc.b); err != nil || got != tc.want {
+			t.Errorf("Compare(%q, %q) = %d, %v; want %d", tc.a, tc.b, got, err, tc.want)
+		}
+	}
+}

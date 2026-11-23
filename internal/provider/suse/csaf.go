@@ -1276,9 +1276,15 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		// are what this declines. Checked after native-wins so a key the
 		// document lists as both affected and not affected keeps its native
 		// affected entry and is counted there.
+		// Declined is the no-fix range, not the entry: one holding both (a
+		// module product fixed, the Server product affected, folded to one
+		// key) still mirrors its fix (QA 2026-11-20).
 		if sleNoFix && leapNotAffected[productKey{eco: leap, pkg: a.Name}] {
-			st.SkippedLeapNotAffected++
-			continue
+			sleRanges = fixedRangesOf(sleRanges)
+			if len(sleRanges) == 0 {
+				st.SkippedLeapNotAffected++
+				continue
+			}
 		}
 		// D131: a split build's range never crosses (see splitBuild). An
 		// entry with nothing else to offer is not mirrored at all and

@@ -202,6 +202,9 @@ type Coverage struct {
 	Keys           []CoverageRecord
 	Distro         *DistroRecord
 	InventoryScope *InventoryScopeRecord
+	// NothingRead is a directory scan in which no manifest could be read: it
+	// exits 2, and Summary cannot tell it from an empty directory.
+	NothingRead bool
 	// Image is D119's record of which platform an image scan read, carried
 	// here beside InventoryScope because it is the same kind of fact: about
 	// the target, set only by the image branch, nil for every other kind.

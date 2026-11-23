@@ -113,28 +113,24 @@ func gemCanonical(v string) ([]gemSegment, error) {
 		}
 	}
 
-	// Step 2 (prereleases only): drop ONE run of zeros-and-dots sitting
-	// immediately before the FIRST letter, anchored at the string start or
-	// after a dot — upstream's `sub!(/(?<=\.|\A)[0.]+(?=[a-zA-Z])/, "")`.
+	// Step 2 (prereleases only): drop ONE run of zeros-and-dots, the leftmost
+	// that sits immediately before a letter -- not only the first letter (QA
+	// 2026-11-20) -- anchored at the string start or after a dot — upstream's `sub!(/(?<=\.|\A)[0.]+(?=[a-zA-Z])/, "")`.
 	// "1.0.0.pre.2" == "1.pre.2" and "0.beta.1" == "0.0.beta.1" both come
 	// from here. Zeros elsewhere survive: "1.0.1.pre" keeps its 0, and
 	// "1.0.0.a.0.0.b" keeps its interior run (upstream fires each sub at
 	// most once — these scans must not loop).
 	if prerelease {
-		k := strings.IndexFunc(s, isASCIILetter)
-		for i := 0; i < k; i++ {
+		for i := 0; i < len(s); i++ {
 			if i > 0 && s[i-1] != '.' {
 				continue
 			}
-			allRun := i < k
-			for j := i; j < k; j++ {
-				if s[j] != '0' && s[j] != '.' {
-					allRun = false
-					break
-				}
+			j := i
+			for j < len(s) && (s[j] == '0' || s[j] == '.') {
+				j++
 			}
-			if allRun {
-				s = s[:i] + s[k:]
+			if j > i && j < len(s) && isASCIILetter(rune(s[j])) {
+				s = s[:i] + s[j:]
 				break
 			}
 		}

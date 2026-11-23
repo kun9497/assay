@@ -733,6 +733,8 @@ func TestLoadLabels_Refusals(t *testing.T) {
 		want string
 	}{
 		{"duplicate id", func(ls []Label) []Label { ls[1].ID = ls[0].ID; return ls }, "duplicate id"},
+		{"case climbs out", func(ls []Label) []Label { ls[0].Case = "../../x"; return ls }, "is not a plain file name"},
+		{"case names a drive", func(ls []Label) []Label { ls[0].Case = "c:x"; return ls }, "is not a plain file name"},
 		{"bad cve", func(ls []Label) []Label { ls[0].CVE = "GHSA-xxxx"; return ls }, "is not CVE-YYYY-NNNN"},
 		{"bad state", func(ls []Label) []Label { ls[0].Expect.State = "maybe"; return ls }, "want affected or clean"},
 		{"clean with fixed", func(ls []Label) []Label { ls[3].Expect.Fixed = "1.0"; return ls }, "a clean label names a fixed version"},

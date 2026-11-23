@@ -24,3 +24,15 @@ func TestParse_PurlHelpersAreCalled(t *testing.T) {
 		}
 	}
 }
+
+// QA 2026-11-20. documentDescribes is SPDX JSON's shorthand for DESCRIBES: a
+// root named that way is a container, not a package without a purl.
+func TestParse_DocumentDescribesNamesTheRoot(t *testing.T) {
+	doc := `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","documentDescribes":["SPDXRef-root"],"packages":[
+	 {"SPDXID":"SPDXRef-root","name":"img"},
+	 {"SPDXID":"SPDXRef-a","name":"a","externalRefs":[{"referenceCategory":"PACKAGE-MANAGER","referenceType":"purl","referenceLocator":"pkg:npm/a@1.0.0"}]}]}`
+	target, stats, err := Parse(strings.NewReader(doc))
+	if err != nil || len(target.Packages) != 1 || stats.SkippedNoPURL != 0 || stats.Components != 1 {
+		t.Errorf("%d packages, %+v, %v; want the root left out", len(target.Packages), stats, err)
+	}
+}

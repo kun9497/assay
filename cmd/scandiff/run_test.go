@@ -1559,7 +1559,7 @@ func TestRun_Live_AssayExitTwoOnce_RetriedAndTrusted(t *testing.T) {
 	if strings.Contains(stdout.String(), "retry") {
 		t.Errorf("stdout = %q, the retry line is a diagnostic and belongs on stderr", stdout.String())
 	}
-	if n := log.count("a", "scan", "ref-blob-flake", "--output", "json"); n != 2 {
+	if n := log.count("a", "scan", "ref-blob-flake", "--output", "json", "--config", "none"); n != 2 {
 		t.Errorf("assay invoked %d times, want 2 (one attempt, one retry)", n)
 	}
 	if n := log.count("g", "ref-blob-flake", "-o", "json"); n != 1 {
@@ -1596,7 +1596,7 @@ func TestRun_Live_AssayExitTwoTwice_StillError(t *testing.T) {
 	if n := strings.Count(errOut, "retry:"); n != 1 {
 		t.Errorf("stderr has %d retry lines, want 1 (stderr=%q)", n, errOut)
 	}
-	if n := log.count("a", "scan", "ref-blob-dead", "--output", "json"); n != 2 {
+	if n := log.count("a", "scan", "ref-blob-dead", "--output", "json", "--config", "none"); n != 2 {
 		t.Errorf("assay invoked %d times, want exactly 2", n)
 	}
 }
@@ -1625,7 +1625,7 @@ func TestRun_Live_AssayCouldNotRun_NotRetried(t *testing.T) {
 	if strings.Contains(stderr.String(), "retry:") {
 		t.Errorf("stderr = %q, want no retry for a launch failure", stderr.String())
 	}
-	if n := log.count("a", "scan", "ref-launch-fail", "--output", "json"); n != 1 {
+	if n := log.count("a", "scan", "ref-launch-fail", "--output", "json", "--config", "none"); n != 1 {
 		t.Errorf("assay invoked %d times, want 1", n)
 	}
 }
@@ -1652,7 +1652,7 @@ func TestRun_Live_AssayUnexpectedCode_NotRetried(t *testing.T) {
 	if strings.Contains(stderr.String(), "retry:") {
 		t.Errorf("stderr = %q, want no retry for an unexpected exit code", stderr.String())
 	}
-	if n := log.count("a", "scan", "ref-odd-exit", "--output", "json"); n != 1 {
+	if n := log.count("a", "scan", "ref-odd-exit", "--output", "json", "--config", "none"); n != 1 {
 		t.Errorf("assay invoked %d times, want 1", n)
 	}
 }
@@ -1683,7 +1683,7 @@ func TestRun_Live_GrypeHardFailure_NotRetried(t *testing.T) {
 	if n := log.count("g", "ref-grype-down", "-o", "json"); n != 1 {
 		t.Errorf("grype invoked %d times, want 1", n)
 	}
-	if n := log.count("a", "scan", "ref-grype-down", "--output", "json"); n != 1 {
+	if n := log.count("a", "scan", "ref-grype-down", "--output", "json", "--config", "none"); n != 1 {
 		t.Errorf("assay invoked %d times, want 1", n)
 	}
 }
