@@ -6,9 +6,13 @@ package dirscan
 
 import (
 	"io/fs"
+	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
+
+	"github.com/kun9497/assay/internal/source"
 )
 
 // Kind identifies which recognized manifest a Manifest is.
@@ -139,6 +143,11 @@ const maxDepth = 6
 func Walk(root string) ([]Manifest, []Unread, error) {
 	var manifests []Manifest
 	var skipped []Unread
+	// package.json files seen, and the directories holding an npm lockfile:
+	// joined after the walk, since a directory's entries arrive in name
+	// order and the lockfile may come after the package.json it resolves.
+	var packageJSONs []string
+	npmLocked := map[string]bool{}
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -184,7 +193,27 @@ func Walk(root string) ([]Manifest, []Unread, error) {
 			return nil
 		}
 
+		// A manifest past the depth cap is neither read nor noted: the cap
+		// is the prune, and a note about a file beyond it would be a
+		// disclosure the prune itself does not get.
+		if depth(rel) <= maxDepth {
+			slashed := filepath.ToSlash(rel)
+			if reason, known := notReadReasons[d.Name()]; known {
+				skipped = append(skipped, Unread{Path: slashed, Reason: reason})
+			}
+			dir := filepath.ToSlash(filepath.Dir(rel))
+			if d.Name() == "package.json" {
+				packageJSONs = append(packageJSONs, slashed)
+			}
+			if slices.Contains(npmLockNames, d.Name()) {
+				npmLocked[dir] = true
+			}
+		}
+
 		kind, ok := manifestKinds[d.Name()]
+		if !ok && isRequirementsVariant(d.Name()) {
+			kind, ok = KindRequirements, true
+		}
 		if !ok && isJarOrWar(d.Name()) {
 			// The one Kind in this package matched by suffix rather than
 			// exact name: unlike a lockfile, a jar's filename is chosen by
@@ -208,6 +237,12 @@ func Walk(root string) ([]Manifest, []Unread, error) {
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+
+	for _, p := range packageJSONs {
+		if !lockedAbove(npmLocked, path.Dir(p)) {
+			skipped = append(skipped, Unread{Path: p, Reason: packageJSONReason})
+		}
 	}
 
 	sort.Slice(manifests, func(i, j int) bool { return manifests[i].Path < manifests[j].Path })
@@ -239,9 +274,57 @@ func relOrRaw(root, path string) string {
 // a build tool can write "app.WAR" on a case-preserving filesystem, and a
 // checked-out repository's filenames are not under this project's control.
 func isJarOrWar(name string) bool {
-	lower := strings.ToLower(name)
-	return strings.HasSuffix(lower, ".jar") || strings.HasSuffix(lower, ".war")
+	return source.IsJavaArchiveName(name)
 }
+
+// isRequirementsVariant reports whether name is one of the spellings a
+// project splits its requirements file into: requirements-dev.txt,
+// requirements_test.txt, requirements.prod.txt. They are the same format as
+// requirements.txt and are read the same way (D38); only the exact name was
+// recognized, so a pin in requirements-prod.txt was never looked at (QA
+// 2026-11-20). Lower-case as pip's own documentation spells it; the bare
+// name is manifestKinds' entry, not this function's.
+func isRequirementsVariant(name string) bool {
+	rest, ok := strings.CutPrefix(name, "requirements")
+	if !ok || !strings.HasSuffix(rest, ".txt") || len(rest) <= len(".txt") {
+		return false
+	}
+	return rest[0] == '-' || rest[0] == '_' || rest[0] == '.'
+}
+
+// notReadReasons are manifests a directory scan recognizes and does not
+// read, with why. Each states dependencies without stating the versions that
+// were resolved, or in a format this build has no reader for, so there is
+// nothing to place inside an advisory range -- and saying nothing about them
+// read as "this project has no such dependencies" (QA 2026-11-20). They are
+// named on stderr and are not incompleteness (Unread.Failed is false):
+// nothing was looked at and found unreadable, and no flag the caller sets
+// changes what the file states.
+var notReadReasons = map[string]string{
+	"pom.xml":         "a Maven project file: it declares dependencies, not the versions a build resolved; scan the built jar or an SBOM",
+	"gradle.lockfile": "a Gradle lockfile, which this version does not read; scan the built jar or an SBOM",
+}
+
+// lockedAbove reports whether dir or any directory above it, up to the
+// scanned root, holds an npm lockfile. A workspace keeps one lockfile at its
+// root for every package.json beneath it, so "beside" alone would name each
+// member of a monorepo that is in fact resolved.
+func lockedAbove(locked map[string]bool, dir string) bool {
+	for {
+		if locked[dir] {
+			return true
+		}
+		if dir == "." || dir == "/" {
+			return false
+		}
+		dir = path.Dir(dir)
+	}
+}
+
+// npmLockNames are the lockfiles that resolve a package.json beside them.
+var npmLockNames = []string{"package-lock.json", "npm-shrinkwrap.json", "yarn.lock", "pnpm-lock.yaml"}
+
+const packageJSONReason = "no lockfile beside or above it (package-lock.json, npm-shrinkwrap.json, yarn.lock or pnpm-lock.yaml): its ranges resolve to no one version"
 
 // depth counts filepath.Separator occurrences in rel (root-relative,
 // OS-separated). An entry directly in root has depth 0; each additional

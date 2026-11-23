@@ -164,8 +164,7 @@ func looksLikeJar(target string) (isJar, hitLimit bool) {
 		return false, false
 	}
 
-	lower := strings.ToLower(target)
-	if strings.HasSuffix(lower, ".jar") || strings.HasSuffix(lower, ".war") {
+	if IsJavaArchiveName(target) {
 		return true, false
 	}
 
@@ -342,4 +341,35 @@ func hasTopLevelKey(r io.Reader, key string) bool {
 			expectKey = true
 		}
 	}
+}
+
+// javaArchiveSuffixes are the file names a Java archive goes by. All are the
+// one format -- a ZIP with a META-INF/ -- under the name its container or
+// build tool expects: an enterprise archive (.ear), a persistence, service or
+// NiFi archive (.par, .sar, .nar), a Jenkins plugin (.hpi, .jpi), a Karaf
+// archive (.kar) and a Liferay package (.lpkg), beside .jar and .war.
+//
+// Only .jar and .war were known until QA 2026-11-20, and the three places
+// that asked disagreed with each other in effect: a directory walk passed
+// over app.ear in silence while naming the same file as the target read it,
+// through the META-INF/ sniff. An .ear holding log4j-core 2.14.1 scanned
+// clean inside a directory. One list, asked by all three.
+//
+// .rar is left out on purpose: a JCA resource adapter shares the extension
+// with RAR archives, which are not ZIPs, and a name that is usually something
+// else is not a name to route on. One given as the target is still read by
+// its contents.
+var javaArchiveSuffixes = []string{".jar", ".war", ".ear", ".par", ".sar", ".nar", ".hpi", ".jpi", ".kar", ".lpkg"}
+
+// IsJavaArchiveName reports whether name is one a Java archive goes by,
+// case-insensitively: a build tool can write "app.WAR", and an archive's
+// entry name is whatever was zipped.
+func IsJavaArchiveName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, suffix := range javaArchiveSuffixes {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
 }

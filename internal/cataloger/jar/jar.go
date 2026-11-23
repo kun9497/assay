@@ -372,8 +372,7 @@ func isPomProperties(name string) bool {
 // case-preserving filesystem, and the archive's own entry name is whatever
 // was zipped, not something this project controls.
 func isNestedArchive(name string) bool {
-	lower := strings.ToLower(name)
-	return strings.HasSuffix(lower, ".jar") || strings.HasSuffix(lower, ".war")
+	return source.IsJavaArchiveName(name)
 }
 
 // parseProperties reads the Java .properties subset pom.properties uses:
