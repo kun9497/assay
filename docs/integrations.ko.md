@@ -226,6 +226,12 @@ waive된 finding은 **보여지지, 결코 숨겨지지 않습니다**: 리포�
 멈추고 경고하므로, waiver는 눈에 띄지 않게 자신의 정당화보다 오래 살 수
 없습니다.
 
+finding 하나가 여러 CVE를 대표할 수 있습니다: Amazon, Oracle, Rocky, AlmaLinux, Fedora의
+errata는 CVE 여러 개를 한꺼번에 고치며 errata의 id로 한 번 보고됩니다. 그중 CVE '하나'를
+지목한 waiver는 — `.assay.yaml`이든 VEX 문서든 — 그 CVE만 waive합니다(D171). finding은 계속
+보고되고 게이트에도 걸리며, waive된 CVE가 옆에 표시됩니다(JSON의 `waived`). 묶인 CVE가 모두
+waive되면 그때 억제됩니다. 업데이트 전체를 규칙 하나로 waive하려면 errata id를 지목하세요.
+
 waiver가 당신이 아니라 소프트웨어의 '생산자'로부터 온 것이라면, 그것을
 받아 적는 대신 그들의 OpenVEX 문서를 넘기세요: `--vex <path>`(반복 가능)가
 그 문서의 `not_affected`와 `fixed` statement를 같은 방식으로 적용합니다 —

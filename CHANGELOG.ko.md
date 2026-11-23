@@ -9,6 +9,15 @@
 
 ### Changed
 
+- 여러 CVE를 묶은 errata의 CVE 하나를 지목한 waiver가 더 이상 finding 전체를 억제하지 않습니다
+  (D171). ALAS, ELSA, RLSA, ALSA, Bodhi 업데이트는 자신이 고치는 모든 CVE를 대표하는 finding
+  하나인데, 그중 하나에 대한 ignore 규칙이나 VEX statement가 finding을, 그리고 다른 CVE까지
+  verdict에서 빼냈습니다. 이제 그 CVE는 계속 보고되는 finding에 waive된 것으로 표시되고, 묶인
+  CVE가 모두 waive되거나 waiver가 errata id를 지목할 때만 finding이 억제됩니다. **그런 finding을
+  CVE 하나로 waive해 둔 파이프라인에서는 그 finding이 다시 보고됩니다.** JSON `schemaVersion`은
+  23입니다: `findings[].waived`가 추가됐습니다(추가). 한 errata의 서로 다른 CVE에 대한 VEX
+  statement가 순서에 따라 서로를 덮어쓰지 않습니다.
+
 - `assay db update`가 이미 설치된 데이터베이스보다 먼저 빌드된 아티팩트를 exit 2로 거부하고
   설치된 데이터베이스를 그대로 둡니다(D169). 서명에는 만료가 없어서, 오래된 아티팩트를 내주는
   레지스트리나 미러가 더 새로운 데이터베이스를 exit 0으로 교체할 수 있었습니다. 의도적으로

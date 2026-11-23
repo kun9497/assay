@@ -9,6 +9,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- A waiver naming one CVE of an errata that bundles several no longer suppresses the whole
+  finding (D171). An ALAS, ELSA, RLSA, ALSA or Bodhi update is one finding standing for every
+  CVE it fixes; an ignore rule or VEX statement for one of them used to remove the finding,
+  and the other CVEs with it, from the verdict. That CVE is now listed as waived on a finding
+  that stays reported, and the finding is suppressed only when every bundled CVE is waived or
+  a waiver names the errata id. **A pipeline that waived such a finding by one CVE will see it
+  reported again.** JSON `schemaVersion` is 23: `findings[].waived` is added (additive). VEX
+  statements about different CVEs of one errata no longer override each other by order.
+
 - `assay db update` refuses an artifact built before the database already installed, with
   exit 2 and the installed database left in place (D169). A signature does not expire, so a
   registry or mirror serving an old artifact used to replace a newer database with exit 0.
