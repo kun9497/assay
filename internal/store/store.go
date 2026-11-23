@@ -178,6 +178,10 @@ type Meta struct {
 	// fresh Meta — a built database therefore never carries one, even when
 	// its advisories were file-copied from a pulled seed (D66).
 	Artifact *ArtifactRecord `json:"artifact,omitempty"`
+	// Digests is the sha256 of each data bucket's entries as the build left
+	// them, by bucket name (D173, Verify). Empty on a database built before
+	// it. Additive Meta JSON, so no schema bump (the D87 precedent).
+	Digests map[string]string `json:"digests,omitempty"`
 	// Ecosystems is the union of every provider's coverage, sorted (D20).
 	//
 	// It exists so a lookup that finds nothing can be told apart from a lookup

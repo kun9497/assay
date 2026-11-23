@@ -127,7 +127,7 @@ func readStatusMeta(dbPath string, stderr io.Writer) (store.Meta, bool) {
 	db, err := store.Open(dbPath)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSchemaMismatch) ||
-			errors.Is(err, store.ErrIncomplete) {
+			errors.Is(err, store.ErrIncomplete) || errors.Is(err, store.ErrDamaged) {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			fmt.Fprintln(stderr, "run `assay db update` to download it, or `assay db build` to build it from source")
 			return store.Meta{}, false

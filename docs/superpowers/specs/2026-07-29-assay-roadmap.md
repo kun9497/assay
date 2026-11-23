@@ -9689,6 +9689,30 @@ waiver for one CVE suppressed the notice and the CVEs beside it.
 **Gives up.** A waiver naming a USN id matches nothing once the notice is folded. The id is not
 made a name of the CVE findings, because the same waiver would then suppress them.
 
+### D173 — A database records what it holds, and can be checked against it
+
+**Decision (2026-11-23).** The build stores a sha256 of each data bucket's entries in `Meta.Digests`.
+`assay db verify` reads the whole database and compares (exit 2 when it differs); `assay scan
+--verify-db` does it before scanning. Off by default.
+
+**Why.** bbolt checksums no data page, and nothing re-reads the database after the download is
+verified. Damage on disk makes lookups miss without an error, and the scan reads clean: 2 KB of
+zeros turned 3,000 findings into 80 with exit 0 (QA 2026-11-20). Reading it all costs 10.5 s on a
+3.2 GB database (6.4 million entries, measured 2026-11-23), too much to add to every scan.
+
+**Over the entries, not the file.** `db push` compacts and strips, and `db update` writes the
+artifact record into what it pulled (D127), so a file hash names a file nobody else has. The
+metadata record is not covered for the same reason. `StripEnrichment` re-records the bucket it
+empties. The build pays the same read once. Additive metadata, so no store schema bump.
+
+**A panic or a memory fault while reading is damage.** `Verify` and the first read in `Open` return
+both as `ErrDamaged`; a damaged root page used to crash the process. Lookups during a scan are not
+guarded.
+
+**Gives up.** A database built before this has nothing to compare and is refused by both commands.
+This is a check against corruption, not tampering: whoever can write the file can write the digests.
+The signature (D137) covers the artifact up to its installation.
+
 ---
 
 ## 6. Benchmarking notes

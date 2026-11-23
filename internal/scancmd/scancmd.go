@@ -162,6 +162,10 @@ type Options struct {
 	// ProvenanceFile is --provenance's path (D120): where the sidecar is
 	// written, on every exit Run takes. Empty writes none.
 	ProvenanceFile string
+	// VerifyDB reads the whole database and refuses one whose contents are
+	// not what its build recorded (D173). Off by default: it costs a read of
+	// the file.
+	VerifyDB bool
 	// DBMaxAge refuses a scan against vulnerability data older than this
 	// (D59). Zero disables the check, which is the default: the right
 	// number depends on how the caller runs `db update`, and inventing one
@@ -703,7 +707,7 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	db, err := store.Open(dbPath)
 	if err != nil {
 		if errors.Is(err, store.ErrNotFound) || errors.Is(err, store.ErrSchemaMismatch) ||
-			errors.Is(err, store.ErrIncomplete) {
+			errors.Is(err, store.ErrIncomplete) || errors.Is(err, store.ErrDamaged) {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			fmt.Fprintln(stderr, "run `assay db update` to download it, or `assay db build` to build it from source")
 			return 2
@@ -728,6 +732,14 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	// no second file whose generation could differ. Built here, before any
 	// gate below can refuse the scan.
 	prov.Database = report.NewDatabaseProvenance(m)
+
+	if opts.VerifyDB {
+		if _, err := db.Verify(); err != nil {
+			fmt.Fprintf(stderr, "error: --verify-db: %v\n", err)
+			fmt.Fprintln(stderr, "run `assay db update` to download it again, or `assay db build` to build it from source")
+			return 2
+		}
+	}
 
 	// D59. Before matching, not after: a scan that will be refused for age
 	// should not spend the time, and a summary printed first would be a
