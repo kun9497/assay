@@ -1310,3 +1310,63 @@ func TestAnnotate_FutureUntilIsClampedToNow(t *testing.T) {
 		t.Fatalf("checkpoint=%v, want %v", prov.CoversUntil, now)
 	}
 }
+
+// QA 2026-11-20. A record NVD modifies during the walk leaves the window
+// (its lastModified passes the pinned end). If it sat at an offset already
+// read, every later record slides down one and the next page starts one
+// record late: the record that crossed the cursor was never emitted, and
+// the walk ended clean. The server here holds five records, loses the first
+// after page 1, and serves by offset into what is left -- as NVD does.
+func TestAnnotate_ARecordLeavingTheWindowMidWalkSkipsNoNeighbour(t *testing.T) {
+	rec := func(n int) string {
+		return fmt.Sprintf(`{"cve":{"id":"CVE-2025-%d","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}`, n)
+	}
+	live := []int{1, 2, 3, 4, 5}
+	var requests int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 2 {
+			live = live[1:] // CVE-2025-1 was modified and left the window
+		}
+		start := 0
+		fmt.Sscanf(r.URL.Query().Get("startIndex"), "%d", &start)
+		var recs []string
+		for i := start; i < len(live) && i < start+2; i++ {
+			recs = append(recs, rec(live[i]))
+		}
+		fmt.Fprintf(w, `{"totalResults":%d,"timestamp":"2024-01-01T00:00:00.000","vulnerabilities":[%s]}`, len(live), strings.Join(recs, ","))
+	}))
+	defer srv.Close()
+
+	got := map[string]int{}
+	p := New(Options{BaseURL: srv.URL, PageSize: 2, Pause: durPtr(0)})
+	if _, err := p.Annotate(context.Background(), func(r advisory.Rating) error {
+		got[r.CVE]++
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for n := 1; n <= 5; n++ {
+		if id := fmt.Sprintf("CVE-2025-%d", n); got[id] == 0 {
+			t.Errorf("%s was never emitted: the record that crossed the cursor was skipped (got %v)", id, got)
+		}
+	}
+}
+
+// A window that shrinks on every page is not being walked; it is refused
+// rather than recorded as covered.
+func TestAnnotate_AWindowThatKeepsShrinkingIsRefused(t *testing.T) {
+	total := 2000
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		total--
+		fmt.Fprintf(w, `{"totalResults":%d,"timestamp":"2024-01-01T00:00:00.000","vulnerabilities":[
+		  {"cve":{"id":"CVE-2025-1","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}},
+		  {"cve":{"id":"CVE-2025-2","metrics":{"cvssMetricV31":[{"cvssData":{"vectorString":"CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}}]}}}]}`, total)
+	}))
+	defer srv.Close()
+	p := New(Options{BaseURL: srv.URL, PageSize: 2, Pause: durPtr(0)})
+	_, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+	if err == nil || !strings.Contains(err.Error(), "the window will not hold still") {
+		t.Fatalf("err = %v, want the shrinking window refused", err)
+	}
+}

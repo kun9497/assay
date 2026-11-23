@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/kun9497/assay/internal/provider"
@@ -182,12 +184,16 @@ func (p *Provider) Fetch(ctx context.Context) ([]store.EOLRelease, store.Provena
 
 	var rows []store.EOLRelease
 	matched := 0
+	// releasesOf counts the rows each wanted product yielded, for the
+	// per-product guard below.
+	releasesOf := map[string]int{}
 	for _, prod := range doc.Result {
 		distroID, ok := wantSlugs[prod.Name]
 		if !ok {
 			continue
 		}
 		matched++
+		releasesOf[prod.Name] += len(prod.Releases)
 		eolLabel := strOrEmpty(prod.Labels.EOL)
 		eoesLabel := strOrEmpty(prod.Labels.EOES)
 		for _, rel := range prod.Releases {
@@ -216,6 +222,27 @@ func (p *Provider) Fetch(ctx context.Context) ([]store.EOLRelease, store.Provena
 	if len(rows) == 0 {
 		return nil, store.Provenance{}, fmt.Errorf(
 			"eol: matched 0 of %d wanted distro product(s) -- endoflife.date's shape may have changed", len(wantSlugs))
+	}
+
+	// The same guard per product (QA 2026-11-20). The one above fires only
+	// when every wanted product is gone, so one renamed slug ("rhel" ->
+	// "red-hat-enterprise-linux"), or one product whose releases array
+	// came back empty, built green with the loss visible only as "11 of 12"
+	// on a progress line. At scan time that distro's lookup finds no row,
+	// and an end-of-life image under --fail-on-eol gets a warning and exit
+	// 0 where the published answer was exit 1. `db push` holds no EOL
+	// check, so this is the only place the loss can be refused.
+	var missing []string
+	for slug := range wantSlugs {
+		if releasesOf[slug] == 0 {
+			missing = append(missing, slug)
+		}
+	}
+	if len(missing) > 0 {
+		sort.Strings(missing)
+		return nil, store.Provenance{}, fmt.Errorf(
+			"eol: endoflife.date returned no release for %s (of %d wanted product(s)) -- a slug was renamed or a product emptied, "+
+				"and --fail-on-eol would stop gating that distro", strings.Join(missing, ", "), len(wantSlugs))
 	}
 
 	return rows, store.Provenance{

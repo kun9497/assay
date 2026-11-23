@@ -57,12 +57,15 @@ func Text(s string) string {
 }
 
 func unsafeRune(r rune) bool {
+	// Code points, not the characters themselves: a line separator or a
+	// bidirectional override typed into source is invisible to a reader and
+	// is the kind of byte an editor or a tool loses in transit.
 	switch {
 	case unicode.IsControl(r): // C0, DEL, C1
 		return true
-	case r == ' ', r == ' ': // line and paragraph separators
+	case r == 0x2028, r == 0x2029: // line and paragraph separators
 		return true
-	case r >= '‪' && r <= '‮', r >= '⁦' && r <= '⁩': // bidi overrides and isolates
+	case r >= 0x202a && r <= 0x202e, r >= 0x2066 && r <= 0x2069: // bidi overrides and isolates
 		return true
 	}
 	return false
