@@ -84,6 +84,8 @@
   Bodhi의 total보다 2% 넘게 모자라게 끝나거나, endoflife.date가 `--fail-on-eol`이 게이트하는 배포판을
   빠뜨리면 이제 줄어든 채 성공하지 않고 빌드가 실패합니다. 순회 중 다른 레코드가 창을 벗어나도 NVD
   레코드를 건너뛰지 않습니다.
+- 잘린 데이터베이스는 `assay db update` 안내가 붙은 `error:`와 exit 2, provenance sidecar로
+  처리합니다. 전에는 런타임 fault로 프로세스가 죽었습니다.
 
 ## [0.18.6] - 2026-11-19
 
