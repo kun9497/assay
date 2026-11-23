@@ -315,24 +315,22 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		// the archive's shape changed, not that the distro has no
 		// advisories — and a database that silently has none turns every
 		// later scan of that distro into a clean report at exit 0.
-		if (eco == "Alpine" || eco == "Debian" || eco == "Ubuntu" || eco == "Rocky Linux" ||
-			eco == "AlmaLinux" || eco == "Chainguard" || eco == "Wolfi" ||
-			eco == "MinimOS" || eco == "Echo" ||
-			eco == "Alpaquita" || eco == "BellSoft Hardened Containers" ||
-			eco == "Bitnami" || eco == "CleanStart") && n == 0 {
-			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s:* records", eco, eco)
+		//
+		// Every archive, since QA 2026-11-20. The guard named the distro
+		// families and left the eight language archives out, on the old
+		// ground that `db push` refused an ecosystem that went missing.
+		// D110 removed that ground: a key the seed declared and this run
+		// did not is now carried forward and frozen, so an npm archive
+		// that came back empty, or respelled ("NPM" -- OSV did exactly
+		// this to Echo:PyPi, D115), built and published green while npm
+		// stopped receiving advisories. An archive this provider asked for
+		// and got nothing from is a broken fetch, and a broken fetch is
+		// refused, not frozen. A rename is still survivable: it is
+		// declared (Provenance.Renamed) and the old name is no longer
+		// fetched.
+		if n == 0 {
+			return store.Provenance{}, fmt.Errorf("fetch %s: archive yielded no %s records", eco, eco)
 		}
-		// "Wolfi" and "BellSoft Hardened Containers" above are not dead
-		// weight even though nothing in Ecosystems ever fetches under either
-		// literal name (D88's and D95's own "one feed, two keys" shapes --
-		// Ecosystems' own comments explain why only "Chainguard" and
-		// "Alpaquita" are fetched). QA on this slice constructed a
-		// Provider directly with p.ecosystems = []string{"Wolfi"} and
-		// found this guard silently did not apply to it, because eco is
-		// only ever compared against the names listed and "Wolfi" was
-		// never one of them. Listing both costs nothing today and closes
-		// that gap for any caller that hands Fetch an ecosystems list
-		// this package's own default does not build.
 		prov.Records += n
 		for e := range covered {
 			allCovered[e] = struct{}{}
