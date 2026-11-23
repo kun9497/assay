@@ -291,16 +291,23 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	undatedKeys := map[string]bool{}
 	total := 0
 
-	for _, r := range repos {
+	// Held until every repository is read: whether a range needs narrowing
+	// (separateLines) is a fact about all of them.
+	var recs []collected
+	for n, r := range repos {
 		if err := ctx.Err(); err != nil {
 			return store.Provenance{}, err
+		}
+		hold := func(a advisory.Advisory) error {
+			recs = append(recs, collected{adv: a, repo: n})
+			return nil
 		}
 		// This repo's own share of st.Updates, not the running total: with
 		// up to 45 extras repos now sharing one stats accumulator, the error
 		// below would otherwise report every update seen so far across every
 		// repo, not this one's.
 		updatesBefore := st.Updates
-		kept, repoAsOf, err := p.fetchRepo(ctx, r, emit, &st)
+		kept, repoAsOf, err := p.fetchRepo(ctx, r, hold, &st)
 		if err != nil {
 			if r.Extras {
 				return store.Provenance{}, fmt.Errorf("amazon: extras %s: %w", r.MirrorListURL, err)
@@ -371,6 +378,16 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 			if prev, ok := keyAsOf[r.Ecosystem]; !ok || repoAsOf.Before(prev) {
 				keyAsOf[r.Ecosystem] = repoAsOf
 			}
+		}
+	}
+	narrowed, err := separateLines(recs)
+	if err != nil {
+		return store.Provenance{}, fmt.Errorf("amazon: %w", err)
+	}
+	fmt.Fprintf(p.progress, "amazon: %d package entries narrowed to their own version line (D174)"+string(rune(10)), narrowed)
+	for _, c := range recs {
+		if err := emit(c.adv); err != nil {
+			return store.Provenance{}, err
 		}
 	}
 	if len(keyAsOf) == 0 {
