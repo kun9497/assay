@@ -24,6 +24,10 @@ func TestNormalizeGoVersion(t *testing.T) {
 	}{
 		// The ordinary case.
 		{"go1.26.4", "1.26.4", true},
+		{"go1.22.2 (Red Hat 1.22.2-1.el9)", "1.22.2", true},
+		{"go1.21.13 (Red Hat 1.21.13-4.el9_4) X:strictfipsruntime", "1.21.13", true},
+		{"go1.22.2 (Other 1.22.2-1)", "", false},
+		{"go1.22.2 (Red Hat 1.22.2-1.el9", "", false},
 		// Go's initial release of a major line had no patch component until
 		// 1.21, so "go1.20" is a real toolchain version. The comparer rejects
 		// a two-component core, so without the padding every binary built by

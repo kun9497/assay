@@ -103,6 +103,9 @@ All notable changes to this project are documented here. The format follows
   `--fail-on-incomplete` fires where it was passed over.
 - A Composer package installed from a `dev-` branch is the target's incompleteness, so
   `--fail-on-incomplete=target` fires for it; it was blamed on the advisory.
+- A Go binary built by Red Hat's toolchain has its standard library evaluated.
+- CycloneDX: the order of siblings under `metadata.component` no longer decides whether a listing
+  is keyed to its release.
 
 ## [0.18.6] - 2026-11-19
 
