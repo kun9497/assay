@@ -3649,6 +3649,16 @@ labeled lines below the ratings table, never as rows pretending to be severity s
 JSON carries the typed fields (schema 7), SARIF a properties bag. Live: log4j-core@2.14.1
 draws "2 known-exploited", Log4Shell scores 0.99999, both gates exit 1.
 
+**Revised (QA 2026-11-20).** A database built with `KEV_ENABLE=0` or `EPSS_ENABLE=0` holds no
+such source, so `--fail-on-kev` and `--fail-on-epss` could never fire against it, and nothing
+said so: the gate the caller typed passed every scan. D87, written after this decision, made
+the sibling gate loud ("every no-answer case is loud when the flag asks"). The same rule now
+holds here: with the flag given and the source absent from `Meta.Ratings`, the scan warns on
+stderr that the gate cannot fire. A warning, not exit 2, as for `--fail-on-eol`: the absence is
+the database's state, and `--db-max-rating-age` is the flag that refuses a database without
+ratings. The published artifact was never exposed (`db push` refuses the loss of a source);
+this is a local build's hazard.
+
 ---
 
 ### D87 — end of life is a fact about the target, and the scan now says it
@@ -5426,6 +5436,21 @@ the exit-2 cause but no content identity.
 same record plus a signature and key management; it is decided with the database-signing
 entry in deferred-decisions, not here. A record of a configuration file `--config`
 overrode is not kept: both runs used the same file, so it explains no difference.
+
+**Revised (QA 2026-11-20).** Three defects around the record and the lines it is built from.
+(1) **A valued flag took another flag as its value.** `--provenance $OUT --fail-on-incomplete`
+with `OUT` empty wrote a sidecar named `--fail-on-incomplete` and ran without the gate: exit 0
+where the caller asked for 2. Every valued scan flag now refuses a next argument that begins
+with `--` (as `db update --from` already did); `--flag=value` still carries any value. (2)
+**`--provenance` may not name the scan target**, which it would overwrite. (3) **`run.error`
+could be written by the target.** The record takes the first stderr line beginning `error: `,
+and the `not read:` lines printed a path from the image raw; a tar entry name holding a newline
+started such a line. Paths and reasons on those lines, and every string the table and
+`--explain` print, now go through `report.Text`, which spells out control characters, the
+Unicode line separators, the bidirectional overrides and invalid UTF-8. JSON and SARIF were
+not affected. Separately, an SBOM file holding anything but whitespace after its JSON document
+is refused (`cyclonedx.DecodeOne`, shared with the SPDX reader): two concatenated documents
+were scanned as the first alone while `target.sha256` hashed both.
 
 ---
 

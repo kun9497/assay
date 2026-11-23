@@ -134,6 +134,11 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 	// missing output was silent, and it is the default one.
 	sw := &stickyWriter{w: w}
 	w = sw
+	// Everything printed below is the target's own text -- names, versions,
+	// paths, a waiver's reason -- so it is printed from a copy with terminal
+	// control characters spelled out (Text). The Summary returned at the
+	// end is computed from that copy too: it holds counts, not strings.
+	res, unread, eol = terminalSafe(res), terminalSafe(unread), terminalSafe(eol)
 	// D87: one line, only when the target's distro release is actually EOL
 	// — Line() itself returns ok=false for both "nothing to say" (Known is
 	// false) and "current release" (Known but not EOL), so this is the only

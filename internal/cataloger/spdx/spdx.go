@@ -9,7 +9,6 @@
 package spdx
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"regexp"
@@ -66,7 +65,7 @@ type relationship struct {
 // a variable of that type.
 func Parse(r io.Reader) (pkgmeta.Target, cyclonedx.Stats, error) {
 	var doc document
-	if err := json.NewDecoder(r).Decode(&doc); err != nil {
+	if err := cyclonedx.DecodeOne(r, &doc); err != nil {
 		return pkgmeta.Target{}, cyclonedx.Stats{}, fmt.Errorf("decode SPDX: %w", err)
 	}
 	if doc.SPDXVersion != "SPDX-2.2" && doc.SPDXVersion != "SPDX-2.3" {
