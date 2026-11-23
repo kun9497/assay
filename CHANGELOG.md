@@ -71,6 +71,17 @@ All notable changes to this project are documented here. The format follows
 - Directory scans: `pom.xml`, `gradle.lockfile` and a `package.json` with no lockfile beside
   or above it are named on stderr as not read, with why. They are not read and do not affect
   the exit code; before, nothing said they were there.
+- `--fail-on-kev` and `--fail-on-epss` warn on stderr when the database carries no KEV catalog
+  or no EPSS scores and the gate therefore cannot fire, as `--fail-on-eol` does for its own
+  question. A locally built database with `KEV_ENABLE=0` or `EPSS_ENABLE=0` passed every scan.
+- A valued scan flag no longer takes another flag as its value. `--provenance` followed
+  directly by a gate (an empty shell variable where the path should be) wrote a sidecar named
+  after the gate and ran without it. `--provenance` also refuses to name the scan target.
+- An SBOM file holding content after its JSON document is refused with exit 2. Two documents
+  concatenated into one file were scanned as the first alone.
+- The table, `--explain` and the `not read:` lines on stderr print the target's own text
+  (package names, versions, paths, waiver reasons) with control characters spelled out, so an
+  SBOM cannot write terminal escape sequences and an image cannot start a line of stderr.
 
 ## [0.18.6] - 2026-11-19
 
