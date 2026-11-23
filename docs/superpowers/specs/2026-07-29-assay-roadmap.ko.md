@@ -2336,6 +2336,14 @@ push는 여전히 통과합니다. 그러지 않으면 도구가 첫 발행을 �
 `poetry.lock`을 처음부터 읽어온 것과 같은 부분집합이라 TOML 라이브러리가 필요 없습니다. D63부터
 읽습니다. 여전히 거부하는 것은 pnpm과 yarn berry뿐이고, 의존성 질문인 것도 그 둘뿐입니다.
 
+**개정 (QA 2026-11-20).** "`Pipfile.lock` 을 읽는다"는 그 `default` 와 `develop` 객체를 뜻했고, 이
+결정 당시 pipenv 가 쓰던 것은 그 둘뿐이었다. 2022.10.9 부터 Pipfile 은 자신의 패키지 카테고리(`[docs]`,
+`[prod]`, `--categories` 로 설치)를 선언할 수 있고, 각 카테고리는 lock 에 자기 이름으로 기록된다. 그것들은
+파서의 구조체에 선언되어 있지 않아 `encoding/json` 이 버렸다: 커스텀 카테고리의 취약한 핀이 아무 집계
+없이 깨끗하다고 스캔되었다. 이제 `_meta` 를 뺀 모든 최상위 키를 카테고리로 읽는다 — `default`,
+`develop`, 그다음 나머지를 이름순으로. 패키지 객체가 아닌 키는 인벤토리를 줄이는 대신 (이 결정 자신의
+규칙대로) 파일을 실패시킨다.
+
 ---
 
 ### D62 — crates.io, 그리고 키가 purl 타입과 다른 첫 생태계
@@ -2590,6 +2598,21 @@ stable보다 높고 대문자 STABLE은 dev보다 아래이며, Maven은 BigInte
 Newtonsoft.Json, Packagist 폴드를 거친 DRUPAL-CONTRIB-2017-082, 그리고 Gem 프리릴리스 순서를 통해
 취약 범위 안에서 잡히는 nokogiri의 1.13.0.rc1. SBOM 스캔은 오늘 당장 동작합니다; lockfile
 cataloger(Gemfile.lock, composer.lock, packages.lock.json)는 다음 슬라이스입니다.
+
+**개정 (QA 2026-11-20).** "NuGet ID 는 대소문자를 구분하지 않으므로 소문자화한다"는 Packagist 와
+crates.io 를 그대로 돌려주도록 남겨 두었는데, 그 전제 — 둘은 대소문자를 구분한다 — 는 아무도 측정하지
+않은 것이었다. 구분하지 않는다. Composer 는 소문자 vendor/name 을 요구하고 `composer.lock` 도 그렇게
+기록한다. crates.io 는 기존 이름과 대소문자만 다른 이름을 거부한다. OSV 의 레코드는 이에 대해 일관되지
+않다 — 로컬 데이터베이스에서 Packagist 이름 1,394 개 중 2 개, crates.io 이름 1,581 개 중 5 개가 대문자를
+가진다(KnpLabs/knp-snappy, WWBN/AVideo, SurrealDB, Deno, Tauri, mdBook, Simple-Wayland-HotKey-Daemon).
+그래서 lockfile 자신의 소문자 이름은 그 advisory 들에 닿지 않았다: `knplabs/knp-snappy@1.7.0` 은
+GHSA-vpr4-p6fq-85jc 에 대해 깨끗하다고 스캔되었다. 이제 `NormalizeName` 이 둘 다 소문자화하며, 저장소
+인덱스와 매처의 양쪽 모두에 적용된다. crates.io 의 `-`/`_` 동치는 접지 않는다. crate 하나는 발행된 표기
+하나를 가지며 양쪽이 그것을 싣는다. **npm 은 그대로 둔다:** 같은 증상이 있지만(`Openclaw` 로 등록된
+advisory 에 대한 `openclaw`), npm 레지스트리에는 소문자 이름의 패키지와 별개인 예전 대소문자 혼용
+패키지가 남아 있어서, 접으면 두 패키지가 합쳐진다. **적용 시점**은 이 버전으로 빌드한 데이터베이스부터다:
+인덱스 키는 빌드 시점에 쓰이므로, 이 바이너리와 예전 데이터베이스, 또는 예전 바이너리와 새 데이터베이스의
+조합은 접히지 않은 쪽에서 대문자 이름 일곱 개를 놓친다.
 
 ---
 

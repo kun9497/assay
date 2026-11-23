@@ -2547,6 +2547,15 @@ version are bare quoted scalars — the same subset `poetry.lock` has always bee
 needs no TOML library. It is read as of D63. Only pnpm and yarn berry are still refused, and only
 those two are a dependency question.
 
+**Revised (QA 2026-11-20).** "`Pipfile.lock` is read" meant its `default` and `develop`
+objects, the only two pipenv wrote when this was decided. Since 2022.10.9 a Pipfile may declare
+its own package categories (`[docs]`, `[prod]`, installed with `--categories`), and each is
+written to the lock under its own name. Those were not declared in the parser's struct, so
+`encoding/json` dropped them: a vulnerable pin in a custom category scanned clean with no
+count. Every top-level key but `_meta` is now read as a category — `default`, `develop`, then
+the rest in name order — and one that is not an object of packages fails the file (this
+decision's own rule) rather than shortening the inventory.
+
 ---
 
 ### D62 — crates.io, and the first ecosystem whose key is not its purl type
@@ -2816,6 +2825,23 @@ the NuGet case fold, DRUPAL-CONTRIB-2017-082 through the Packagist fold, and nok
 1.13.0.rc1 caught inside its vulnerable range through Gem prerelease ordering. SBOM scans
 work today; lockfile catalogers (Gemfile.lock, composer.lock, packages.lock.json) are the
 next slice.
+
+**Revised (QA 2026-11-20).** "NuGet is lowercased because NuGet IDs are case-insensitive" left
+Packagist and crates.io returned unchanged, on a premise nobody measured: that they are
+case-sensitive. They are not. Composer requires a lower-case vendor/name and `composer.lock`
+records it that way; crates.io refuses a name that differs from an existing one only by case.
+OSV's records are inconsistent about it — in the local database 2 of 1,394 Packagist names and
+5 of 1,581 crates.io names carry capitals (KnpLabs/knp-snappy, WWBN/AVideo, SurrealDB, Deno,
+Tauri, mdBook, Simple-Wayland-HotKey-Daemon) — so a lockfile's own lower-case name reached
+none of their advisories: `knplabs/knp-snappy@1.7.0` scanned clean against GHSA-vpr4-p6fq-85jc.
+`NormalizeName` now lower-cases both, on the store index and on both sides of the matcher.
+crates.io's `-`/`_` equivalence is not folded; one crate has one published spelling and both
+sides carry it. **npm is left alone:** the same symptom exists (`openclaw` against an advisory
+filed under `Openclaw`), but the npm registry still holds legacy mixed-case packages distinct
+from their lower-case namesakes, so a fold would join two packages. **Takes effect** with a
+database built by this version: the index key is written at build time, so this binary against
+an older database, or an older binary against a newer one, misses the seven capitalised names
+from the side that was not folded.
 
 ---
 
