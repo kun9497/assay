@@ -131,6 +131,19 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 	// list would claim coverage of a release the archive stopped carrying.
 	covered := map[string]bool{}
 
+	// Records carrying a Hummingbird entry are held until the feed has been
+	// read and released below with their epochs restored (hummingbirdHold).
+	// Everything else is emitted as it is converted, as before: the hold is
+	// a few hundred records, not the feed.
+	var hummingbird hummingbirdHold
+	emitNow := emit
+	emit = func(adv advisory.Advisory) error {
+		if hummingbird.take(adv) {
+			return nil
+		}
+		return emitNow(adv)
+	}
+
 	// D135: the archive is downloaded BEFORE the delta is consulted, so every
 	// delta document is fetched after the snapshot it is compared against
 	// and cannot be the older of the two copies -- the race the 2026-10-22
@@ -239,6 +252,10 @@ func (p *Provider) Fetch(ctx context.Context, emit func(advisory.Advisory) error
 		}
 	}
 
+	if err := hummingbird.release(&st, emitNow); err != nil {
+		return store.Provenance{}, err
+	}
+
 	// D20's coverage set, and the guard beside it. A build that produced no
 	// Red Hat records must fail rather than write a database that answers
 	// every RHEL scan with "no advisories for this ecosystem" -- which is
@@ -341,6 +358,8 @@ func (s stats) String() string {
 			"%d products with no CPE, %d whole-product entries naming no package, "+
 			"%d unreadable products, %d Hummingbird components with no readable purl, "+
 			"%d Hummingbird fixed builds carrying an epoch, "+
+			"%d more given the epoch another document states for the same build, "+
+			"%d the one epoch the feed gives the package, %d left epoch-less between two, "+
 			"%d documents with no CVE id, "+
 			"%d unreadable documents; delta: %d changed since the archive, "+
 			"%d fetched, %d already withdrawn, %d yielded a record, "+
@@ -353,7 +372,9 @@ func (s stats) String() string {
 		s.SkippedModule, s.SkippedFlatpak, s.SkippedModuleContext,
 		s.SkippedNonRHEL, s.SkippedELSFixed, s.SkippedImage,
 		s.SkippedNoCPE, s.SkippedWholeProduct, s.SkippedBadProduct, s.SkippedNoPurl,
-		s.HummingbirdFixedWithEpoch, s.SkippedNoCVE, s.SkippedBadDoc,
+		s.HummingbirdFixedWithEpoch, s.HummingbirdEpochFromBuild,
+		s.HummingbirdEpochFromName, s.HummingbirdEpochUnsettled,
+		s.SkippedNoCVE, s.SkippedBadDoc,
 		s.DeltaListed, s.DeltaFetched, s.DeltaGone, s.DeltaAdvisories,
 		s.DeltaRetried, s.DeltaRescued, s.ArchiveSuperseded, s.ArchiveNewerThanDelta)
 }
