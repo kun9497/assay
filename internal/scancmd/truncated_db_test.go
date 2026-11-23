@@ -57,8 +57,7 @@ func TestRun_ADanglingIndexEntryIsExitTwo(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := raw.Update(func(tx *bolt.Tx) error {
-		b := tx.Bucket([]byte("by-id"
-"<advisory ID>"))
+		b := tx.Bucket([]byte("by-id"))
 		var keys [][]byte
 		if err := b.ForEach(func(k, _ []byte) error {
 			keys = append(keys, append([]byte(nil), k...))
