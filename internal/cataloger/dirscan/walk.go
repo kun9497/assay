@@ -6,6 +6,7 @@ package dirscan
 
 import (
 	"io/fs"
+	"os"
 	"path"
 	"path/filepath"
 	"slices"
@@ -148,6 +149,18 @@ func Walk(root string) ([]Manifest, []Unread, error) {
 	// order and the lockfile may come after the package.json it resolves.
 	var packageJSONs []string
 	npmLocked := map[string]bool{}
+
+	// WalkDir does not follow a root that is a link or a Windows junction, so
+	// a scan of one saw a single non-directory entry and reported that it
+	// held no manifest (QA 2026-11-20). Every path recorded is relative to
+	// root, so following it changes none of them.
+	if own, err := os.Lstat(root); err == nil && !own.IsDir() {
+		// A trailing separator, not EvalSymlinks, which does not resolve a
+		// junction: both systems read "link/" as what the link points at.
+		if to, err := os.Stat(root); err == nil && to.IsDir() {
+			root += string(filepath.Separator)
+		}
+	}
 
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

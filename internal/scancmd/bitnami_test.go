@@ -2,6 +2,7 @@ package scancmd
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/kun9497/assay/internal/pkgmeta"
@@ -135,6 +136,21 @@ func TestCatalogFromImage_BitnamiAbsentIsNotAnError(t *testing.T) {
 	for _, p := range target.Packages {
 		if p.Ecosystem == "Bitnami" {
 			t.Errorf("a Bitnami package was catalogued from an image with no /opt/bitnami: %+v", p)
+		}
+	}
+}
+
+// QA 2026-11-20. A marker package whose purl states no version was neither a
+// package nor a counted skip.
+func TestCatalogFromImage_ABitnamiPackageWithoutAVersionIsCounted(t *testing.T) {
+	doc := strings.Replace(bitnamiSPDXDoc("postgresql", "18.6.0-3", "photon-5"), "postgresql@18.6.0-3?", "postgresql?", 1)
+	for body, want := range map[string]int{doc: 1, bitnamiSPDXDoc("postgresql", "18.6.0-3", "photon-5"): 0} {
+		_, stats, _, err := catalogFromImage(context.Background(), "test-image", rpmImage(t, map[string]string{
+			osReleasePath: osReleasePhoton5, "var/lib/rpm/rpmdb.sqlite": fixtureBytes(t, rpmFixture),
+			"opt/bitnami/postgresql/.spdx-postgresql.spdx": body,
+		}))
+		if err != nil || stats.SkippedNoVersion != want {
+			t.Errorf("SkippedNoVersion = %d, %v; want %d", stats.SkippedNoVersion, err, want)
 		}
 	}
 }

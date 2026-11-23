@@ -313,7 +313,7 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		// line, or whose output is truncated, must not read this as safety.
 		fmt.Fprintln(w, "No packages could be evaluated - this is NOT a clean result.")
 
-	case incompleteChecks > 0 || notEvaluated > 0:
+	case incompleteChecks > 0 || notEvaluated > 0 || sum.UnreadManifests > 0:
 		// Nothing found, but not every check ran. Saying "no known
 		// vulnerabilities" would claim a completeness the run did not have.
 		//
@@ -337,6 +337,9 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 			found = fmt.Sprintf("No unwaived vulnerabilities found in %d package(s) (%d suppressed)", evaluated, len(res.Suppressed))
 		}
 		switch {
+		case incompleteChecks == 0 && notEvaluated == 0:
+			// A path that could not be read holds packages nobody counted.
+			fmt.Fprintf(w, "%s, but %d path(s) could not be read - this is NOT a clean result.\n", found, sum.UnreadManifests)
 		case incompleteChecks > 0 && notEvaluated > 0:
 			fmt.Fprintf(w,
 				"%s, but %d package(s) were not checked and %d check(s) could not be completed - this is NOT a clean result.\n",

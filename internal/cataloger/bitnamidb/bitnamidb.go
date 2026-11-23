@@ -48,10 +48,14 @@ import (
 // rather than spdx.Parse's own placeholder "sbom" (which is the right answer
 // for an actual whole-image SBOM scan, but not for one marker file found
 // deep inside an image being catalogued directly).
-func ParseSPDXMarker(r io.Reader, path string) ([]pkgmeta.Package, error) {
-	target, _, err := spdx.Parse(r)
+//
+// The count is the marker's packages whose purl states no version: they name
+// software the image holds and cannot be judged, so they are the caller's to
+// report as skipped (QA 2026-11-20).
+func ParseSPDXMarker(r io.Reader, path string) ([]pkgmeta.Package, int, error) {
+	target, stats, err := spdx.Parse(r)
 	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+		return nil, 0, fmt.Errorf("parse %s: %w", path, err)
 	}
 	var out []pkgmeta.Package
 	for _, p := range target.Packages {
@@ -61,7 +65,7 @@ func ParseSPDXMarker(r io.Reader, path string) ([]pkgmeta.Package, error) {
 		p.Locations = []pkgmeta.Location{{Path: path}}
 		out = append(out, p)
 	}
-	return out, nil
+	return out, stats.SkippedNoVersion, nil
 }
 
 // legacyComponent is the value half of .bitnami_components.json's flat

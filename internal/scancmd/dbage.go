@@ -327,15 +327,19 @@ const staleAfter = 7 * 24 * time.Hour
 // An undated database is not called old: this is a nudge, not a gate, and
 // --db-max-age is where an unknown age is refused (D17's discipline).
 func warnIfStale(m store.Meta, now time.Time, stderr io.Writer) {
-	if m.BuiltAt.IsZero() {
+	built := m.BuiltAt
+	if !m.AdvisoriesBuiltAt.IsZero() {
+		built = m.AdvisoriesBuiltAt
+	}
+	if built.IsZero() {
 		return
 	}
-	age := now.Sub(m.BuiltAt)
+	age := now.Sub(built)
 	if age <= staleAfter {
 		return
 	}
 	fmt.Fprintf(stderr, "warning: this database was built %d days ago (%s); advisories published since are missing\n",
-		int(age.Hours()/24), m.BuiltAt.Format("2006-01-02"))
+		int(age.Hours()/24), built.Format("2006-01-02"))
 	fmt.Fprintln(stderr, "  run `assay db update`, or set --db-max-age to fail a scan on stale data instead")
 }
 

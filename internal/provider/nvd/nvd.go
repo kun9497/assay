@@ -521,19 +521,20 @@ func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating
 		// not knowable, so the step assumes the worst; when it sat ahead of
 		// the cursor instead, the cost is that many records read twice,
 		// which emit and withdraw both absorb.
-		if shrink := total - page.TotalResults; shrink > 0 && startIndex > 0 {
+		pageTotal := *page.TotalResults
+		if shrink := total - pageTotal; shrink > 0 && startIndex > 0 {
 			rewinds++
 			if rewinds > maxRewinds {
 				return store.Provenance{}, 0, fmt.Errorf(
 					"nvd: totalResults shrank on %d pages of one window (now %d at startIndex %d) - the window will not hold still, refusing to record it as covered",
-					rewinds, page.TotalResults, startIndex)
+					rewinds, pageTotal, startIndex)
 			}
 			startIndex = max(0, startIndex-shrink)
-			total = page.TotalResults
+			total = pageTotal
 			fmt.Fprintf(p.progress, nlFmt("nvd: totalResults fell by %d mid-walk; stepping back to startIndex %d"), shrink, startIndex)
 			continue
 		}
-		total = page.TotalResults
+		total = pageTotal
 		// The earliest page timestamp wins, mirroring OSV's "the oldest
 		// upstream wins" (D12): a multi-page sync spans many timestamps, one
 		// per request, and reporting the latest would claim a freshness the
@@ -603,7 +604,9 @@ func (p *Provider) annotateWindow(ctx context.Context, emit func(advisory.Rating
 
 // apiResponse is one page of NVD's CVE 2.0 API.
 type apiResponse struct {
-	TotalResults int `json:"totalResults"`
+	// A pointer, so a 200 that is not a CVE page (an error envelope, {})
+	// is told from one that holds none.
+	TotalResults *int `json:"totalResults"`
 	// Timestamp is when NVD generated this page (D12): the feed's own clock,
 	// not ours. A mirror replaying a stale snapshot today would still carry
 	// an old Timestamp even though we fetched it just now.
@@ -659,6 +662,11 @@ func (p *Provider) fetchPage(ctx context.Context, startIndex int, since, until t
 	var body apiResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return apiResponse{}, time.Time{}, fmt.Errorf("decode nvd response: %w", err)
+	}
+	// Read as an empty page it ended the sync as complete, at page 0 or
+	// mid-walk, under a window recorded as covered (QA 2026-11-20).
+	if body.TotalResults == nil {
+		return apiResponse{}, time.Time{}, fmt.Errorf("nvd: a 200 response without totalResults is not a CVE page")
 	}
 
 	var asOf time.Time

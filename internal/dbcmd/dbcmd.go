@@ -214,6 +214,13 @@ func Update(ctx context.Context, dbPath, seedPath, seedRef string, ratingsOnly b
 		// must see the same coverage `db status` showed against the seed,
 		// not an empty one because no provider ran this time.
 		maps.Copy(meta.Providers, seedMeta.Providers)
+		// And so must their age: BuiltAt is this run's, so a chain of
+		// ratings-only builds kept D139's stale warning quiet over
+		// advisories of any age (QA 2026-11-20).
+		meta.AdvisoriesBuiltAt = seedMeta.AdvisoriesBuiltAt
+		if meta.AdvisoriesBuiltAt.IsZero() {
+			meta.AdvisoriesBuiltAt = seedMeta.BuiltAt
+		}
 		// The file copy carried the seed's enrichment bucket and its EOL
 		// rows' only home is Meta, so a fresh Meta written by SetMeta below
 		// would keep the prose without the provenance vouching for it and

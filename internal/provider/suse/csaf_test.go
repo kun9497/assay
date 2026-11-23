@@ -1870,3 +1870,31 @@ func TestSplitNEVR(t *testing.T) {
 		}
 	}
 }
+
+// QA 2026-11-20. A key holding both a fix (one SLE product) and a no-fix
+// statement (another) lost its whole mirror to a Leap known_not_affected; only
+// the no-fix range is contradicted by it.
+func TestConvert_MirrorsTheFixOfAMixedSLEEntry_DespiteLeapNotAffected(t *testing.T) {
+	d := buildDocWith(t, "CVE-2024-0450",
+		[]string{"SUSE Linux Enterprise Server 15 SP6", "SUSE Linux Enterprise Module for Basesystem 15 SP6", "openSUSE Leap 15.6"},
+		map[string]string{
+			"python311":                   "pkg:rpm/suse/python311@?upstream=python311.src.rpm",
+			"python311-3.11.9-150600.1.7": "pkg:rpm/suse/python311@3.11.9-150600.1.7?upstream=python311-3.11.9-150600.1.7.src.rpm",
+		},
+		[]string{"SUSE Linux Enterprise Module for Basesystem 15 SP6:python311-3.11.9-150600.1.7"},
+		[]string{"SUSE Linux Enterprise Server 15 SP6:python311"},
+		[]string{"openSUSE Leap 15.6:python311"},
+		nil)
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	m, found := affectedByName(adv)["openSUSE Leap:15.6/python311"]
+	if !found || len(m.Ranges) != 1 || len(m.Ranges[0].Events) != 2 || m.Ranges[0].Events[1].Fixed != "3.11.9-150600.1.7" {
+		t.Errorf("mirror = %v %+v, want the fixed range alone", found, m)
+	}
+	if st.SkippedLeapNotAffected != 0 {
+		t.Errorf("SkippedLeapNotAffected = %d, want 0", st.SkippedLeapNotAffected)
+	}
+}

@@ -816,6 +816,7 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 		Keys:           report.CoverageOf(inventory, m, res.Skipped),
 		Distro:         report.DistroOf(inventory.Distro),
 		InventoryScope: scope,
+		NothingRead:    nothingRead(kind, manifests),
 		Image:          image,
 		Provenance:     prov,
 	}
@@ -973,7 +974,7 @@ func runStages(ctx context.Context, dbPath, target string, opts Options, stdout,
 	// a directory's question, and an image whose inventory could not be read
 	// at all already failed in catalogFromImage.
 	if manifests.AnyFailed() {
-		if kind == source.TargetDirectory && len(manifests.Read) == 0 {
+		if nothingRead(kind, manifests) {
 			fmt.Fprintln(stderr,
 				"error: no manifest in this directory could be read; this result cannot be trusted")
 			return 2
@@ -2043,10 +2044,11 @@ func catalogBitnami(ctx context.Context, img *source.Image, exactFiles map[strin
 	var spdxPkgs []pkgmeta.Package
 	for _, name := range source.SortedNames(markerFiles) {
 		f := markerFiles[name]
-		pkgs, err := bitnamidb.ParseSPDXMarker(bytes.NewReader(f.Data), name)
+		pkgs, versionless, err := bitnamidb.ParseSPDXMarker(bytes.NewReader(f.Data), name)
 		if err != nil {
 			return nil, 0, "", fmt.Errorf("parse %s: %w", name, err)
 		}
+		markerLinks += versionless
 		for i := range pkgs {
 			for j := range pkgs[i].Locations {
 				pkgs[i].Locations[j].LayerDigest = f.DiffID
@@ -2106,3 +2108,9 @@ const (
 	kevSource  = "KEV"
 	epssSource = "EPSS"
 )
+
+// nothingRead is the directory scan that exits 2 whatever its flags: something
+// could not be read, and nothing was.
+func nothingRead(kind source.TargetKind, m dirscan.Manifests) bool {
+	return kind == source.TargetDirectory && m.AnyFailed() && len(m.Read) == 0
+}

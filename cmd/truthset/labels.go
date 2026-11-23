@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -162,6 +163,8 @@ func loadLabels(path string) ([]Label, error) {
 			return nil, fmt.Errorf("%s: duplicate id", where)
 		case l.Case == "" || l.Family == "" || l.Name == "" || l.Version == "":
 			return nil, fmt.Errorf("%s: case, family, name and version are all required", where)
+		case !isPlainFileName(l.Case):
+			return nil, fmt.Errorf("%s: case %q is not a plain file name; it names the files the run writes", where, l.Case)
 		case !strings.HasPrefix(l.PURL, "pkg:"):
 			return nil, fmt.Errorf("%s: purl %q must be a pkg: purl carrying the label's version", where, l.PURL)
 		}
@@ -206,4 +209,13 @@ func loadLabels(path string) ([]Label, error) {
 		return out[i].CVE < out[j].CVE
 	})
 	return out, nil
+}
+
+// isPlainFileName is scandiff's rule for a name joined into a path: one path
+// element on every platform.
+func isPlainFileName(name string) bool {
+	if name == "." || name == ".." || strings.ContainsAny(name, `/\:`) {
+		return false
+	}
+	return filepath.Base(name) == name
 }

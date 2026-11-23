@@ -28,7 +28,9 @@ type document struct {
 	SPDXID string `json:"SPDXID"`
 	// DocumentNamespace is the document's own URI identity, carried for the
 	// scan's provenance record (D120).
-	DocumentNamespace string         `json:"documentNamespace"`
+	DocumentNamespace string `json:"documentNamespace"`
+	// DocumentDescribes is SPDX 2.x JSON's shorthand for DESCRIBES.
+	DocumentDescribes []string       `json:"documentDescribes"`
 	Packages          []pkg          `json:"packages"`
 	Relationships     []relationship `json:"relationships"`
 }
@@ -171,6 +173,9 @@ func pseudoPackageShape(p pkg, scratch cyclonedx.Stats) bool {
 
 func describedPackageIDs(doc document) map[string]bool {
 	ids := make(map[string]bool)
+	for _, id := range doc.DocumentDescribes {
+		ids[id] = true
+	}
 	for _, r := range doc.Relationships {
 		if r.RelationshipType == "DESCRIBES" && r.SPDXElementID == doc.SPDXID {
 			ids[r.RelatedSPDXElement] = true

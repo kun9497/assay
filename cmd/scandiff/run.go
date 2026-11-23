@@ -379,7 +379,9 @@ func joinFatal(assayFatal, grypeFatal string) string {
 // which is what run writes to the capture, so a human re-judging the target
 // reads the bytes the verdict came from.
 func runAssay(execScan execFunc, bin string, t Target, stderr io.Writer) (out []byte, fatal string) {
-	args := []string{"scan", t.Ref, "--output", "json"}
+	// --config none: a .assay.yaml in the working directory would waive the
+	// very findings the floors count (QA 2026-11-20).
+	args := []string{"scan", t.Ref, "--output", "json", "--config", "none"}
 	out, code, err := execScan(bin, args...)
 	if err == nil && code == exitError {
 		fmt.Fprintf(stderr, "retry: target=%s assay scan exited 2, retrying once\n", t.Name)

@@ -1370,3 +1370,16 @@ func TestAnnotate_AWindowThatKeepsShrinkingIsRefused(t *testing.T) {
 		t.Fatalf("err = %v, want the shrinking window refused", err)
 	}
 }
+
+// QA 2026-11-20. A 200 that is not a CVE page ended the sync as complete.
+func TestAnnotate_A200ThatIsNotACVEPageIsRefused(t *testing.T) {
+	for _, body := range []string{`{}`, `{"message":"try later"}`, `{"timestamp":"2024-01-01T00:00:00.000"}`} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }))
+		p := New(Options{BaseURL: srv.URL, PageSize: 2, Pause: durPtr(0)})
+		_, err := p.Annotate(context.Background(), func(advisory.Rating) error { return nil })
+		srv.Close()
+		if err == nil || !strings.Contains(err.Error(), "is not a CVE page") {
+			t.Errorf("%s: err = %v, want it refused", body, err)
+		}
+	}
+}

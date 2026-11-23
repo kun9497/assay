@@ -168,6 +168,9 @@ type Meta struct {
 	Schema    int                   `json:"schema"`
 	BuiltAt   time.Time             `json:"built_at"` // when this database was assembled locally
 	Providers map[string]Provenance `json:"providers"`
+	// AdvisoriesBuiltAt is when the advisories were built, where that is not
+	// BuiltAt: a --ratings-only build carries its seed's. Zero otherwise.
+	AdvisoriesBuiltAt time.Time `json:"advisories_built_at,omitzero"`
 	// Artifact is the published artifact this database was pulled from, or
 	// nil for one built locally (D127). Written by `db update` into the
 	// unpacked database before it is installed (Bolt.SetArtifact), so the
