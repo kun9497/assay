@@ -9755,6 +9755,12 @@ below it (0 of 646 cuts). A build from before its line's first fix is in no span
 the lines above. In a gap the window closes with `last_affected`, so no fix is named: the next
 line's first fix is not one for a build under it.
 
+**Two spans meeting at one upstream version are one line** (revised 2026-11-23, on the first
+database built with this). Core ships each kernel-livepatch's 1.0-0 and the livepatch topic its
+1.0-2 and later; 1.0-0 was cut out of 263 of the topic's entries and read clean of every fix the
+topic has for it. The measurement above missed it because it counted only advisories of the build's
+own repository. No other name of the 7,778 narrowed entries has that shape.
+
 **Gives up.** On a line that publishes advisories, a CVE Amazon has fixed only in another line is no
 longer reported. That report was never Amazon's statement about the line, but it was right
 whenever Amazon had simply not fixed it yet. AL2023 is not covered: 364 of its entries would have

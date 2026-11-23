@@ -19,12 +19,16 @@ func TestFetch_AL2VersionLinesAreJudgedByTheirOwnRepository(t *testing.T) {
 	k := func(v, r string) []pkgFixture { return []pkgFixture{{"kernel", "0", v, r, "x86_64"}} }
 	p := func(v, r string) []pkgFixture { return []pkgFixture{{"postgresql", "0", v, r, "x86_64"}} }
 	d := func(v, r string) []pkgFixture { return []pkgFixture{{"docker", "0", v, r, "x86_64"}} }
-	topics := []string{"kernel-5.4", "kernel-5.10", "postgresql13", "postgresql14", "docker", "ecs", "kernel-ng"}
+	lp := func(r string) []pkgFixture {
+		return []pkgFixture{{"kernel-livepatch-4.14.165-131.185", "0", "1.0", r, "x86_64"}}
+	}
+	topics := []string{"livepatch", "kernel-5.4", "kernel-5.10", "postgresql13", "postgresql14", "docker", "ecs", "kernel-ng"}
 	mux := http.NewServeMux()
 	mountExtrasCatalog(t, mux, topics)
 	mountRepo(t, mux, "/core", []updateFixture{
 		{id: "ALAS2-1", cves: []string{"CVE-2018-1"}, pkgs: k("4.9.76", "38.79.amzn2")},
 		{id: "ALAS2-2", cves: []string{"CVE-2019-25162"}, pkgs: k("4.14.291", "218.527.amzn2")},
+		{id: "ALAS2-4", cves: []string{"CVE-2019-9"}, pkgs: lp("0.amzn2")},
 		{id: "ALAS2-3", cves: []string{"CVE-2026-1"}, pkgs: k("4.14.355", "287.769.amzn2")},
 	})
 	for topic, ups := range map[string][]updateFixture{
@@ -33,6 +37,7 @@ func TestFetch_AL2VersionLinesAreJudgedByTheirOwnRepository(t *testing.T) {
 		"postgresql13": {{id: "ALAS2POSTGRESQL13-1", cves: []string{"CVE-2022-1552"}, pkgs: p("13.7", "1.amzn2.0.1")}, {id: "ALAS2POSTGRESQL13-2", cves: []string{"CVE-2025-1"}, pkgs: p("13.22", "1.amzn2.0.1")}},
 		"postgresql14": {{id: "ALAS2POSTGRESQL14-2023-002", cves: []string{"CVE-2022-1552"}, pkgs: p("14.3", "2.amzn2.0.1")}},
 		"docker":       {{id: "ALAS2DOCKER-1", cves: []string{"CVE-1"}, pkgs: d("20.10", "1.amzn2")}, {id: "ALAS2DOCKER-2", cves: []string{"CVE-2"}, pkgs: d("25.0", "1.amzn2")}},
+		"livepatch":    {{id: "ALAS2LIVEPATCH-2020-001", cves: []string{"CVE-2020-9"}, pkgs: lp("2.amzn2")}},
 		"ecs":          {{id: "ALAS2ECS-1", cves: []string{"CVE-2"}, pkgs: d("24.0", "1.amzn2")}},
 	} {
 		mountRepo(t, mux, "/extras/"+topic+"/latest/x86_64", ups)
@@ -73,6 +78,10 @@ func TestFetch_AL2VersionLinesAreJudgedByTheirOwnRepository(t *testing.T) {
 		// The ends of a span belong to it, and nothing beside them does.
 		{"kernel", "4.9.76-38.79.amzn2", "ALAS2-2=4.14.291-218.527.amzn2 ALAS2-3=4.14.355-287.769.amzn2"},
 		{"kernel", "4.14.355-287.770.amzn2", "ALAS2KERNEL-5.10-1=- ALAS2KERNEL-5.10-2022-020=- ALAS2KERNEL-5.4-1=5.4.20-12.75.amzn2 ALAS2KERNEL-5.4-2=5.4.302-229.517.amzn2"},
+		// Core ships a livepatch's 1.0-0 and the topic its 1.0-2: one line, two
+		// repositories, and the topic is the only judge of the core build.
+		{"kernel-livepatch-4.14.165-131.185", "1.0-0.amzn2", "ALAS2LIVEPATCH-2020-001=1.0-2.amzn2"},
+		{"kernel-livepatch-4.14.165-131.185", "1.0-2.amzn2", ""},
 		// One line side by side: overlapping spans cut nothing.
 		{"docker", "23.0-1.amzn2", "ALAS2DOCKER-2=25.0-1.amzn2 ALAS2ECS-1=24.0-1.amzn2"},
 	} {
