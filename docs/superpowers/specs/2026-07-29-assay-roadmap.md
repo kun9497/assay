@@ -9474,6 +9474,49 @@ through `catalogFromImage`, the Fedora shape in two spellings, and eight mutatio
 
 ---
 
+### D171 — A waiver for one CVE of an errata waives that CVE, not the errata
+
+Decided 2026-11-23, from the 2026-11-20 QA audit. An errata record — an ALAS, ELSA, RLSA, ALSA
+or Bodhi update — lists the CVEs it fixes in `related` and is one finding. D71 and D72 put
+`related` into `Finding.Identifiers` so `--explain`, a CVE search and the rating join could
+reach it; D102 and D104 match a waiver against "the finding's whole identifier set", reasoning
+about aliases, which are other names for one vulnerability. Together they made a waiver naming
+ONE bundled CVE suppress the whole errata: an ignore rule or VEX statement for CVE-A took CVE-B
+out of the verdict with it, exit 1 became exit 0, and nothing said the waiver had covered more
+than it named. One VEX document saying `not_affected` for CVE-A and `affected` for CVE-B gave
+exit 0 or 1 by statement order, because "latest statement wins" was resolved across both.
+
+Other scanners, as read on 2026-11-23: grype matches an ignore rule against the match's own id
+and reaches related ids only with `include-aliases: true`, where it too drops the whole match;
+its OpenVEX path matches the match's own id alone. trivy reports per CVE (from memory, not
+re-read), so the question does not arise. assay was the most permissive of the three.
+
+**Decision.** A finding records the CVEs it **bundles**: CVE-shaped ids a joined record lists
+only in `related`, less any the finding also carries as its own id, alias or upstream
+(`Finding.Bundled`). A waiver is read against the finding's own names first and suppresses it
+as before — the errata id, an alias, a package-only ignore rule. A waiver naming a bundled CVE
+waives that CVE alone (`Finding.Waived`): the finding stays in `findings[]` and keeps gating,
+and is suppressed only when every bundled CVE is waived, with each CVE's own reason. A finding
+that also carries a CVE as a name of its own is not suppressed by its bundle being waived.
+VEX precedence is resolved per CVE. The two waiver passes add up: an ignore rule for one CVE
+and a VEX statement for the other suppress the finding between them.
+
+**Shown everywhere.** JSON `findings[].waived` (schema 23, additive), a `waived:` line per CVE
+under the table, a clause in the SARIF message, a `waived:` line in `--explain`, and a stderr
+line counting the CVEs waived on findings still reported.
+
+**Gives up.** The finding's severity is the errata's, so waiving its worst CVE does not lower
+the band: an errata record carries one rating, not one per CVE. A pipeline that waived an
+errata finding by one CVE sees it reported again on upgrade — what it had been hiding. Grype's
+opt-in to the old behaviour is not offered; naming the errata id does the same thing and says
+what it does.
+
+**Held by** five tests through `Run` (ignore rules; VEX, including four orderings of a mixed
+document; the two mechanisms together; a CVE that names the finding; every renderer) and
+fourteen mutations.
+
+---
+
 ## 6. Benchmarking notes
 
 Design elements taken from existing tools, and what was left behind.

@@ -235,6 +235,13 @@ reason, and they do not trip `--fail-on` — but they stay in the output (SARIF 
 standard `suppressions`, which GitHub shows as dismissed). An expired rule stops waiving and
 warns, so a waiver cannot outlive its justification unnoticed.
 
+One finding can stand for several CVEs: an errata from Amazon, Oracle, Rocky, AlmaLinux or
+Fedora fixes a group of them and is reported once, under the errata's id. A waiver naming ONE
+of those CVEs — in `.assay.yaml` or in a VEX document — waives that CVE only (D171). The finding
+is still reported and still gates, with the waived CVE listed beside it (`waived` in JSON), and
+is suppressed once every CVE it bundles has been waived. To waive the whole update in one rule,
+name the errata id.
+
 When the waiver comes from the software's *producer* rather than from you, pass their
 OpenVEX document instead of transcribing it: `--vex <path>` (repeatable) applies its
 `not_affected` and `fixed` statements the same way — suppressed findings are counted and

@@ -9,7 +9,7 @@
 
 | 계약 | 무엇인가 | 버전 필드 | 현재 |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 22 |
+| `report` | `assay scan --output json` | `schemaVersion` | 23 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
@@ -91,6 +91,13 @@
   `none`, `not-read`였고 그런 이미지는 `none`으로 읽혔습니다; `none`을 "npm 패키지 없음"으로 받던 소비자는 그때
   틀린 말을 들었고 이제 `partial`을 듣습니다. 해석되는 링크된 패키지는 `read`이고 그 finding은 루트 아래 논리
   경로에 나옵니다. 스키마 21은 먼저 병합된 `skipped[].cves`입니다. (D160 개정)
+- 스키마 23 (추가; 동작 변경 하나): `findings[].waived` — 여전히 보고되는 finding에서 ignore 규칙이나
+  VEX statement가 면책한 `advisory.related` 안의 CVE들이며, 각각 `reason`과 `source`(`ignore-file`
+  또는 `vex`)를 가집니다. 없으면 생략됩니다. 동작 변경은 문서의 모양이 아니라 waiver가 하는 일에
+  있습니다: 여러 CVE를 묶은 errata(ALAS, ELSA, RLSA, ALSA, Bodhi)의 CVE 하나를 지목한 waiver는
+  전에는 finding 전체를 `suppressed[]`로 옮겼지만, 이제는 그 CVE를 여기에 적은 채 `findings[]`에
+  남겨 둡니다. 묶인 CVE가 모두 waive되거나 waiver가 errata id를 지목해야 억제됩니다. 그런 finding을
+  CVE 하나로 waive해 둔 파이프라인에서는 그 finding이 다시 보고됩니다. (D171)
 
 ## provenance sidecar, status.json, `db status`
 

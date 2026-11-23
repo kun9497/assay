@@ -380,6 +380,18 @@ func Table(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		fmt.Fprintf(w, "%s %s\n", frozenMarker, frozenSentence(key, frozen[key]))
 	}
 
+	// D171. A finding that bundles several CVEs stays in the table when a
+	// waiver exonerates some of them, and its row cannot say which: one line
+	// per waived CVE, so the reader sees what the waiver did and that the
+	// finding is reported for what is left. In finding order, which is
+	// already deterministic.
+	for _, f := range res.Findings {
+		for _, wv := range f.Waived {
+			fmt.Fprintf(w, "waived: %s on %s (%s), by %s: %s; still reported for the other CVEs it bundles\n",
+				wv.CVE, f.Advisory.ID, f.Package.Name, wv.Source, wv.Reason)
+		}
+	}
+
 	// The summary keeps a partial scan from reading as a clean one, so its
 	// parts must add up: every component the document contained is either
 	// evaluated or not, and no package is counted in both.

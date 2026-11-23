@@ -9,7 +9,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 
 | Contract | What it is | Version field | Current |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 22 |
+| `report` | `assay scan --output json` | `schemaVersion` | 23 |
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |
@@ -99,6 +99,14 @@ it relied on:
   thing then and is told `partial` now. Linked packages that do resolve are `read` and their
   findings appear at the logical path under the root. Schema 21 is
   `skipped[].cves`, merged first. (D160 revised)
+- Schema 23 (additive; one behaviour change): `findings[].waived` — the CVEs among
+  `advisory.related` that an ignore rule or VEX statement exonerated on a finding that is still
+  reported, each with its `reason` and `source` (`ignore-file` or `vex`). Omitted when none.
+  The behaviour change is in what a waiver does, not in the document's shape: a waiver naming
+  one CVE of an errata that bundles several (ALAS, ELSA, RLSA, ALSA, Bodhi) used to move the
+  whole finding to `suppressed[]`; it now leaves it in `findings[]` with that CVE listed here,
+  until every bundled CVE is waived or a waiver names the errata id. A pipeline that waived
+  such a finding by one CVE sees it reported again. (D171)
 
 ## The provenance sidecar, status.json and `db status`
 

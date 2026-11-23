@@ -119,6 +119,27 @@ type Finding struct {
 	// identity: showing a reader one extra identifier is noise, failing to
 	// resolve one they were just handed is a defect.
 	Identifiers []string
+	// Bundled is the CVEs this finding stands for without being any one of
+	// them (D171): the CVE ids a joined record lists only in `related`, the
+	// shape of an errata -- an ALAS, ELSA, RLSA, ALSA or Bodhi update that
+	// fixes several CVEs at once -- less any the finding also carries as its
+	// own id, alias or upstream. Sorted, upper-cased. Empty for a record that
+	// IS one vulnerability, which is every record outside those feeds.
+	//
+	// A waiver reads it: a statement about one bundled CVE says nothing
+	// about its siblings, so it waives that CVE (Waived) and leaves the
+	// finding standing until every bundled CVE is waived. Identifiers alone
+	// cannot say this -- it holds the bundled CVEs beside the finding's own
+	// names, and a waiver matched against the lot took one CVE's
+	// exoneration for the whole update's.
+	Bundled []string
+	// Waived is the bundled CVEs a waiver has exonerated on a finding that
+	// is still reported because others remain (D171), in the order they
+	// were waived. Set by the waiver passes in scancmd, never by Match.
+	Waived []Waived
+	// self and related are the two halves Bundled is cut from, gathered
+	// while records join. No renderer reads them.
+	self, related []string
 	// Enrichment is what other authorities wrote ABOUT this vulnerability in
 	// prose — KISA's Korean headline, overview and notice link — joined on the
 	// CVE exactly the way Ratings are (D3).
@@ -1143,11 +1164,15 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								Score:              score,
 								Ratings:            []Rating{r},
 								Identifiers:        lookupIDs(a),
+								self:               selfIDs(a),
+								related:            a.Related,
 							})
 						} else {
 							f := &res.Findings[idx]
 							f.Ratings = append(f.Ratings, r)
 							f.Identifiers = append(f.Identifiers, lookupIDs(a)...)
+							f.self = append(f.self, selfIDs(a)...)
+							f.related = append(f.related[:len(f.related):len(f.related)], a.Related...)
 							if beats(r, winnerOf(*f)) {
 								f.Advisory, f.Evidence = a, ev
 								f.MatchedName = lookupName
@@ -1186,6 +1211,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 
 	for i := range res.Findings {
 		res.Findings[i].Identifiers = dedupSorted(res.Findings[i].Identifiers)
+		res.Findings[i].Bundled = bundledCVEs(res.Findings[i].self, res.Findings[i].related)
 		if err := m.annotate(&res.Findings[i], sevMemo); err != nil {
 			return Result{}, err
 		}
@@ -1385,6 +1411,8 @@ func absorb(findings []Finding, group map[string]int, dst, src int) {
 	d, s := &findings[dst], &findings[src]
 	d.Ratings = append(d.Ratings, s.Ratings...)
 	d.Identifiers = append(d.Identifiers, s.Identifiers...)
+	d.self = append(d.self, s.self...)
+	d.related = append(d.related[:len(d.related):len(d.related)], s.related...)
 	if beats(winnerOf(*s), winnerOf(*d)) {
 		// Every field that describes the displayed record moves with it, as
 		// in Match's own beats() swap: without the join and mirror fields the
@@ -1427,6 +1455,104 @@ func lookupIDs(a advisory.Advisory) []string {
 	out = append(out, a.Aliases...)
 	out = append(out, a.Upstream...)
 	return append(out, a.Related...)
+}
+
+// selfIDs is the names a record gives the vulnerability it IS: its id, its
+// aliases and its upstream. lookupIDs less `related`.
+func selfIDs(a advisory.Advisory) []string {
+	out := make([]string, 0, 1+len(a.Aliases)+len(a.Upstream))
+	out = append(out, a.ID)
+	out = append(out, a.Aliases...)
+	return append(out, a.Upstream...)
+}
+
+// bundledCVEs is Finding.Bundled: the CVE-shaped related ids that are not
+// also one of the finding's own names, upper-cased, deduplicated and sorted.
+// A related id that is not a CVE (an RHSA an ALSA points back to) is not a
+// vulnerability the finding stands for and stays out.
+func bundledCVEs(self, related []string) []string {
+	own := make(map[string]bool, len(self))
+	for _, id := range self {
+		own[strings.ToUpper(id)] = true
+	}
+	var out []string
+	for _, id := range related {
+		if u := strings.ToUpper(id); strings.HasPrefix(u, "CVE-") && !own[u] {
+			out = append(out, u)
+		}
+	}
+	return dedupSorted(out)
+}
+
+// Waived is one bundled CVE a waiver exonerated on a finding that is still
+// reported (D171).
+type Waived struct {
+	CVE    string
+	Reason string
+	// Source is "ignore-file" or "vex", Suppressed.Source's own values.
+	Source string
+}
+
+// BundledCVE returns the bundled CVE id names, in the finding's own
+// spelling, or false when id is not one of them -- when it is one of the
+// finding's own names, or no name of the finding at all.
+func (f Finding) BundledCVE(id string) (string, bool) {
+	for _, c := range f.Bundled {
+		if strings.EqualFold(c, id) {
+			return c, true
+		}
+	}
+	return "", false
+}
+
+// IsWaived reports whether the bundled CVE cve has been waived.
+func (f Finding) IsWaived(cve string) bool {
+	for _, w := range f.Waived {
+		if strings.EqualFold(w.CVE, cve) {
+			return true
+		}
+	}
+	return false
+}
+
+// FullyWaived reports whether every CVE the finding bundles has been waived:
+// nothing it stands for is left, and the finding is suppressed. False for a
+// finding that bundles none -- that one is waived only by its own name --
+// and for one that also carries a CVE AS a name of its own (an alias beside
+// the bundle): that CVE is not in Bundled, no bundled waiver speaks for it,
+// and only a waiver naming it, which suppresses the finding outright, does.
+func (f Finding) FullyWaived() bool {
+	if len(f.Bundled) == 0 {
+		return false
+	}
+	for _, id := range f.Identifiers {
+		if _, bundled := f.BundledCVE(id); !bundled && strings.HasPrefix(strings.ToUpper(id), "CVE-") {
+			return false
+		}
+	}
+	for _, c := range f.Bundled {
+		if !f.IsWaived(c) {
+			return false
+		}
+	}
+	return true
+}
+
+// WithWaived returns f with one more waived CVE. A copy: findings are passed
+// by value between the waiver passes and must not share the slice.
+func (f Finding) WithWaived(w Waived) Finding {
+	f.Waived = append(append([]Waived(nil), f.Waived...), w)
+	return f
+}
+
+// WaivedReason is the reason a fully waived finding is suppressed for: each
+// CVE's own, because two waivers rarely say the same thing.
+func (f Finding) WaivedReason() string {
+	parts := make([]string, 0, len(f.Waived))
+	for _, w := range f.Waived {
+		parts = append(parts, w.CVE+": "+w.Reason)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // advisoryCVEs is the CVE-shaped subset of lookupIDs, upper-cased,

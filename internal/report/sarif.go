@@ -567,6 +567,16 @@ func findingMessage(f matcher.Finding, target string) string {
 		// Security-tab reader sees only this message, so it says so here.
 		fmt.Fprintf(&b, " (%s)", frozenSentence(f.Package.Ecosystem, frozenDate(f)))
 	}
+	if len(f.Waived) > 0 {
+		// D171: a Security-tab reader sees only this message, so it says
+		// which of the CVEs this result bundles a waiver has exonerated and
+		// that the result stands for the rest.
+		cves := make([]string, 0, len(f.Waived))
+		for _, wv := range f.Waived {
+			cves = append(cves, wv.CVE)
+		}
+		fmt.Fprintf(&b, " (waived: %s; reported for the other CVEs it bundles)", strings.Join(cves, ", "))
+	}
 	switch f.FixState() {
 	case advisory.FixStateFixed:
 		if f.Evidence.Fixed != "" {

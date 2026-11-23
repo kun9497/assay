@@ -58,7 +58,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 22
+const schemaVersion = 23
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -187,6 +187,12 @@ type FindingRecord struct {
 	// crossMappedFrom precedent.
 	FrozenSince string         `json:"frozenSince,omitempty"`
 	Advisory    AdvisoryRecord `json:"advisory"`
+	// Waived (schema 23, D171) is the CVEs among advisory.related that a
+	// waiver has exonerated on this finding. The finding is reported for the
+	// ones not listed: an errata is suppressed only when every CVE it
+	// bundles is waived, or when a waiver names the errata itself. omitempty:
+	// almost no finding carries one.
+	Waived []WaivedRecord `json:"waived,omitempty"`
 	// Severity is severity.Band's String() form (D17's own
 	// none/low/medium/high/critical/unknown), never the numeric iota — a
 	// numeric band would make the document depend on Band's declaration
@@ -418,6 +424,15 @@ type EvidenceRecord struct {
 // full finding, inlined, plus the reason the waiver gave. Inlined rather
 // than nested so a consumer already reading FindingRecord fields finds them
 // in the same place here, with two extra keys.
+// WaivedRecord is one bundled CVE a waiver exonerated on a finding that is
+// still reported (D171). Source is "ignore-file" or "vex", as on
+// SuppressedRecord.
+type WaivedRecord struct {
+	CVE    string `json:"cve"`
+	Reason string `json:"reason"`
+	Source string `json:"source"`
+}
+
 type SuppressedRecord struct {
 	FindingRecord
 	Reason string `json:"reason"`
@@ -538,7 +553,12 @@ func findingRecord(f matcher.Finding) FindingRecord {
 			Claims:  e.Claims,
 		})
 	}
+	var waived []WaivedRecord
+	for _, wv := range f.Waived {
+		waived = append(waived, WaivedRecord{CVE: wv.CVE, Reason: wv.Reason, Source: wv.Source})
+	}
 	return FindingRecord{
+		Waived:             waived,
 		Package:            packageRecord(f.Package),
 		MatchedName:        f.MatchedName,
 		MatchedViaProvides: f.MatchedViaProvides,

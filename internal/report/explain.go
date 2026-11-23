@@ -165,6 +165,11 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 		// rests on data the upstream stopped publishing (D12).
 		lines = append(lines, "frozen:   "+frozenSentence(f.Package.Ecosystem, frozenDate(f)))
 	}
+	for _, wv := range f.Waived {
+		// D171: the finding is reported for the CVEs it bundles that are
+		// NOT listed here.
+		lines = append(lines, fmt.Sprintf("waived:   %s by %s: %s", wv.CVE, wv.Source, wv.Reason))
+	}
 	if ids := otherIDs(f); len(ids) > 0 {
 		lines = append(lines, fmt.Sprintf("also known as: %s", strings.Join(ids, ", ")))
 	}

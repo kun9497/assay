@@ -8799,6 +8799,45 @@ status.d, rpm, pacman — 로 처음 찾은 패키지 데이터베이스 하나�
 
 ---
 
+### D171 — errata 의 CVE 하나에 대한 waiver 는 그 CVE 를 waive 하지, errata 를 waive 하지 않는다
+
+2026-11-23 결정, 2026-11-20 QA 감사에서 나왔다. errata 레코드 — ALAS, ELSA, RLSA, ALSA, Bodhi 업데이트 —
+는 자신이 고치는 CVE 들을 `related` 에 나열하며 finding 하나다. D71 과 D72 는 `--explain`, CVE 검색, rating
+join 이 닿을 수 있도록 `related` 를 `Finding.Identifiers` 에 넣었다. D102 와 D104 는 waiver 를 "finding 의
+식별자 집합 전체"에 대고 맞추는데, 그 근거는 한 취약점의 다른 이름인 alias 였다. 둘이 합쳐져 묶인 CVE
+하나를 지목한 waiver 가 errata 전체를 억제했다: CVE-A 에 대한 ignore 규칙이나 VEX statement 가 CVE-B 까지
+verdict 에서 빼냈고, exit 1 이 exit 0 이 되었으며, waiver 가 지목한 것보다 더 많이 덮었다는 말은 어디에도
+없었다. CVE-A 는 `not_affected`, CVE-B 는 `affected` 라고 말하는 VEX 문서 하나는 statement 순서에 따라
+exit 0 또는 1 을 냈다. "최신 statement 가 이긴다"가 둘에 걸쳐 판정되었기 때문이다.
+
+다른 스캐너들은, 2026-11-23 에 읽은 바로는: grype 는 ignore 규칙을 매치 자신의 id 에 맞추고
+`include-aliases: true` 일 때만 related id 에 닿으며, 그때는 마찬가지로 매치 전체를 버린다. OpenVEX 경로는
+매치 자신의 id 만 맞춘다. trivy 는 CVE 단위로 보고하므로(기억에 의존, 다시 읽지 않음) 이 질문이 생기지
+않는다. 셋 중 assay 가 가장 느슨했다.
+
+**결정.** finding 은 자신이 **묶은(bundled)** CVE 를 기록한다: 합쳐진 레코드가 `related` 에만 나열한
+CVE 모양의 id 에서, finding 이 자기 id·alias·upstream 으로도 가진 것을 뺀 것이다(`Finding.Bundled`).
+waiver 는 먼저 finding 자신의 이름에 대고 읽으며 전처럼 억제한다 — errata id, alias, 패키지만 적은 ignore
+규칙. 묶인 CVE 를 지목한 waiver 는 그 CVE 만 waive 한다(`Finding.Waived`): finding 은 `findings[]` 에 남아
+계속 게이트에 걸리고, 묶인 CVE 가 모두 waive 되었을 때만 각 CVE 자신의 사유와 함께 억제된다. CVE 를 자기
+이름으로도 가진 finding 은 묶음이 waive 되었다고 억제되지 않는다. VEX 우선순위는 CVE 별로 판정한다. 두
+waiver 패스는 합쳐진다: 한 CVE 에 대한 ignore 규칙과 다른 CVE 에 대한 VEX statement 가 함께 finding 을
+억제한다.
+
+**모든 곳에 보인다.** JSON `findings[].waived`(스키마 23, 추가), 테이블 아래 CVE 마다 `waived:` 한 줄,
+SARIF 메시지의 한 구절, `--explain` 의 `waived:` 줄, 그리고 여전히 보고되는 finding 에서 waive 된 CVE 를
+세는 stderr 한 줄.
+
+**포기하는 것.** finding 의 등급은 errata 의 것이므로 가장 심각한 CVE 를 waive 해도 band 는 내려가지
+않는다: errata 레코드는 CVE 마다가 아니라 하나의 rating 을 가진다. errata finding 을 CVE 하나로 waive 해
+둔 파이프라인은 업그레이드 뒤 그것이 다시 보고되는 것을 본다 — 그동안 숨기고 있던 것이다. 예전 동작으로의
+grype 식 opt-in 은 제공하지 않는다. errata id 를 지목하면 같은 일을 하고, 무엇을 하는지도 말해 준다.
+
+**지키는 것은** `Run` 을 통한 테스트 다섯(ignore 규칙; 섞인 문서의 네 가지 순서를 포함한 VEX; 두
+메커니즘 함께; finding 을 지목하는 CVE; 모든 렌더러)과 mutation 열네 개다.
+
+---
+
 ## 6. 벤치마킹 노트
 
 기존 도구에서 가져온 설계 요소와, 남겨둔 것.

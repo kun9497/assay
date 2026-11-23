@@ -1092,7 +1092,25 @@ func applyIgnoreRules(res *matcher.Result, ignoreFile string, stderr io.Writer, 
 	if len(suppressed) > 0 {
 		fmt.Fprintf(stderr, "%d finding(s) suppressed by %s\n", len(suppressed), path)
 	}
+	if n := stillReported(kept, "ignore-file"); n > 0 {
+		fmt.Fprintf(stderr, "%d CVE(s) waived by %s on finding(s) still reported for the other CVEs they bundle\n", n, path)
+	}
 	return 0
+}
+
+// stillReported counts the bundled CVEs source has waived on findings that
+// are still reported (D171), so a waiver that removed no finding is not
+// silent about what it did.
+func stillReported(findings []matcher.Finding, source string) int {
+	n := 0
+	for _, f := range findings {
+		for _, w := range f.Waived {
+			if w.Source == source {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 // applyVEX loads every --vex document in order and moves the findings each
@@ -1140,6 +1158,7 @@ func applyVEX(res *matcher.Result, paths []string, target vex.Target, stderr io.
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
+		waivedBefore := stillReported(res.Findings, "vex")
 		kept, suppressed, st := doc.Apply(res.Findings, target, warn)
 		rec.SHA256, rec.ID = doc.SHA256, doc.ID
 		rec.Statements, rec.Applied, rec.Skipped = st.Statements, st.Applied, st.Skipped
@@ -1148,6 +1167,11 @@ func applyVEX(res *matcher.Result, paths []string, target vex.Target, stderr io.
 		res.Suppressed = append(res.Suppressed, suppressed...)
 		if len(suppressed) > 0 {
 			fmt.Fprintf(stderr, "%d finding(s) suppressed by VEX (%s)\n", len(suppressed), path)
+		}
+		// D171. Counted on what is still reported: a CVE waived on the way
+		// to a finding's suppression is already in the line above.
+		if n := stillReported(kept, "vex") - waivedBefore; n > 0 {
+			fmt.Fprintf(stderr, "%d CVE(s) waived by VEX (%s) on finding(s) still reported for the other CVEs they bundle\n", n, path)
 		}
 		total.Statements += st.Statements
 		total.Unmatched += st.Unmatched
