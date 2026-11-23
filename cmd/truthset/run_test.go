@@ -772,3 +772,31 @@ func TestWilson(t *testing.T) {
 		}
 	}
 }
+
+// QA 2026-11-20: a missing kept scan is exit 2, named on stderr.
+func TestRun_OfflineWithoutAKeptScanIsExitTwo(t *testing.T) {
+	var out, errOut bytes.Buffer
+	code := run([]string{"-labels", writeLabels(t, heldLabels()), "-offline", t.TempDir()}, &out, &errOut,
+		func(string, ...string) ([]byte, int, error) { t.Fatal("executed"); return nil, 0, nil })
+	if code != exitError || !strings.Contains(errOut.String(), "error: case=alpine-busybox-below offline:") {
+		t.Errorf("exit %d, want 2 and the case named:%s", code, errOut.String())
+	}
+}
+
+// QA 2026-11-20: a misspelled expect key was dropped, and the demand with it.
+func TestLoadLabels_RefusesAnUnknownKey(t *testing.T) {
+	p := writeLabels(t, heldLabels())
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(b, []byte(`"fixed"`)) {
+		t.Fatal("the fixture names no fixed version")
+	}
+	if err := os.WriteFile(p, bytes.ReplaceAll(b, []byte(`"fixed"`), []byte(`"fixd"`)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadLabels(p); err == nil || !strings.Contains(err.Error(), "fixd") {
+		t.Errorf("err = %v, want the unknown key named", err)
+	}
+}

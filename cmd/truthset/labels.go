@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/url"
@@ -143,7 +144,11 @@ func loadLabels(path string) ([]Label, error) {
 		return nil, err
 	}
 	var f labelsFile
-	if err := json.Unmarshal(raw, &f); err != nil {
+	// Unknown keys are refused: "fixd" for "fixed" dropped the demand and let a
+	// wrong fixed version score as a true positive (QA 2026-11-20).
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&f); err != nil {
 		return nil, fmt.Errorf("labels file %s: %w", path, err)
 	}
 	if f.SchemaVersion != labelsSchemaVersion {

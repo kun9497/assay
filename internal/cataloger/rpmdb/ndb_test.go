@@ -304,3 +304,39 @@ func TestOpenNDB_WrongVersionIsRefused(t *testing.T) {
 		t.Fatal("a file claiming an unknown ndb version was accepted")
 	}
 }
+
+// QA 2026-11-20: ndb guards nothing held. The slot table's damage refuses the
+// file; a blob's is one skipped record.
+func TestReadNDB_EachCorruptionGuard(t *testing.T) {
+	blob := buildHeader(strTag(tagName, "x"), strTag(tagVersion, "1"), strTag(tagRelease, "1"))
+	base := buildNDB(t, 3, []ndbEntry{{1, blob}, {2, blob}})
+	le := binary.LittleEndian
+	slot := func(n int) int { return (ndbSlotStart + n) * ndbSlotSize }
+	start := func(b []byte, n int) int { return int(le.Uint32(b[slot(n)+8:])) * ndbBlkSize }
+	size := func(b []byte, n int) int { return int(le.Uint32(b[slot(n)+12:])) * ndbBlkSize }
+	for name, tc := range map[string]struct {
+		edit    func(b []byte)
+		refused bool
+		want    string
+	}{
+		"two slots, one index":     {func(b []byte) { le.PutUint32(b[slot(1)+4:], 1) }, true, "claimed by two slots"},
+		"offset in the slot table": {func(b []byte) { le.PutUint32(b[slot(1)+8:], 1) }, true, "inside the slot region"},
+		"head magic":               {func(b []byte) { b[start(b, 1)] ^= 0xff }, false, "no BlbS magic"},
+		"head names another":       {func(b []byte) { le.PutUint32(b[start(b, 1)+4:], 9) }, false, "blob head names package 9"},
+		"tail magic":               {func(b []byte) { b[start(b, 1)+size(b, 1)-1] ^= 0xff }, false, "no BlbE magic"},
+		"tail length":              {func(b []byte) { le.PutUint32(b[start(b, 1)+size(b, 1)-8:], 5) }, false, "tail declares 5"},
+	} {
+		b := append([]byte(nil), base...)
+		tc.edit(b)
+		res, err := ReadNDB(b, "SLES:15.SP6", "Packages.db")
+		if tc.refused {
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("%s: err = %v, want %q", name, err, tc.want)
+			}
+			continue
+		}
+		if err != nil || len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0], tc.want) || len(res.Packages) != 1 {
+			t.Errorf("%s: %d packages, skipped %v, err %v; want one of each and %q", name, len(res.Packages), res.Skipped, err, tc.want)
+		}
+	}
+}

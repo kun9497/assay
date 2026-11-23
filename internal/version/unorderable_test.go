@@ -24,3 +24,13 @@ func TestAffectsVersion_AComposerBranchIsTheTargetsOwnDefect(t *testing.T) {
 		t.Errorf("a branch bound: err %v, cause %v; want the advisory's", err, CauseOf(err))
 	}
 }
+
+// QA 2026-11-20: a last_affected bound that does not order is an error, not a
+// clean verdict.
+func TestAffectsVersion_AnUnorderableLastAffectedIsAnError(t *testing.T) {
+	a := advisory.Affected{Ecosystem: "Packagist", Name: "x", Ranges: []advisory.Range{{Type: "ECOSYSTEM",
+		Events: []advisory.Event{{Introduced: "0"}, {LastAffected: "dev-master"}}}}}
+	if hit, _, _, err := AffectsVersion(Composer{}, "1.5.0", a); hit || err == nil || CauseOf(err) != CauseAdvisoryData {
+		t.Errorf("hit %v, err %v, cause %v; want the advisory's bound refused", hit, err, CauseOf(err))
+	}
+}

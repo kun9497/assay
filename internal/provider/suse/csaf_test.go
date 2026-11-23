@@ -1898,3 +1898,21 @@ func TestConvert_MirrorsTheFixOfAMixedSLEEntry_DespiteLeapNotAffected(t *testing
 		t.Errorf("SkippedLeapNotAffected = %d, want 0", st.SkippedLeapNotAffected)
 	}
 }
+
+// QA 2026-11-20: a remediation on the LTSS id does not label the mainline
+// statement the document also carries.
+func TestConvert_AnLTSSRemediationDoesNotReachTheMainlineEntry(t *testing.T) {
+	d := buildDocWithRemediations(t, "CVE-2025-1", []string{"SUSE Linux Enterprise Server 15 SP5", "SUSE Linux Enterprise Server 15 SP5-LTSS"},
+		map[string]string{"foo": "pkg:rpm/suse/foo@?upstream=foo.src.rpm"}, nil,
+		[]string{"SUSE Linux Enterprise Server 15 SP5:foo", "SUSE Linux Enterprise Server 15 SP5-LTSS:foo"},
+		[]map[string]any{{"category": "no_fix_planned", "product_ids": []string{"SUSE Linux Enterprise Server 15 SP5-LTSS:foo"}}})
+	var st stats
+	adv, ok := convert(d, &st)
+	if !ok {
+		t.Fatal("convert dropped the document")
+	}
+	a := affectedByName(adv)["SLES:15.SP5/foo"]
+	if len(a.Ranges) != 1 || a.Ranges[0].FixState == advisory.FixStateWontFix {
+		t.Errorf("ranges %+v, want the mainline entry without the LTSS reason", a.Ranges)
+	}
+}
