@@ -81,16 +81,29 @@ type Release struct {
 }
 
 // DefaultReleases is Bodhi's current stable Fedora releases, measured
-// 2026-08-19 against https://bodhi.fedoraproject.org/releases/?rows_per_page=100:
-// F43 and F44 (F42 archived 2026-05-27; F45/F46 pending). Fedora's ~6-month
-// cadence and ~13-month support window mean this pair changes roughly twice
-// a year -- keeping it current is a docs/deferred-decisions.md maintenance
-// item, not a code change, because EOL freezes what is already stored
-// rather than requiring one.
+// 2026-11-23 against https://bodhi.fedoraproject.org/releases/?rows_per_page=100:
+// F43 (end of life 2026-12-02), F44 and F45; F46 is pending (rawhide) and
+// F42 was archived 2026-05-27. Fedora's ~6-month cadence and ~13-month
+// support window mean this list changes roughly twice a year.
+//
+// It is a list a person keeps, and it had fallen behind: measured
+// 2026-08-19 as F43 and F44 and not looked at again, so F45 -- current for
+// weeks, 685 stable security updates -- was never fetched, every Fedora 45
+// scan reported its packages not evaluated, and the build log went on
+// calling the pair "Bodhi's current stable releases" (QA 2026-11-20). The
+// revisit is recorded in docs/deferred-decisions.md; a release dropped from
+// here is frozen by D110, not lost.
 var DefaultReleases = []Release{
 	{Name: "F43", Ecosystem: "Fedora:43"},
 	{Name: "F44", Ecosystem: "Fedora:44"},
+	{Name: "F45", Ecosystem: "Fedora:45"},
 }
+
+// totalShortfallPercent is how far short of Bodhi's own total a release's
+// walk may fall and still be taken as complete. Not zero: an update can
+// leave the stable set while the pages are being walked, and the total is
+// the one page 1 reported.
+const totalShortfallPercent = 2
 
 // pageRequestTimeout bounds ONE page fetch. Measured 2026-08-19: ~18s/100
 // rows, heavier than a typical REST page because Bodhi embeds full comment
@@ -126,7 +139,7 @@ func eolDisclosure(releases []Release) string {
 		names[i] = r.Name
 	}
 	return fmt.Sprintf(
-		"fedora: fetching %s only (Bodhi's current stable releases) -- Fedora's ~13-month "+
+		"fedora: fetching %s only (this build's list of current releases) -- Fedora's ~13-month "+
 			"support window means an EOL'd release (F42 archived 2026-05-27) gets NO new "+
 			"advisories from this feed ever again; a scan of an EOL'd Fedora image is a frozen "+
 			"lower bound with no in-band signal that it stopped moving (docs/deferred-decisions.md)",
@@ -261,6 +274,9 @@ func (p *Provider) fetchRelease(ctx context.Context, r Release, emit func(adviso
 	var asOf time.Time
 	kept := 0
 	page := 1
+	// received is every update the walk was handed; promised is the total
+	// page 1 said the release holds.
+	received, promised := 0, 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return kept, asOf, err
@@ -268,6 +284,10 @@ func (p *Provider) fetchRelease(ctx context.Context, r Release, emit func(adviso
 		resp, err := p.fetchPageRetrying(ctx, r.Name, page, st)
 		if err != nil {
 			return kept, asOf, err
+		}
+		received += len(resp.Updates)
+		if page == 1 {
+			promised = resp.Total
 		}
 		for _, u := range resp.Updates {
 			st.Updates++
@@ -302,6 +322,17 @@ func (p *Provider) fetchRelease(ctx context.Context, r Release, emit func(adviso
 			break
 		}
 		page++
+	}
+	// The loop above stops on each response's OWN "pages", so a 200 that
+	// decodes to nothing ({} or null), or a later page reporting fewer
+	// pages than page 1 did, ended the release as complete: 100 of 1,721
+	// updates, the release declared covered, its scans clean (QA
+	// 2026-11-20). Bodhi says how many updates there are; a walk that got
+	// materially fewer did not read the release.
+	if short := promised - received; promised > 0 && short*100 > promised*totalShortfallPercent {
+		return kept, asOf, fmt.Errorf(
+			"received %d of the %d updates Bodhi reported for %s: the walk ended early (an empty or reshaped page), so the release was not read",
+			received, promised, r.Name)
 	}
 	return kept, asOf, nil
 }

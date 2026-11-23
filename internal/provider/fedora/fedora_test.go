@@ -598,3 +598,75 @@ func TestFetch_BuildAffectedUsesSourcePackageName(t *testing.T) {
 		t.Errorf("Affected[0].Ecosystem = %q, want Fedora:43", got.Affected[0].Ecosystem)
 	}
 }
+
+// QA 2026-11-20. The walk stopped on each response's own "pages", so a 200
+// that decoded to nothing, or a later page that reported fewer pages, ended
+// the release as complete: 100 of 1,721 updates, the release declared
+// covered. Bodhi's own total says how many there are.
+func TestFetch_AWalkThatEndsShortOfBodhisTotalIsRefused(t *testing.T) {
+	one := func(n int) []updateFixture {
+		return []updateFixture{{
+			alias: fmt.Sprintf("FEDORA-2026-%04d", n), title: "update", severity: "high",
+			dateStable: "2026-01-05 10:00:00",
+			builds:     []buildFixture{{nvr: fmt.Sprintf("pkg%d-1.0-1.fc43", n)}},
+		}}
+	}
+	for name, page2 := range map[string]string{
+		"an empty object":                    `{}`,
+		"null":                               `null`,
+		"a reshaped page reporting one":      `{"updates":[],"page":2,"pages":1,"total":1}`,
+		"an empty page that says it is last": `{"updates":[],"page":2,"pages":2,"total":50}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				if r.URL.Query().Get("page") == "1" {
+					w.Write(bodhiPageJSON(t, one(1), 1, 50, 50))
+					return
+				}
+				w.Write([]byte(page2))
+			}))
+			defer srv.Close()
+			emitted := 0
+			_, err := New(Options{Releases: []Release{{Name: "F43", Ecosystem: "Fedora:43"}}, BaseURL: srv.URL}).
+				Fetch(context.Background(), func(advisory.Advisory) error { emitted++; return nil })
+			if err == nil || !strings.Contains(err.Error(), "received 1 of the 50 updates Bodhi reported for F43") {
+				t.Fatalf("err = %v after %d emitted, want the short walk refused", err, emitted)
+			}
+		})
+	}
+
+	// An update leaving the stable set mid-walk is not a broken walk: 99 of
+	// 100 is within the tolerance, 97 of 100 is not.
+	for received, wantErr := range map[int]bool{99: false, 98: false, 97: true} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var ups []updateFixture
+			for i := 0; i < received; i++ {
+				ups = append(ups, one(i)...)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write(bodhiPageJSON(t, ups, 1, 1, 100))
+		}))
+		_, err := New(Options{Releases: []Release{{Name: "F43", Ecosystem: "Fedora:43"}}, BaseURL: srv.URL}).
+			Fetch(context.Background(), func(advisory.Advisory) error { return nil })
+		srv.Close()
+		if (err != nil) != wantErr {
+			t.Errorf("%d of 100: err = %v, want refused = %v", received, err, wantErr)
+		}
+	}
+}
+
+// The list of current releases is one a person keeps. Held here so the day
+// it is edited, the build log's own description is read again beside it.
+func TestDefaultReleases_AreTheOnesBodhiCalledCurrentWhenLastMeasured(t *testing.T) {
+	var names []string
+	for _, r := range DefaultReleases {
+		names = append(names, r.Name+"="+r.Ecosystem)
+	}
+	if got, want := strings.Join(names, ","), "F43=Fedora:43,F44=Fedora:44,F45=Fedora:45"; got != want {
+		t.Errorf("DefaultReleases = %s, want %s (measured against Bodhi 2026-11-23)", got, want)
+	}
+	if d := eolDisclosure(DefaultReleases); !strings.Contains(d, "fetching F43, F44, F45 only") || strings.Contains(d, "Bodhi's current stable releases") {
+		t.Errorf("disclosure = %q, want it to name the three and not claim they are Bodhi's own list", d)
+	}
+}
