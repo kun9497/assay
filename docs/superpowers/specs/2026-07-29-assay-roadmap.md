@@ -9731,6 +9731,35 @@ guarded.
 This is a check against corruption, not tampering: whoever can write the file can write the digests.
 The signature (D137) covers the artifact up to its installation.
 
+### D174 — An AL2 build is judged by the repository that publishes its version line
+
+**Decision (2026-11-23, revises D78).** AL2 core and its extras topics ship different version lines
+under one package name, all keyed `Amazon Linux:2`. A repository that publishes advisories for a
+name is the judge of its own builds of it: the span between its first and last fix is cut out of
+every higher repository's `[0, fixed)` for that name. A repository that publishes none for the
+name is nobody's line, and its builds keep the reports of the lines above.
+
+**Why.** A fully patched core kernel (4.14.355) was reported for 367 advisories of kernel 5.4, 5.10
+and 5.15, postgresql 13.22 for 17 of postgresql 14, each naming another line's fix. Measured on the
+live feeds of 2026-11-23, over every published build: 4,734,669 (package, CVE, repository pair)
+reports of a CVE the build's own repository had fixed, to 1,376, over 13 names whose repositories
+ship one line side by side (docker, golang) and so are not cut. Those patched builds draw none now.
+
+**A lower bound on every range was rejected.** It also clears the lines nobody publishes for: 16
+repositories (kernel-ng, php 7.2 to 7.4, postgresql 9.6 and 10) would have read clean. php 7.4.33
+keeps its 33 reports.
+
+**The span is the fixes', not the repository's package list,** so nothing more is fetched. It is
+never wider than the line: no published build of a cut range's own repository falls in a span
+below it (0 of 646 cuts). A build from before its line's first fix is in no span and still draws
+the lines above. In a gap the window closes with `last_affected`, so no fix is named: the next
+line's first fix is not one for a build under it.
+
+**Gives up.** On a line that publishes advisories, a CVE Amazon has fixed only in another line is no
+longer reported. That report was never Amazon's statement about the line, but it was right
+whenever Amazon had simply not fixed it yet. AL2023 is not covered: 364 of its entries would have
+been narrowed, and whether those are separate lines was not examined.
+
 ---
 
 ## 6. Benchmarking notes

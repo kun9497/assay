@@ -18,6 +18,12 @@ All notable changes to this project are documented here. The format follows
   reported again.** JSON `schemaVersion` is 23: `findings[].waived` is added (additive). VEX
   statements about different CVEs of one errata no longer override each other by order.
 
+- Amazon Linux 2: a build is judged by the repository that publishes its version line (D174). A
+  patched core kernel was reported for 367 advisories of kernel 5.4, 5.10 and 5.15, and postgresql,
+  php and ruby likewise, each with another line's fix. **A CVE Amazon has fixed only in another
+  line is no longer reported on a line that publishes advisories.** Builds of topics that publish
+  none (php 7.4, kernel-ng) keep their reports. Takes effect in databases built from this version.
+
 - An Ubuntu or Debian notice (USN, DSA, DLA) whose every CVE is already reported for the package
   is no longer a second, unrated finding; it is named on those findings (D172). **Finding and
   unknown counts fall on Ubuntu and Debian**; no vulnerability leaves the report. A notice that
