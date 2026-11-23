@@ -909,16 +909,16 @@ func TestRun_ScanDBMaxRatingAgeReachesRealExitCode(t *testing.T) {
 }
 
 // TestParseScan_DBMaxRatingAge pins the new flag's parsing to --db-max-age's
-// exactly: the = form and the space form, a positive Go duration, last one
-// wins, and every refusal names the flag -- a typo must never become a scan
+// exactly: the = form and the space form, a positive Go duration, once only,
+// and every refusal names the flag -- a typo must never become a scan
 // with no gate.
 func TestParseScan_DBMaxRatingAge(t *testing.T) {
-	_, opts, err := parseScanArgs([]string{"alpine:3.19", "--db-max-rating-age=48h", "--db-max-rating-age=168h"})
+	_, opts, err := parseScanArgs([]string{"alpine:3.19", "--db-max-rating-age=168h"})
 	if err != nil {
 		t.Fatalf("parseScanArgs: %v", err)
 	}
 	if opts.DBMaxRatingAge != 168*time.Hour {
-		t.Errorf("DBMaxRatingAge = %v, want 168h0m0s (the last one given)", opts.DBMaxRatingAge)
+		t.Errorf("DBMaxRatingAge = %v, want 168h0m0s", opts.DBMaxRatingAge)
 	}
 	// Two flags, two fields: neither may land in the other's.
 	if opts.DBMaxAge != 0 {

@@ -111,6 +111,11 @@ func AffectsVersion(c Comparer, v string, a advisory.Affected) (bool, Evidence, 
 		}
 		return true, best, nil, nil
 	}
+	// Before a.Versions is consulted, deliberately (D30, reaffirmed
+	// 2026-11-23): the list is enumerated from the same bound that would not
+	// read, so a hit in it is not independent evidence. Falling through was
+	// measured on PyPI: five more hits and about 300 false positives. The
+	// skip is reported.
 	if rangeErr != nil {
 		return false, Evidence{}, nil, rangeErr
 	}

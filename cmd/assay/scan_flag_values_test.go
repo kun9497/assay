@@ -82,3 +82,24 @@ func TestRun_ProvenanceWithNoValueDoesNotRunTheScan(t *testing.T) {
 		t.Error("a sidecar named after the swallowed flag was written")
 	}
 }
+
+// QA 2026-11-20. A repeated gate took its last value, silently.
+func TestParseScanArgs_ARepeatedValueIsRefused(t *testing.T) {
+	for flag, v := range map[string][2]string{
+		"--db-max-age": {"24h", "9999h"}, "--db-max-rating-age": {"24h", "9999h"},
+		"--timeout": {"1m", "1h"}, "--config": {"a.yaml", "none"},
+	} {
+		for _, args := range [][]string{
+			{"x.json", flag, v[0], flag, v[1]},
+			{"x.json", flag + "=" + v[0], flag + "=" + v[1]},
+			{"x.json", flag + "=" + v[0], flag, v[1]},
+		} {
+			if _, _, err := parseScanArgs(args); err == nil || !strings.Contains(err.Error(), flag+" given more than once") {
+				t.Errorf("parseScanArgs(%q): err = %v, want a refusal", args, err)
+			}
+		}
+		if _, _, err := parseScanArgs([]string{"x.json", flag, v[0]}); err != nil {
+			t.Errorf("%s once: %v", flag, err)
+		}
+	}
+}

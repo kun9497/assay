@@ -133,6 +133,13 @@ All notable changes to this project are documented here. The format follows
   under `--fail-on-incomplete=target`). A Bitnami package without a version is counted skipped.
 - RubyGems prereleases with a zero before a later letter compare as rubygems does.
 - openSUSE Leap keeps the fix of an SLE entry that also carries a no-fix statement.
+- `--db-max-age`, `--db-max-rating-age`, `--timeout` and `--config` given twice are refused (exit 2),
+  as `--fail-on` is. The last one won silently. **A command that overrides its own default by
+  repeating the flag stops working.**
+- A `docker-archive:` holding two members named `manifest.json`, or two of the config, is refused:
+  readers disagree on which is the image.
+- A layer naming one ancestor directory twice (a directory and a link) is read as it unpacks.
+- SARIF: a rule shared by several installs takes the worst one's severity and lists every fix.
 - NVD: a 200 response that is not a CVE page fails the sync instead of ending it as complete.
 - CycloneDX: the order of siblings under `metadata.component` no longer decides whether a listing
   is keyed to its release.

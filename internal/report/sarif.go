@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"slices"
+	"sort"
 	"strings"
 
 	"github.com/kun9497/assay/internal/advisory"
@@ -35,13 +37,23 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 
 	rules := make([]sarifRule, 0, len(res.Findings)+1)
 	results := make([]sarifResult, 0, len(res.Findings)+len(res.Suppressed)+len(res.Skipped))
+	// One rule per id, built from every finding that shares it: GitHub reads a
+	// finding's severity from its rule, so a rule built from the first seen
+	// showed a critical install under the high one's band (QA 2026-11-20).
+	groups := map[string][]matcher.Finding{}
+	for _, f := range res.Findings {
+		groups[ruleID(f)] = append(groups[ruleID(f)], f)
+	}
+	for _, s := range res.Suppressed {
+		groups[ruleID(s.Finding)] = append(groups[ruleID(s.Finding)], s.Finding)
+	}
 	seen := map[string]bool{}
 
 	for _, f := range res.Findings {
 		id := ruleID(f)
 		if !seen[id] {
 			seen[id] = true
-			rules = append(rules, findingRule(id, f))
+			rules = append(rules, groupRule(id, groups[id]))
 		}
 		results = append(results, sarifResult{
 			RuleID:  id,
@@ -68,7 +80,7 @@ func SARIF(w io.Writer, res matcher.Result, cat cyclonedx.Stats, unread []dirsca
 		id := ruleID(f)
 		if !seen[id] {
 			seen[id] = true
-			rules = append(rules, findingRule(id, f))
+			rules = append(rules, groupRule(id, groups[id]))
 		}
 		results = append(results, sarifResult{
 			RuleID:       id,
@@ -838,4 +850,53 @@ func summaryLevelOf(sum Summary, cov Coverage) string {
 		return "error"
 	}
 	return summaryLevel(sum)
+}
+
+// groupRule is findingRule for the findings sharing a rule id: the worst one's
+// rule, with what the others add to it.
+func groupRule(id string, fs []matcher.Finding) sarifRule {
+	worst := fs[0]
+	for _, f := range fs[1:] {
+		// An unrated finding replaces nothing but another one.
+		if worst.Severity == severity.Unknown || f.Severity != severity.Unknown &&
+			securitySeverity(f.Severity, f.Score) > securitySeverity(worst.Severity, worst.Score) {
+			worst = f
+		}
+	}
+	r := findingRule(id, worst)
+	if len(fs) == 1 {
+		return r
+	}
+	var purls, helps []string
+	for _, f := range fs {
+		if p := f.Package.PURL; p != "" && !slices.Contains(purls, p) {
+			purls = append(purls, p)
+		}
+		if h := helpText(f); !slices.Contains(helps, h) {
+			helps = append(helps, h)
+		}
+		if f.Unfixable() {
+			r.Properties["unfixable"] = true
+			r.Properties["fixState"] = f.FixState().String()
+		}
+		one := findingRule(id, f).Properties
+		for _, k := range []string{"kev", "kevDateAdded", "kevRansomware"} {
+			if v, ok := one[k]; ok {
+				r.Properties[k] = v
+			}
+		}
+		if v, ok := f.MaxEPSS(); ok {
+			if have, ok := r.Properties["epss"].(float64); !ok || v > have {
+				r.Properties["epss"] = v
+			}
+		}
+	}
+	if len(purls) > 0 {
+		sort.Strings(purls)
+		r.Properties["purls"] = purls
+	}
+	sort.Strings(helps)
+	help := strings.Join(helps, "\n")
+	r.Help = &sarifHelp{Text: help, Markdown: "```\n" + help + "```\n"}
+	return r
 }

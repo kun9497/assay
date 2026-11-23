@@ -129,6 +129,13 @@
   `--fail-on-incomplete=target`에서 exit 2). 버전 없는 Bitnami 패키지는 건너뛴 것으로 셉니다.
 - 뒤쪽 문자 앞에 0이 있는 RubyGems 프리릴리스를 rubygems와 같게 비교합니다.
 - openSUSE Leap은 수정 없음 진술도 함께 가진 SLE 항목의 수정 버전을 유지합니다.
+- `--db-max-age`, `--db-max-rating-age`, `--timeout`, `--config`를 두 번 주면 `--fail-on`처럼
+  거부합니다(exit 2). 전에는 마지막 값이 조용히 이겼습니다. **플래그를 반복해 자기 기본값을 덮어쓰던
+  명령은 동작하지 않습니다.**
+- `manifest.json`이나 config라는 이름의 항목이 둘인 `docker-archive:`는 거부합니다. 어느 쪽이
+  이미지인지 리더마다 다르게 읽습니다.
+- 한 조상 디렉터리를 두 번(디렉터리와 링크) 적은 레이어는 풀리는 그대로 읽습니다.
+- SARIF: 여러 설치가 공유하는 rule은 가장 심한 것의 심각도를 쓰고 모든 수정 버전을 나열합니다.
 - NVD: CVE 페이지가 아닌 200 응답은 완료로 끝내지 않고 동기화를 실패시킵니다.
 - CycloneDX: `metadata.component` 아래 형제의 순서가 목록이 릴리스에 키로 묶이는지를 정하지 않습니다.
 
