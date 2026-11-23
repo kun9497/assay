@@ -98,6 +98,8 @@
   `--fail-on-incomplete`가 걸립니다.
 - `dev-` 브랜치로 설치한 Composer 패키지는 대상의 불완전함으로 처리되어
   `--fail-on-incomplete=target`이 걸립니다. 전에는 권고의 탓으로 돌렸습니다.
+- Red Hat 툴체인으로 빌드한 Go 바이너리의 표준 라이브러리를 평가합니다.
+- CycloneDX: `metadata.component` 아래 형제의 순서가 목록이 릴리스에 키로 묶이는지를 정하지 않습니다.
 
 ## [0.18.6] - 2026-11-19
 

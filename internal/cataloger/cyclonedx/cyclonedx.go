@@ -710,6 +710,18 @@ func indexOfPackage(pkgs []pkgmeta.Package, p pkgmeta.Package, keyed map[string]
 		}
 	}
 	if compatible >= 0 {
+		// An unkeyed listing that states its architecture has a nearer twin
+		// than a bare one: the keyed listing of that same architecture. Taking
+		// the bare slot first left it unkeyed, and which of two siblings
+		// reached the slot first decided whether the document was complete
+		// (exit 2 or 0 by sibling order, QA 2026-11-20).
+		if p.Arch != "" && p.Ecosystem == "" && pkgs[compatible].Arch == "" && !ambiguous(p, keyed) {
+			for i, q := range pkgs {
+				if sameListing(q, p) && q.Ecosystem != "" && q.Arch == p.Arch {
+					return i
+				}
+			}
+		}
 		return compatible
 	}
 	// D166: an OS nested under the subject keys the subject's listing of a

@@ -9474,6 +9474,11 @@ or not a probe found anything there (a few hundred small files in one pass). An 
 package is in the inventory under a different name than the list's (a dpkg rename mid-upgrade)
 is unowned rather than guessed.
 
+**Known limit (QA 2026-11-20).** rpm and apk keep one database file, so a later package operation
+rewrites every record into its own layer. A file the image's author replaced between the two is
+then labelled as owned by the package. JSON only; no verdict reads it. Closing it means comparing
+the file with the digest the record holds.
+
 ---
 
 ### D168 — Contradictory or ambiguous OS evidence in an SBOM is reported, not resolved (extends D166)

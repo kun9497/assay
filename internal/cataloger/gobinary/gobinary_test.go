@@ -345,6 +345,7 @@ func TestAddStdlib_CountsAddUp(t *testing.T) {
 		skipped   int
 	}{
 		{"go1.26.4", 1, 0},
+		{"go1.22.2 (Red Hat 1.22.2-1.el9)", 1, 0},
 		{"go1.20", 1, 0},
 		{"devel go1.27-abc 2026-01-01", 0, 1},
 		{"", 0, 1},

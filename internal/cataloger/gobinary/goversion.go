@@ -47,6 +47,14 @@ func normalizeGoVersion(v string) (string, bool) {
 			break
 		}
 	}
+	// Red Hat's toolchain appends its own package version: "go1.22.2 (Red Hat
+	// 1.22.2-1.el9)". The stdlib linked is the named Go release, and refusing
+	// the string left every binary built on RHEL or UBI with its stdlib not
+	// evaluated (QA 2026-11-20). Only this vendor's form: a suffix nobody has
+	// read may mean another release.
+	if i := strings.Index(v, " (Red Hat "); i > 0 && strings.HasSuffix(v, ")") {
+		v = v[:i]
+	}
 	// A development toolchain — "devel go1.27-abc123 2026-01-01" — names no
 	// released version. Refusing is right: inventing 1.27.0 would claim a
 	// version that does not exist and could sit on either side of a fix.
