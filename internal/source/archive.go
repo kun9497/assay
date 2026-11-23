@@ -99,7 +99,7 @@ func archivePadding(size int) []byte {
 	return make([]byte, (512-size%512)%512)
 }
 
-// Match the library's first clean-path match and relative link resolution.
+// Match the library's clean-path match and relative link resolution.
 // Iteration bounds link depth and closes each file before following a link.
 func readArchiveMetadata(ctx context.Context, open tarball.Opener, name string, limit int64) ([]byte, error) {
 	visited := make(map[string]bool)
@@ -129,12 +129,23 @@ func readArchiveMetadata(ctx context.Context, open tarball.Opener, name string, 
 	return nil, fmt.Errorf("archive metadata exceeds %d link hops at %s", maxSymlinks, name)
 }
 
+// findArchiveMetadata reads the one member called name. Two are refused, not
+// resolved: go-containerregistry takes the first, moby and containerd unpack
+// the archive and so take the last, and no archive a tool writes has both --
+// one tarball scanned as one image and loaded as another (QA 2026-11-20).
+// Layers need no such rule: their content is held to the config's diff ids.
 func findArchiveMetadata(reader io.Reader, name string, limit int64) ([]byte, string, error) {
 	archive := tar.NewReader(reader)
+	found := false
+	var data []byte
+	link := ""
 	for {
 		header, err := archive.Next()
 		if errors.Is(err, io.EOF) {
-			return nil, "", fmt.Errorf("file %s not found in tar", name)
+			if !found {
+				return nil, "", fmt.Errorf("file %s not found in tar", name)
+			}
+			return data, link, nil
 		}
 		if err != nil {
 			return nil, "", err
@@ -142,20 +153,24 @@ func findArchiveMetadata(reader io.Reader, name string, limit int64) ([]byte, st
 		if path.Clean(header.Name) != path.Clean(name) {
 			continue
 		}
+		if found {
+			return nil, "", fmt.Errorf("docker archive holds more than one member named %s; readers disagree on which is the image", path.Clean(name))
+		}
+		found = true
 		if header.Typeflag == tar.TypeSymlink || header.Typeflag == tar.TypeLink {
-			return nil, path.Join(filepath.Dir(name), path.Clean(header.Linkname)), nil
+			link = path.Join(filepath.Dir(name), path.Clean(header.Linkname))
+			continue
 		}
 		if header.Size > limit {
 			return nil, "", fmt.Errorf("archive metadata %s declares %d bytes, past the %s limit (D112)", name, header.Size, formatBytes(limit))
 		}
-		data, err := io.ReadAll(io.LimitReader(archive, limit+1))
+		data, err = io.ReadAll(io.LimitReader(archive, limit+1))
 		if err != nil {
 			return nil, "", err
 		}
 		if int64(len(data)) > limit {
 			return nil, "", fmt.Errorf("archive metadata %s exceeds the %s limit (D112)", name, formatBytes(limit))
 		}
-		return data, "", nil
 	}
 }
 

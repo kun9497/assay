@@ -369,6 +369,13 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		// query's path; it decides the query only when nothing in this
 		// layer decided it by name (see the ancestor case below).
 		above := make([]layerHit, len(qs))
+		// Within a layer the later entry for one ancestor replaces the
+		// earlier, so this layer's directories join dirAbove only after it
+		// and undo only an ancestor entry of the same name (QA 2026-11-20: a
+		// directory followed by a link at one name, in one layer, read as
+		// the link replaced from above and the file as absent).
+		aboveName := make([]string, len(qs))
+		layerDirs := make([]map[string]bool, len(qs))
 		pos := -1
 
 		err := readLayer(ctx, l, func(name string, h *tar.Header, r io.Reader) error {
@@ -477,13 +484,19 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 						} else {
 							above[k] = layerHit{kind: hitLink, linkname: h.Linkname, pos: pos, rest: strings.TrimPrefix(q.path, name+"/")}
 						}
+						aboveName[k] = name
+						delete(layerDirs[k], name)
 					case tar.TypeDir:
-						if dirAbove[k] == nil {
-							dirAbove[k] = map[string]bool{}
+						if layerDirs[k] == nil {
+							layerDirs[k] = map[string]bool{}
 						}
-						dirAbove[k][name] = true
+						layerDirs[k][name] = true
+						if aboveName[k] == name {
+							above[k], aboveName[k] = layerHit{}, ""
+						}
 					default:
-						above[k] = layerHit{kind: hitGone}
+						above[k], aboveName[k] = layerHit{kind: hitGone}, name
+						delete(layerDirs[k], name)
 					}
 				case name == q.path:
 					switch h.Typeflag {
@@ -509,6 +522,15 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 		})
 		if err != nil {
 			return nil, fmt.Errorf("read layer %s: %w", l.DiffID, err)
+		}
+
+		for k, dirs := range layerDirs {
+			for name := range dirs {
+				if dirAbove[k] == nil {
+					dirAbove[k] = map[string]bool{}
+				}
+				dirAbove[k][name] = true
+			}
 		}
 
 		for k, hit := range hits {

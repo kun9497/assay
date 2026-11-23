@@ -103,6 +103,11 @@ func TestOpen_DockerArchiveMetadataLimitsAreTheDeclaredOnes(t *testing.T) {
 			if err := w.WriteHeader(&tc.over); err != nil {
 				t.Fatal(err)
 			}
+			// The manifest is looked for to the end of the archive, so an
+			// over-long config needs its body for the manifest to be read.
+			if len(tc.entries) > 0 {
+				buf.Write(make([]byte, (tc.over.Size+511)/512*512+1024))
+			}
 			file := filepath.Join(t.TempDir(), "image.tar")
 			if err := os.WriteFile(file, buf.Bytes(), 0600); err != nil {
 				t.Fatal(err)
@@ -142,13 +147,12 @@ func TestArchiveMetadataBoundariesAndTruncation(t *testing.T) {
 	}
 }
 
-func TestArchiveMetadataLinksFirstMatchAndLongNames(t *testing.T) {
+func TestArchiveMetadataLinksAndLongNames(t *testing.T) {
 	long := strings.Repeat("a/", 80) + "config.json"
 	for _, kind := range []byte{tar.TypeSymlink, tar.TypeLink} {
 		data := archiveTestBytes(t,
 			archiveTestEntry{header: tar.Header{Name: "dir/config", Typeflag: kind, Linkname: "../" + long}},
 			archiveTestFile("./"+long, []byte("first")),
-			archiveTestFile(long, []byte("second")),
 		)
 		body, err := readArchiveMetadata(context.Background(), archiveTestOpener(data), "dir/config", MaxConfigBytes)
 		if err != nil || string(body) != "first" {
@@ -360,5 +364,26 @@ func TestArchivePrefixSeeksAcrossBoundary(t *testing.T) {
 	guarded := &archiveContextReader{ctx: ctx, Reader: r, Closer: file}
 	if _, err := guarded.Seek(0, io.SeekStart); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled seek: %v", err)
+	}
+}
+
+// QA 2026-11-20. Readers disagree on which of two same-named members is the
+// image: one tarball scanned as A and loaded as B.
+func TestOpen_DockerArchiveWithTwoMetadataMembersIsRefused(t *testing.T) {
+	config := []byte(`{"os":"linux","architecture":"amd64","rootfs":{"type":"layers","diff_ids":[]}}`)
+	manifest := []byte(`[{"Config":"c.json","Layers":[]}]`)
+	for name, entries := range map[string][]archiveTestEntry{
+		"two manifests":         {archiveTestFile("manifest.json", manifest), archiveTestFile("c.json", config), archiveTestFile("manifest.json", manifest)},
+		"two configs":           {archiveTestFile("manifest.json", manifest), archiveTestFile("c.json", config), archiveTestFile("./c.json", config)},
+		"a link and a file":     {archiveTestFile("manifest.json", manifest), {header: tar.Header{Name: "c.json", Typeflag: tar.TypeSymlink, Linkname: "d.json"}}, archiveTestFile("d.json", config), archiveTestFile("c.json", config)},
+		"two of what is linked": {archiveTestFile("manifest.json", manifest), {header: tar.Header{Name: "c.json", Typeflag: tar.TypeSymlink, Linkname: "d.json"}}, archiveTestFile("d.json", config), archiveTestFile("d.json", config)},
+	} {
+		p := filepath.Join(t.TempDir(), "x.tar")
+		if err := os.WriteFile(p, archiveTestBytes(t, entries...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Open(context.Background(), "docker-archive:"+p, "linux/amd64"); err == nil || !strings.Contains(err.Error(), "more than one member named") {
+			t.Errorf("%s: err = %v, want it refused", name, err)
+		}
 	}
 }

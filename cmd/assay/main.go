@@ -1399,7 +1399,9 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			if err != nil {
 				return "", scancmd.Options{}, err
 			}
-			opts.DBMaxAge = d
+			if err := setOnce(&opts.DBMaxAge, d, "--db-max-age"); err != nil {
+				return "", scancmd.Options{}, err
+			}
 
 		case a == "--db-max-age":
 			i++
@@ -1411,7 +1413,9 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			if err != nil {
 				return "", scancmd.Options{}, err
 			}
-			opts.DBMaxAge = d
+			if err := setOnce(&opts.DBMaxAge, d, "--db-max-age"); err != nil {
+				return "", scancmd.Options{}, err
+			}
 
 		// D113. Spelled and parsed exactly like --db-max-age beside it,
 		// through the same helper, so the two gates a service is told to pass
@@ -1421,7 +1425,9 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			if err != nil {
 				return "", scancmd.Options{}, err
 			}
-			opts.DBMaxRatingAge = d
+			if err := setOnce(&opts.DBMaxRatingAge, d, "--db-max-rating-age"); err != nil {
+				return "", scancmd.Options{}, err
+			}
 
 		case a == "--db-max-rating-age":
 			i++
@@ -1433,7 +1439,9 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 			if err != nil {
 				return "", scancmd.Options{}, err
 			}
-			opts.DBMaxRatingAge = d
+			if err := setOnce(&opts.DBMaxRatingAge, d, "--db-max-rating-age"); err != nil {
+				return "", scancmd.Options{}, err
+			}
 
 		// D112. Both spellings: the decision writes this flag
 		// `--timeout <duration>`, so the form a reader copies from it has to
@@ -1679,6 +1687,18 @@ func parseMaxAge(flag, v string) (time.Duration, error) {
 	return d, nil
 }
 
+// setOnce stores a duration flag, refusing a second one: the later value used
+// to win silently, which loosens a gate the first one set, the shape
+// --fail-on refuses (QA 2026-11-20). Every duration flag refuses zero, so
+// non-zero means already given.
+func setOnce(dst *time.Duration, d time.Duration, flag string) error {
+	if *dst != 0 {
+		return fmt.Errorf("%s given more than once (%s, then %s)", flag, *dst, d)
+	}
+	*dst = d
+	return nil
+}
+
 // setTimeout validates a --timeout value and stores it on opts.Timeout, in
 // --db-max-age's idiom and wording: Go's own duration syntax, and a refusal
 // that names what to type instead.
@@ -1693,8 +1713,7 @@ func setTimeout(opts *scancmd.Options, v string) error {
 	if d <= 0 {
 		return fmt.Errorf("--timeout: %q must be positive; omit the flag to scan without a time limit", v)
 	}
-	opts.Timeout = d
-	return nil
+	return setOnce(&opts.Timeout, d, "--timeout")
 }
 
 // setPlatform validates a --platform value and stores it on opts.Platform
@@ -1723,6 +1742,9 @@ func setPlatform(opts *scancmd.Options, v string) error {
 func setConfig(opts *scancmd.Options, v string) error {
 	if v == "" {
 		return fmt.Errorf("--config requires a non-empty path (pass `--config none` to apply no ignore file)")
+	}
+	if opts.IgnoreFile != "" {
+		return fmt.Errorf("--config given more than once (%q, then %q)", opts.IgnoreFile, v)
 	}
 	opts.IgnoreFile = v
 	return nil
