@@ -31,6 +31,8 @@ var dataBuckets = [][]byte{bucketAdvisories, bucketByID, bucketRatings, bucketEn
 //
 // Keys must ascend. They do in any healthy tree, and a damaged branch page
 // that points back at a page already read would otherwise be walked forever.
+// No test holds that line: without such a cycle, entries out of order give
+// another digest anyway.
 func bucketDigest(bk *bolt.Bucket) (digest string, entries int, err error) {
 	h := sha256.New()
 	var n [8]byte
