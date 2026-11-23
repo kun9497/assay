@@ -201,6 +201,7 @@ func parseRecords(r io.Reader) ([]record, error) {
 	}
 
 	sc := bufio.NewScanner(r)
+	sc.Buffer(nil, maxLine)
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
@@ -242,3 +243,8 @@ func parseRecords(r io.Reader) ([]record, error) {
 	flush()
 	return recs, nil
 }
+
+// maxLine bounds one line of a package database. Not bufio.Scanner's default
+// 64 KiB, which real packages' dependency and provides lines exceed (QA
+// 2026-11-20); past this a line still fails loudly through sc.Err().
+const maxLine = 16 << 20

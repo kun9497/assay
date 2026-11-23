@@ -16,6 +16,7 @@ const InfoDir = "var/lib/dpkg/info"
 func ParseFileList(r io.Reader) ([]string, error) {
 	var out []string
 	sc := bufio.NewScanner(r)
+	sc.Buffer(nil, maxLine)
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		if line == "" || line == "/." {

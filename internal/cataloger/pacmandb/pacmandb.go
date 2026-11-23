@@ -138,6 +138,7 @@ func parseSections(r io.Reader) (map[string][]string, error) {
 	fields := map[string][]string{}
 	var key string
 	sc := bufio.NewScanner(r)
+	sc.Buffer(nil, maxLine)
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {
@@ -164,3 +165,8 @@ func parseSections(r io.Reader) (map[string][]string, error) {
 func isSectionHeader(line string) bool {
 	return len(line) > 2 && strings.HasPrefix(line, "%") && strings.HasSuffix(line, "%")
 }
+
+// maxLine bounds one line of a package database. Not bufio.Scanner's default
+// 64 KiB, which real packages' dependency and provides lines exceed (QA
+// 2026-11-20); past this a line still fails loudly through sc.Err().
+const maxLine = 16 << 20
