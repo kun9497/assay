@@ -1110,6 +1110,8 @@ exited 0 while 24 findings went unmentioned.
       codename-scoped VEX; v0.18.2 to v0.18.6
 - [x] `db update` follows a tag forward only (D169) — an artifact built before the installed
       database is refused with exit 2; `--allow-older` or a digest reference lifts it
+- [x] An image's inventory is the database of its own package format (D170) — a second
+      package database is reported not read, never merged and never read in its place
 - [x] A package listed in both `components` and the subject keeps its stated source version (D165)
       — whichever listing comes first; two stated versions or source names that contradict are judged
       on neither, as one target-cause skip naming both (exit 2 under the strict gate); QA 2026-11-10
