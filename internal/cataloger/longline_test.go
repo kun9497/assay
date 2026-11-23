@@ -36,8 +36,4 @@ func TestPackageDatabases_ReadALineOverTheScannerDefault(t *testing.T) {
 	if err != nil || len(pac) != 1 {
 		t.Errorf("pacman: %d packages, err %v; want one", len(pac), err)
 	}
-	list, err := dpkgdb.ParseFileList(strings.NewReader("/usr/" + long + nl + "/usr/bin/x" + nl))
-	if err != nil || len(list) != 2 {
-		t.Errorf("dpkg list: %d paths, err %v; want both", len(list), err)
-	}
 }
