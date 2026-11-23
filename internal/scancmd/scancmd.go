@@ -1653,9 +1653,6 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 			}
 		}
 	}
-	if use == "" && hasStatus {
-		use = dbDpkg // an empty status file and nothing else: the error below names it
-	}
 	rpmPath := rpmFound.bdbPath
 	if rpmPath == "" {
 		rpmPath = rpmFound.ndbPath

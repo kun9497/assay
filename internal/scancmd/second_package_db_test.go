@@ -151,6 +151,13 @@ func TestCatalogFromImage_TheImagesOwnFormatIsItsInventory(t *testing.T) {
 			wantType: "rpm", wantN: 6, wantUnread: apkDBPath, wantReadAs: "the rpm database was read",
 		},
 		{
+			// An RPM distro this build has no advisory key for is still an
+			// RPM distro: its identity implies the format without a key.
+			name:     "centos (no key) with an apk database",
+			files:    map[string]string{osReleasePath: "ID=centos\nVERSION_ID=\"7\"\n", "var/lib/rpm/rpmdb.sqlite": rpm, apkDBPath: apkOneRecord},
+			wantType: "rpm", wantN: 6, wantUnread: apkDBPath, wantReadAs: "the rpm database was read",
+		},
+		{
 			// pacman's database is a pass of its own, made only when nothing
 			// else was found -- or when the image says it is Arch.
 			name: "arch with an apk database",
