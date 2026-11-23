@@ -80,6 +80,8 @@ func ReadBDB(db []byte, ecosystem, path string) (Result, error) {
 		out        Result
 		nextHdrNum int64 = -1
 		records    int
+		// heads is every overflow chain an item points at.
+		heads = map[uint32]bool{}
 	)
 	for pgno := uint32(1); pgno <= f.lastPgno; pgno++ {
 		p, err := f.page(pgno)
@@ -95,7 +97,16 @@ func ReadBDB(db []byte, ecosystem, path string) (Result, error) {
 			return Result{}, fmt.Errorf("%w: %s: %v", ErrBDB, path, err)
 		}
 		// Items alternate key, data. The odd ones are the values, and the
-		// values are the RPM header blobs.
+		// values are the RPM header blobs. A key with no value is a damaged
+		// item count, and the record it belonged to is lost.
+		if len(items)%2 != 0 {
+			return Result{}, fmt.Errorf("%w: %s: page %d holds %d items, an unpaired key", ErrBDB, path, pgno, len(items))
+		}
+		for _, it := range items {
+			if len(it) >= bdbOffPageLen && it[0] == bdbOffPage {
+				heads[f.order.Uint32(it[4:8])] = true
+			}
+		}
 		for i := 0; i+1 < len(items); i += 2 {
 			key, val := items[i], items[i+1]
 			records++
@@ -128,6 +139,40 @@ func ReadBDB(db []byte, ecosystem, path string) (Result, error) {
 			}
 			out.Packages = append(out.Packages, pkg)
 			out.own(h, len(out.Packages)-1)
+		}
+	}
+
+	// A hash page that was zeroed, or whose type byte or item count was
+	// damaged, removes every record it held and leaves nothing on the page to
+	// say so (QA 2026-11-20) -- and zero pages cannot simply be refused: the
+	// hash method extends the file a doubling at a time and leaves buckets it
+	// has not used yet as zeros. What the records leave behind is their
+	// values. A package header is larger than a page in practice, so it lives
+	// in an overflow chain, and a chain page that no item and no other page
+	// points at is a record this walk did not see. Deleting a package frees
+	// its chain (the pages change type), so a healthy database holds none.
+	//
+	// The links are read, not prev_pgno: "no page points here" is the fact
+	// itself, and it does not depend on a back link being maintained. A page
+	// damaged in its type byte alone still points on, so a broken chain stays
+	// one skipped record rather than refusing the file.
+	pointed := heads
+	for pgno := uint32(1); pgno <= f.lastPgno; pgno++ {
+		p, err := f.page(pgno)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: %s: %v", ErrBDB, path, err)
+		}
+		pointed[f.order.Uint32(p[16:20])] = true
+	}
+	for pgno := uint32(1); pgno <= f.lastPgno; pgno++ {
+		p, err := f.page(pgno)
+		if err != nil {
+			return Result{}, fmt.Errorf("%w: %s: %v", ErrBDB, path, err)
+		}
+		if p[bdbHashMetaAtOff] == bdbOverflow && !pointed[pgno] {
+			return Result{}, fmt.Errorf(
+				"%w: %s: overflow page %d begins a record no hash page points at; "+
+					"a hash page is damaged and the package list would be short", ErrBDB, path, pgno)
 		}
 	}
 

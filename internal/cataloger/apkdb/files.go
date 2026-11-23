@@ -17,6 +17,7 @@ func ParseFiles(r io.Reader) (map[string]string, error) {
 	out := map[string]string{}
 	var name, dir string
 	sc := bufio.NewScanner(r)
+	sc.Buffer(nil, maxLine)
 	for sc.Scan() {
 		line := sc.Text()
 		if line == "" {

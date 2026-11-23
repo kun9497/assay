@@ -30,6 +30,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -189,7 +190,7 @@ func Parse(path string) ([]pkgmeta.Package, cyclonedx.Stats, []Skipped, error) {
 				continue
 			}
 
-			switch classifyResolution(readResolution(entry)) {
+			switch classifyResolution(readResolution(entry), name, version) {
 			case causeRegistry:
 				dedupeKey := name + "@" + version
 				if seen[dedupeKey] {
@@ -356,14 +357,14 @@ func readResolution(entry *yaml.Node) resolution {
 // and type: binary or a custom:* resolver is a non-registry source assay
 // treats the same way as git for evaluation purposes - a real dependency it
 // cannot place in an advisory range.
-func classifyResolution(r resolution) cause {
+func classifyResolution(r resolution, name, version string) cause {
 	switch {
 	case r.typ == "directory":
 		return causeLocal
 	case r.typ == "git", r.repo != "" && r.commit != "":
 		return causeGit
 	case r.tarball != "":
-		if isNpmRegistryTarball(r.tarball) {
+		if isNpmRegistryTarball(r.tarball) || isRegistryRelease(r, name, version) {
 			return causeRegistry
 		}
 		return causeGit
@@ -374,6 +375,43 @@ func classifyResolution(r resolution) cause {
 	default:
 		return causeMalformed
 	}
+}
+
+// semverRelease is a whole semver version and nothing else.
+var semverRelease = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$`)
+
+// isRegistryRelease reports whether an entry with a tarball URL on another
+// host is an ordinary registry release served by a mirror or a private proxy.
+// pnpm writes the URL on every entry under lockfileIncludeTarballUrl, and for
+// registries with non-standard paths, so the host alone routed every package
+// of such a lockfile to "git or foreign tarball" and --fail-on saw none of
+// them, while npmlock evaluates the same package from the same mirror (QA
+// 2026-11-20).
+//
+// Three things together, because each alone also describes something else.
+// A registry entry carries integrity; a git-hosted tarball from pnpm 8 and
+// earlier does not, and newer ones are marked by their host here. The key's
+// version is a whole semver version, where a URL dependency's key holds a URL
+// and a git one a commit. The name is a package name, not a URL: splitting
+// "x@https://host/y@1.2.3" on its last "@" yields a version that looks fine.
+func isRegistryRelease(r resolution, name, version string) bool {
+	if r.integrity == "" || !semverRelease.MatchString(version) || strings.Contains(name, ":") {
+		return false
+	}
+	// A scoped name has one "/", a bare one none; an older URL key
+	// ("@host/path/...") has more.
+	if n := strings.Count(name, "/"); n > 1 || (n == 1 && !strings.HasPrefix(name, "@")) {
+		return false
+	}
+	u, err := url.Parse(r.tarball)
+	if err != nil {
+		return false
+	}
+	switch u.Host {
+	case "codeload.github.com", "github.com", "gitlab.com", "bitbucket.org":
+		return false
+	}
+	return true
 }
 
 // isNpmRegistryTarball reports whether a resolution's tarball URL is hosted

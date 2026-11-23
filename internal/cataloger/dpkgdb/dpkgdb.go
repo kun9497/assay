@@ -95,9 +95,12 @@ func parseStanzas(r io.Reader, ecosystem, path string) ([]pkgmeta.Package, error
 	}
 
 	sc := bufio.NewScanner(r)
-	// A Description field can be long, and the default 64 KiB token is ample
-	// for it. A file that exceeds it should fail loudly rather than be read in
-	// part, which sc.Err() below ensures.
+	// Not the default 64 KiB token: a binary stanza's dependency fields are
+	// one line each, and real packages exceed it (QA 2026-11-20), which failed
+	// the whole image with "token too long" over one readable line. Past
+	// maxLine it still fails loudly, through sc.Err() below, rather than being
+	// read in part.
+	sc.Buffer(nil, maxLine)
 	for sc.Scan() {
 		line := strings.TrimRight(sc.Text(), " \t\r")
 		if line == "" {
@@ -220,3 +223,6 @@ func isInstalled(status string) bool {
 	}
 	return installedStates[fields[2]]
 }
+
+// maxLine bounds one line of a package database.
+const maxLine = 16 << 20

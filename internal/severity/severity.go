@@ -95,6 +95,12 @@ var vendorSeverityWords = map[string]struct {
 	// would have to know to check for.
 	"Medium": {Medium, 4.0},
 	"Low":    {Low, 0.1},
+	// GHSA's database_specific.severity, upper-case as published. "HIGH" and
+	// "CRITICAL" are its own words, not another vendor's in capitals.
+	"CRITICAL": {Critical, 9.0},
+	"HIGH":     {High, 7.0},
+	"MODERATE": {Medium, 4.0},
+	"LOW":      {Low, 0.1},
 	// D75: Fedora's Bodhi feed has its own five-word ladder --
 	// urgent/high/medium/low/unspecified -- and "urgent"/"high" are
 	// genuinely different WORDS from RHSA's "Critical"/"Important", not a

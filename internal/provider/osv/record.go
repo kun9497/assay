@@ -29,6 +29,9 @@ type rawRecord struct {
 	Related   []string      `json:"related"`
 	Affected  []rawAffected `json:"affected"`
 	Severity  []rawSeverity `json:"severity"`
+	// DatabaseSpecific is read for GHSA's severity word only. Raw, because
+	// its shape is each database's own.
+	DatabaseSpecific json.RawMessage `json:"database_specific"`
 }
 
 type rawAffected struct {
@@ -39,6 +42,9 @@ type rawAffected struct {
 	} `json:"package"`
 	Ranges   []rawRange `json:"ranges"`
 	Versions []string   `json:"versions"`
+	// Severity is where OSV 1.5+ lets a record rate one package; Bitnami
+	// rates nowhere else.
+	Severity []rawSeverity `json:"severity"`
 }
 
 type rawRange struct {
@@ -359,6 +365,34 @@ func convert(data []byte, wantEcosystem string, st *stats, tracker *ubuntuTracke
 	}
 	for _, sev := range r.Severity {
 		out.Severity = append(out.Severity, advisory.Severity{Type: sev.Type, Score: sev.Score})
+	}
+	// OSV 1.5 moved severity onto each affected entry for a record that rates
+	// them separately, and Bitnami rates only there, so every Bitnami advisory
+	// was stored unrated and a 9.8 did not trip --fail-on (QA 2026-11-20).
+	// Read only when the record rates nothing itself; each distinct entry is
+	// kept, and the highest wins at query time (D25).
+	if len(out.Severity) == 0 {
+		seen := map[rawSeverity]bool{}
+		for _, ra := range r.Affected {
+			for _, sev := range ra.Severity {
+				if !seen[sev] {
+					seen[sev] = true
+					out.Severity = append(out.Severity, advisory.Severity{Type: sev.Type, Score: sev.Score})
+				}
+			}
+		}
+	}
+	// A GitHub-reviewed advisory with no CVSS vector states its severity as a
+	// word in database_specific. Stored as the vendor's word, on D71 decision
+	// 2's rule, and banded by internal/severity like the others.
+	if len(out.Severity) == 0 && strings.HasPrefix(r.ID, "GHSA-") {
+		var ds struct {
+			Severity string `json:"severity"`
+		}
+		// A shape that does not decode states no word this can read.
+		if json.Unmarshal(r.DatabaseSpecific, &ds) == nil && ds.Severity != "" {
+			out.Severity = append(out.Severity, advisory.Severity{Type: "VENDOR_WORD", Score: ds.Severity})
+		}
 	}
 	// D72: a distro-authored record with no CVSS entries at all states its
 	// severity only as the summary's leading word. Stored losslessly as a
