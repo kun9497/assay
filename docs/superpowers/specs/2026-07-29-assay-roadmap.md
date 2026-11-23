@@ -2915,6 +2915,20 @@ packages under the global `node_modules` roots and Go binaries in the standard b
 directories — in one layer pass; jars inside images and everything at unnamed paths stay
 unread and disclosed.
 
+**Revised (QA 2026-11-20).** "A jar or war" was two extensions, asked in three places that did
+not agree in effect: the directory walk matched `.jar` and `.war` by name and passed over
+everything else, while a file named as the target was read by its contents (ZIP magic and a
+`META-INF/` entry). `app.ear` holding log4j-core 2.14.1 scanned clean inside a directory and
+was read correctly when named directly. One list now answers all three (`.jar`, `.war`, `.ear`,
+`.par`, `.sar`, `.nar`, `.hpi`, `.jpi`, `.kar`, `.lpkg`), case-insensitively, for the walk, for
+nested archives and for the target's name check. `.rar` is left out: a JCA adapter shares the
+extension with RAR archives, which are not ZIPs. In the same pass the walk reads
+`requirements-*.txt`, `requirements_*.txt` and `requirements.*.txt` as it reads
+`requirements.txt` (D38), and names on stderr the manifests it recognizes and has no reader
+for — `pom.xml`, `gradle.lockfile`, and a `package.json` with no lockfile beside or above it —
+as not read. Those notes are not incompleteness (`Unread.Failed` is false): no gate reads them
+and they are not in the JSON `unread[]`, the standing `requirements.txt` had before D38.
+
 ---
 
 ### D71 — Rocky Linux, and the five decisions the RPM-family research fixed

@@ -63,6 +63,14 @@ All notable changes to this project are documented here. The format follows
   lower-case name and some advisories are filed under capitals (`KnpLabs/knp-snappy`,
   `SurrealDB`), so those packages were reported clean. Takes effect with a database built from
   this version on.
+- Directory scans: Java archives are read by every name they go by (`.ear`, `.par`, `.sar`,
+  `.nar`, `.hpi`, `.jpi`, `.kar`, `.lpkg`, beside `.jar` and `.war`). An `.ear` inside a
+  directory was passed over, while the same file named as the target was read.
+- Directory scans: `requirements-*.txt`, `requirements_*.txt` and `requirements.*.txt` are
+  read the way `requirements.txt` is.
+- Directory scans: `pom.xml`, `gradle.lockfile` and a `package.json` with no lockfile beside
+  or above it are named on stderr as not read, with why. They are not read and do not affect
+  the exit code; before, nothing said they were there.
 
 ## [0.18.6] - 2026-11-19
 

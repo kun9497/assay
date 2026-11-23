@@ -2097,6 +2097,15 @@ honest shape is "use it when it is there, say so when it is not".
 **Groundwork.** `gomod.Parse` takes a directory, not a file, so a second source inside that
 directory is an addition rather than a signature change.
 
+**Added 2026-11-23 (QA 2026-11-20).** Three more manifests are recognized and not read, and
+since this date a scan names them on stderr instead of passing over them: `pom.xml` (it
+declares dependencies, not the versions a build resolved), `gradle.lockfile` (no reader), and
+a `package.json` with no lockfile beside or above it (ranges, not versions). Reading
+`gradle.lockfile` is the cheap one — a flat `group:artifact:version=configurations` list — and
+is not built because no user has asked and the built jar already answers. Resolving a
+`pom.xml` means reimplementing Maven's inheritance, property and BOM resolution, which is a
+different project. **Revisit when** someone scans a Gradle project that ships no jar.
+
 ---
 
 ### Disclosing the deliberate directory-scan prunes
