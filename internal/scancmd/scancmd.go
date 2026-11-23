@@ -31,6 +31,7 @@ import (
 	"github.com/kun9497/assay/internal/severity"
 	"github.com/kun9497/assay/internal/source"
 	"github.com/kun9497/assay/internal/store"
+	"github.com/kun9497/assay/internal/version"
 	"github.com/kun9497/assay/internal/vex"
 )
 
@@ -1388,6 +1389,61 @@ func catalogImage(ctx context.Context, ref, platform string, stderr io.Writer) (
 	return t, stats, scope, rec, img.Platform.OuterIndexDigests, img.Credentials.Source, img.Unresolved(), err
 }
 
+// The package databases an image can carry, as catalogFromImage names the one
+// it read, and the formats an image's identity can imply.
+const (
+	dbAPK     = "apk"
+	dbDpkg    = "dpkg status"
+	dbStatusD = "dpkg status.d"
+	dbRPM     = "rpm"
+	dbPacman  = "pacman"
+
+	formatAPK  = "apk"
+	formatDeb  = "deb"
+	formatRPM  = "rpm"
+	formatALPM = "alpm"
+)
+
+// packageFormatOf is the package format an image's identity implies, or ""
+// when it implies none. Read off the comparer its ecosystem key resolves to,
+// so the table that decides how a distro's versions are ordered is the one
+// that decides which database is its inventory; an RPM distro this build has
+// no key for (centos, openEuler) is still an RPM distro.
+func packageFormatOf(d *pkgmeta.Distro, ecosystem string) string {
+	if c, ok := version.For(ecosystem); ok {
+		switch c.(type) {
+		case version.APK:
+			return formatAPK
+		case version.Deb:
+			return formatDeb
+		case version.RPM:
+			return formatRPM
+		case version.Pacman:
+			return formatALPM
+		}
+	}
+	if d != nil && rpmFamilies[d.ID] {
+		return formatRPM
+	}
+	return ""
+}
+
+// databasesOf is the databases a format's packages are listed in, in the
+// order they are looked for.
+func databasesOf(format string) []string {
+	switch format {
+	case formatAPK:
+		return []string{dbAPK}
+	case formatDeb:
+		return []string{dbDpkg, dbStatusD}
+	case formatRPM:
+		return []string{dbRPM}
+	case formatALPM:
+		return []string{dbPacman}
+	}
+	return nil
+}
+
 // unresolvedNote is the clause a no-database error ends with when the walk
 // gave up on a path behind a link chain: the database may be what the chain
 // led to, and "none found" alone would send the reader looking for a file
@@ -1501,20 +1557,6 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
 	}
 
-	// D97. Only when nothing else has already been found: FilesNamed is
-	// another full pass over every layer, the identical cost D54's own
-	// comment above accepts for status.d, paid here only by an image that
-	// is not apk-, dpkg- or rpm-based -- which an Arch image, by
-	// construction, never is.
-	var pacmanFiles map[string]source.FileFromLayer
-	var pacmanLinks int
-	if !hasAPK && files[dpkgDBPath].Data == nil && len(statusD) == 0 && !hasRPM {
-		pacmanFiles, pacmanLinks, err = img.FilesNamed(ctx, pacmanLocalDir, "desc")
-		if err != nil {
-			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
-		}
-	}
-
 	var (
 		target    pkgmeta.Target
 		ecosystem string
@@ -1556,10 +1598,84 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		}
 	}
 
-	// Dispatched on which database the image actually carries, not on what
-	// os-release claimed. An image may have neither, and one that has a
-	// database whose distro has no ecosystem is still worth cataloging unkeyed
-	// — the matcher reports those as skipped rather than clean.
+	// The package format the image's own identity implies, "" when it implies
+	// none (no os-release, or a distro this build cannot place).
+	prefer := packageFormatOf(target.Distro, ecosystem)
+
+	// D97. FilesNamed is another full pass over every layer, the identical
+	// cost D54's own comment above accepts for status.d, so it is paid only
+	// when nothing else has been found -- or when the image says it is Arch,
+	// where another format's database must not stand in for pacman's.
+	var pacmanFiles map[string]source.FileFromLayer
+	var pacmanLinks int
+	if prefer == formatALPM || (!hasAPK && files[dpkgDBPath].Data == nil && len(statusD) == 0 && !hasRPM) {
+		pacmanFiles, pacmanLinks, err = img.FilesNamed(ctx, pacmanLocalDir, "desc")
+		if err != nil {
+			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, err
+		}
+	}
+
+	// Which database is read. An image carries one, and this used to be a
+	// fixed order -- apk, dpkg, rpm, pacman, the first found -- so a second
+	// database earlier in that order REPLACED the real inventory: a Debian
+	// image with a one-record lib/apk/db/installed scanned as one clean
+	// package, exit 0, and Fedora's dpkg rpm, which ships an empty
+	// /var/lib/dpkg/status, failed an rpm image for having "no rpm database"
+	// (QA 2026-11-20). The database of the image's own format is read when
+	// it is there; the old order decides only when the identity implies no
+	// format or its database is absent, and then an empty dpkg status never
+	// outranks a database that holds something. Every other database found
+	// with something in it is reported not read below, so nothing is merged
+	// across formats (an apk package keyed to Debian:12 would be judged by
+	// the wrong data and comparer) and nothing is dropped in silence.
+	dpkgStatus, hasStatus := files[dpkgDBPath]
+	hasStatus = hasStatus && dpkgStatus.Data != nil
+	statusEmpty := hasStatus && len(bytes.TrimSpace(dpkgStatus.Data)) == 0
+	found := map[string]bool{
+		dbAPK:     hasAPK,
+		dbDpkg:    hasStatus,
+		dbStatusD: len(statusD) > 0,
+		dbRPM:     hasRPM,
+		dbPacman:  len(pacmanFiles) > 0,
+	}
+	use := ""
+	for _, db := range databasesOf(prefer) {
+		if found[db] {
+			use = db
+			break
+		}
+	}
+	if use == "" {
+		for _, db := range []string{dbAPK, dbDpkg, dbStatusD, dbRPM, dbPacman} {
+			if found[db] && !(db == dbDpkg && statusEmpty) {
+				use = db
+				break
+			}
+		}
+	}
+	if use == "" && hasStatus {
+		use = dbDpkg // an empty status file and nothing else: the error below names it
+	}
+	rpmPath := rpmFound.bdbPath
+	if rpmPath == "" {
+		rpmPath = rpmFound.ndbPath
+	}
+	if rpmPath == "" {
+		rpmPath = rpmFound.sqlitePath
+	}
+	for _, other := range []struct{ db, path string }{
+		{dbAPK, apkPath}, {dbDpkg, dpkgDBPath}, {dbStatusD, dpkgStatusDir}, {dbRPM, rpmPath}, {dbPacman, pacmanLocalDir},
+	} {
+		if !found[other.db] || other.db == use || (other.db == dbDpkg && statusEmpty) {
+			continue
+		}
+		img.NoteUnresolved(other.path, fmt.Sprintf(
+			"a second package database; the %s database was read as this image's inventory and this one was not", use))
+	}
+
+	// An image may have no database at all, and one that has a database whose
+	// distro has no ecosystem is still worth cataloging unkeyed — the matcher
+	// reports those as skipped rather than clean.
 	var pkgs []pkgmeta.Package
 	var diffID string
 	var skippedRecords int
@@ -1567,8 +1683,8 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 	// apk carry their file lists inside it); dpkg's and pacman's lists are
 	// files the probe pass reads, so they join inside catalogApplicationProbes.
 	owned := newFileOwners(img)
-	switch {
-	case hasAPK:
+	switch use {
+	case dbAPK:
 		p, err := apkdb.Parse(bytes.NewReader(apkFound.Data), ecosystem)
 		if err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", apkPath, err)
@@ -1579,14 +1695,14 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		if err := owned.fromAPK(apkFound.Data, p, apkFound.DiffID); err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s file list: %w", apkPath, err)
 		}
-	case files[dpkgDBPath].Data != nil:
+	case dbDpkg:
 		f := files[dpkgDBPath]
 		p, err := dpkgdb.Parse(bytes.NewReader(f.Data), ecosystem)
 		if err != nil {
 			return pkgmeta.Target{}, cyclonedx.Stats{}, report.InventoryScopeRecord{}, fmt.Errorf("parse %s: %w", dpkgDBPath, err)
 		}
 		pkgs, diffID = p, f.DiffID
-	case len(statusD) > 0:
+	case dbStatusD:
 		// D54. One stanza per file, parsed in sorted order so two scans of one
 		// image agree — FilesUnder returns a map, and a map's iteration order
 		// reaching the report would make every run a different document.
@@ -1613,7 +1729,7 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		// changes, the scan says how many rather than quietly shrinking the
 		// inventory (D36's rule, applied to a shape D54 introduces).
 		skippedRecords += statusDLinks
-	case hasRPM:
+	case dbRPM:
 		// D43, extended to the third container format by D76. The inventory
 		// is read regardless of whether pkgmeta.Distro.Ecosystem() can key
 		// it: a distro this build has no advisory feed for (centos,
@@ -1668,7 +1784,7 @@ func catalogFromImage(ctx context.Context, ref string, img *source.Image) (pkgme
 		rpmdb.ResolveSourceVersions(res.Packages)
 		pkgs, diffID, skippedRecords = res.Packages, f.DiffID, len(res.Skipped)
 		owned.fromRPM(res, f.DiffID) // D162: BASENAMES/DIRNAMES/DIRINDEXES
-	case len(pacmanFiles) > 0:
+	case dbPacman:
 		// D97. One desc file per package, parsed in sorted order for the
 		// same reason status.d's own loop above is: FilesNamed returns a
 		// map, and a map's iteration order reaching the report would make
