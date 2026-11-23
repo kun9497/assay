@@ -97,10 +97,18 @@ func TestNormalizeName(t *testing.T) {
 		{"NuGet", "Newtonsoft.Json", "newtonsoft.json"},
 		{"NuGet", "newtonsoft.json", "newtonsoft.json"},
 		{"NuGet", "System.Text.Json", "system.text.json"},
-		// RubyGems, Packagist and Maven are case-sensitive and pass through
-		// unchanged, the same as Go and npm above.
+		// Packagist and crates.io are case-insensitive, and OSV files some
+		// advisories under capitals a lockfile never carries (QA
+		// 2026-11-20): the real names, as GHSA spells them.
+		{"Packagist", "KnpLabs/knp-snappy", "knplabs/knp-snappy"},
+		{"Packagist", "knplabs/knp-snappy", "knplabs/knp-snappy"},
+		{"crates.io", "SurrealDB", "surrealdb"},
+		// '-' and '_' are not folded: one crate has one published spelling.
+		{"crates.io", "tokio-util", "tokio-util"},
+		{"crates.io", "serde_json", "serde_json"},
+		// RubyGems and Maven are case-sensitive and pass through unchanged,
+		// the same as Go and npm above.
 		{"RubyGems", "Rails", "Rails"},
-		{"Packagist", "Drupal/Core", "Drupal/Core"},
 		{"Maven", "org.apache.logging.log4j:log4j-core", "org.apache.logging.log4j:log4j-core"},
 	}
 	for _, tc := range cases {
