@@ -2990,6 +2990,13 @@ vector, whose word is `database_specific.severity`; no other database's word the
 record that rates nothing at its top level takes the ratings on its affected entries, where
 Bitnami publishes all of its own (D99).
 
+**Revised (2026-11-23), Ubuntu's priority.** A record whose only severity is OSV's `Ubuntu` word
+(critical, high, medium, low, negligible) is banded from it, after every vector, v2 included
+(D156). Canonical states that its priority schedules fixes and is not a severity, so it never
+enters the maximum beside a vector in the same record; another source's rating still can exceed
+it (D25). `negligible` is Low, because None would say it was rated harmless. Derived at query
+time, so no rebuild is needed.
+
 ---
 
 ### D72 — AlmaLinux, spending the two D71 decisions it could not ship without
@@ -4394,6 +4401,11 @@ an unparseable document purl warns and never becomes a wildcard. Independent rev
 mutations red — the eighth (blanking `Source`) survived until a caller-level anchor on
 the table's per-line source label was added, the round doing exactly what it exists for.
 
+**Revised (2026-11-23).** "Latest statement wins" holds across every `--vex` document, not within
+each. Applied one after another, a finding the first document suppressed was gone before the
+second was read. A tie goes to the last document given. The author is not weighed: whichever
+document is passed is trusted equally.
+
 ### D105 — trivy joins the weekly differential, and the tool stops lying about its name
 
 **Decision.** The weekly differential (D93) gains trivy as a second comparison scanner.
@@ -5413,6 +5425,12 @@ index read during the walk, including entries that are not selected. A disagreem
 refused (exit 2) and the error names the digest and both declarations. The consequence is
 that a layout listing one manifest once with a media type and once without is refused, where
 v0.18.4 scanned it when the typed entry came first.
+
+**Revised (2026-11-23), a tie in a layout.** A layout whose different top-level entries hold
+different images for the chosen platform is refused, naming each entry; walk order had picked the
+first. `oci-dir:<path>@<which>` names an entry by its ref name or the digest in `index.json`. A
+path that exists as written keeps its `@`. Several images inside one index stay that index's own
+order, and a registry index is unaffected.
 
 ---
 

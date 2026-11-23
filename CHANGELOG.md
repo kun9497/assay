@@ -103,6 +103,12 @@ All notable changes to this project are documented here. The format follows
   `--fail-on-incomplete` fires where it was passed over.
 - A Composer package installed from a `dev-` branch is the target's incompleteness, so
   `--fail-on-incomplete=target` fires for it; it was blamed on the advisory.
+- An Ubuntu record with no CVSS vector takes Canonical's priority as its severity; it was unknown.
+  **`--fail-on` can fire where it did not.** Applies to databases already installed.
+- `--vex`: the latest statement wins across all the documents given. A newer `affected` in one
+  document did not retract an older `not_affected` in another.
+- `oci-dir:` refuses (exit 2) a layout holding two different images of the platform, and takes
+  `oci-dir:<path>@<ref name or digest>` to name one. The first was scanned silently.
 - A Go binary built by Red Hat's toolchain has its standard library evaluated.
 - CycloneDX: the order of siblings under `metadata.component` no longer decides whether a listing
   is keyed to its release.

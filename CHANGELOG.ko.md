@@ -98,6 +98,13 @@
   `--fail-on-incomplete`가 걸립니다.
 - `dev-` 브랜치로 설치한 Composer 패키지는 대상의 불완전함으로 처리되어
   `--fail-on-incomplete=target`이 걸립니다. 전에는 권고의 탓으로 돌렸습니다.
+- CVSS 벡터가 없는 Ubuntu 레코드는 Canonical의 priority를 심각도로 씁니다. 전에는 unknown이었습니다.
+  **전에는 걸리지 않던 `--fail-on`이 걸릴 수 있습니다.** 이미 설치된 데이터베이스에도 적용됩니다.
+- `--vex`: 주어진 모든 문서를 통틀어 최신 진술이 이깁니다. 한 문서의 새 `affected`가 다른 문서의 옛
+  `not_affected`를 취소하지 못했습니다.
+- `oci-dir:`는 같은 플랫폼의 서로 다른 이미지가 둘 있는 레이아웃을 거부하고(exit 2),
+  `oci-dir:<경로>@<ref 이름 또는 digest>`로 하나를 지목할 수 있습니다. 전에는 조용히 첫 번째를
+  스캔했습니다.
 - Red Hat 툴체인으로 빌드한 Go 바이너리의 표준 라이브러리를 평가합니다.
 - CycloneDX: `metadata.component` 아래 형제의 순서가 목록이 릴리스에 키로 묶이는지를 정하지 않습니다.
 
