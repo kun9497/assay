@@ -43,8 +43,37 @@ var justificationEnum = map[string]bool{
 // to. stats counts what became of this document's statements, so a caller
 // can say how many applied to nothing rather than let them vanish.
 func (d *Document) Apply(findings []matcher.Finding, target Target, warn func(string)) (kept []matcher.Finding, suppressed []matcher.Suppressed, stats Stats) {
-	live, stats := d.liveStatements(target, warn)
-	matched := make([]bool, len(d.Statements))
+	kept, suppressed, all := ApplyAll([]*Document{d}, findings, target, warn)
+	return kept, suppressed, all[0]
+}
+
+// ApplyAll is Apply over several documents as one set of statements, so
+// "latest statement wins" holds across them. Applied one after another, a
+// finding the first document suppressed was gone before the second was read,
+// and a newer "affected" there never retracted an older "not_affected" (QA
+// 2026-11-20). Statements of equal timestamp are decided by the last document
+// given, as the last in one document is.
+//
+// stats holds one entry per document, in order. A suppression is counted for
+// the document whose statement won it -- for a bundle waived CVE by CVE, the
+// one that waived the last.
+func ApplyAll(docs []*Document, findings []matcher.Finding, target Target, warn func(string)) (kept []matcher.Finding, suppressed []matcher.Suppressed, stats []Stats) {
+	stats = make([]Stats, len(docs))
+	var live []liveStatement
+	var owner []int // owner[i] is the document statement i came from
+	for n, d := range docs {
+		ls, st := d.liveStatements(target, warn)
+		stats[n] = st
+		for _, s := range ls {
+			s.index += len(owner)
+			s.doc = n
+			live = append(live, s)
+		}
+		for range d.Statements {
+			owner = append(owner, n)
+		}
+	}
+	matched := make([]bool, len(owner))
 
 	for _, f := range findings {
 		// The finding's own names first: a statement about the errata id, or
@@ -59,8 +88,10 @@ func (d *Document) Apply(findings []matcher.Finding, target Target, warn func(st
 				// reason text.
 				Source: "vex",
 			})
+			stats[st.doc].Applied++
 			continue
 		}
+		last, waived := 0, make(map[int]int)
 		// D171. Then each CVE the finding bundles, by itself: a statement
 		// about one CVE of an errata says nothing about the others, and
 		// "latest statement wins" is a contest between statements about ONE
@@ -72,19 +103,24 @@ func (d *Document) Apply(findings []matcher.Finding, target Target, warn func(st
 			}
 			if st, ok := resolve(live, f, []string{cve}, target, matched); ok {
 				f = f.WithWaived(matcher.Waived{CVE: cve, Reason: st.reason, Source: "vex"})
-				stats.Waived++
+				stats[st.doc].Waived++
+				waived[st.doc]++
+				last = st.doc
 			}
 		}
 		if f.FullyWaived() {
+			stats[last].Applied++
 			suppressed = append(suppressed, matcher.Suppressed{Finding: f, Reason: f.WaivedReason(), Source: "vex"})
 			continue
 		}
+		for n, c := range waived {
+			stats[n].WaivedKept += c
+		}
 		kept = append(kept, f)
 	}
-	stats.Applied = len(suppressed)
-	for _, m := range matched {
+	for i, m := range matched {
 		if !m {
-			stats.Unmatched++
+			stats[owner[i]].Unmatched++
 		}
 	}
 	return kept, suppressed, stats
@@ -105,6 +141,8 @@ type Stats struct {
 	// Waived is how many bundled CVEs this document exonerated one at a
 	// time (D171), on findings suppressed or still reported.
 	Waived int
+	// WaivedKept is the part of Waived on findings still reported.
+	WaivedKept int
 }
 
 // ownIdentifiers is the finding's identifiers less the CVEs it only bundles.
@@ -540,7 +578,9 @@ func vulnerabilityMatches(v Vulnerability, identifiers []string) bool {
 type liveStatement struct {
 	// index is the statement's position in Document.Statements, for Apply's
 	// count of statements that matched nothing.
-	index     int
+	index int
+	// doc is which of ApplyAll's documents the statement came from.
+	doc       int
 	stmt      Statement
 	products  []liveProduct
 	timestamp time.Time
@@ -752,13 +792,14 @@ func resolve(live []liveStatement, f matcher.Finding, identifiers []string, targ
 	if !haveBest || !best.suppresses {
 		return result{}, false
 	}
-	return result{reason: reasonFor(best, bestVL, bestVia)}, true
+	return result{reason: reasonFor(best, bestVL, bestVia), doc: best.doc}, true
 }
 
 // result carries what resolve found, kept separate from liveStatement itself
 // so reasonFor's formatting concern stays out of the matching loop above.
 type result struct {
 	reason string
+	doc    int
 }
 
 // statementLabel names a statement for a warning message: its vulnerability

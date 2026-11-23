@@ -1144,11 +1144,8 @@ func stillReported(findings []matcher.Finding, source string) int {
 // the identical "an unreadable waiver is untrustworthy input" reasoning
 // applyIgnoreRules already applies to a malformed .assay.yaml (D11).
 //
-// Each document is applied against whatever res.Findings still holds after
-// the documents processed before it — so a later --vex path can only
-// suppress what an earlier one left behind, never re-suppress what it
-// already waived, matching applyIgnoreRules' own "ignore rules run first"
-// ordering one level down.
+// The documents are applied as one set of statements (vex.ApplyAll): the
+// latest statement about a finding wins whichever document holds it.
 //
 // D121: target scopes every statement that names an image, and after the
 // last document one line says what applied to nothing — the statements
@@ -1171,29 +1168,35 @@ func applyVEX(res *matcher.Result, paths []string, target vex.Target, stderr io.
 			noPURL++
 		}
 	}
-	var total vex.Stats
+	docs := make([]*vex.Document, 0, len(paths))
 	for _, path := range paths {
 		w.VEX = append(w.VEX, report.VEXProvenance{Path: path})
-		rec := &w.VEX[len(w.VEX)-1]
 		doc, err := vex.Load(path)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return 2
 		}
-		waivedBefore := stillReported(res.Findings, "vex")
-		kept, suppressed, st := doc.Apply(res.Findings, target, warn)
+		rec := &w.VEX[len(w.VEX)-1]
 		rec.SHA256, rec.ID = doc.SHA256, doc.ID
+		docs = append(docs, doc)
+	}
+	kept, suppressed, stats := vex.ApplyAll(docs, res.Findings, target, warn)
+	res.Findings = kept
+	res.Suppressed = append(res.Suppressed, suppressed...)
+	var total vex.Stats
+	first := len(w.VEX) - len(paths)
+	for n, path := range paths {
+		st := stats[n]
+		rec := &w.VEX[first+n]
 		rec.Statements, rec.Applied, rec.Skipped = st.Statements, st.Applied, st.Skipped
 		rec.OutOfScope, rec.Unmatched = st.OutOfScope, st.Unmatched
-		res.Findings = kept
-		res.Suppressed = append(res.Suppressed, suppressed...)
-		if len(suppressed) > 0 {
-			fmt.Fprintf(stderr, "%d finding(s) suppressed by VEX (%s)\n", len(suppressed), path)
+		if st.Applied > 0 {
+			fmt.Fprintf(stderr, "%d finding(s) suppressed by VEX (%s)\n", st.Applied, path)
 		}
 		// D171. Counted on what is still reported: a CVE waived on the way
 		// to a finding's suppression is already in the line above.
-		if n := stillReported(kept, "vex") - waivedBefore; n > 0 {
-			fmt.Fprintf(stderr, "%d CVE(s) waived by VEX (%s) on finding(s) still reported for the other CVEs they bundle\n", n, path)
+		if st.WaivedKept > 0 {
+			fmt.Fprintf(stderr, "%d CVE(s) waived by VEX (%s) on finding(s) still reported for the other CVEs they bundle\n", st.WaivedKept, path)
 		}
 		total.Statements += st.Statements
 		total.Unmatched += st.Unmatched

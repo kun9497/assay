@@ -198,10 +198,16 @@ func load(ctx context.Context, ref string, want v1.Platform, explicit bool) (v1.
 		return img, loaded{choice: choice}, nil
 
 	case kindLayout:
-		p := strings.TrimPrefix(ref, schemeLayout)
-		layoutIndex, err := openLayoutIndex(ctx, p)
+		p, selector := layoutSelector(strings.TrimPrefix(ref, schemeLayout))
+		bounded, err := openLayoutIndex(ctx, p)
 		if err != nil {
 			return nil, loaded{}, fmt.Errorf("read oci layout %s: %w", ref, err)
+		}
+		var layoutIndex indexReader = bounded
+		if selector != "" {
+			if layoutIndex, err = selectFromLayout(bounded, p, selector); err != nil {
+				return nil, loaded{}, err
+			}
 		}
 		m, err := layoutIndex.IndexManifest()
 		if err != nil {
@@ -434,6 +440,11 @@ func imageFromIndex(ctx context.Context, idx indexReader, what string, parent v1
 			skippedNote(skipped), hint)}
 	}
 	c := cands[i]
+	if parent.Hex == "" {
+		if err := refuseLayoutTie(cands, i, what); err != nil {
+			return nil, PlatformChoice{}, err
+		}
+	}
 	img := c.img
 	if img == nil {
 		var err error
@@ -471,6 +482,10 @@ type candidate struct {
 	idx   indexReader
 	// img is set when the image was already read to learn its platform.
 	img v1.Image
+	// root is the top-level entry the walk reached this through, and refName
+	// that entry's org.opencontainers.image.ref.name.
+	root    v1.Hash
+	refName string
 }
 
 // unreadable is a platform-less index entry whose image or config could not
@@ -503,6 +518,8 @@ type indexWalk struct {
 	descriptors int
 	candidates  []candidate
 	skipped     []unreadable
+	root        v1.Hash
+	refName     string
 }
 
 // collectCandidates walks an index, descending into nested ones, and appends
@@ -533,6 +550,9 @@ func (w *indexWalk) collectCandidates(ctx context.Context, idx indexReader, what
 	for _, d := range m.Manifests {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if depth == 0 {
+			w.root, w.refName = d.Digest, d.Annotations[refNameAnnotation]
 		}
 		if d.MediaType.IsIndex() {
 			// A digest identifies the entire subtree. Its first occurrence
@@ -600,6 +620,7 @@ func (w *indexWalk) collectCandidates(ctx context.Context, idx indexReader, what
 			w.candidates = append(w.candidates, candidate{
 				plat:   normalizePlatform(v1.Platform{OS: cf.OS, Architecture: cf.Architecture, Variant: cf.Variant}),
 				digest: d.Digest, parent: parent, outer: outer, idx: idx, img: img,
+				root: w.root, refName: w.refName,
 			})
 			continue
 		}
@@ -613,6 +634,7 @@ func (w *indexWalk) collectCandidates(ctx context.Context, idx indexReader, what
 		w.candidates = append(w.candidates, candidate{
 			plat:   normalizePlatform(*p),
 			digest: d.Digest, parent: parent, outer: outer, idx: idx,
+			root: w.root, refName: w.refName,
 		})
 	}
 	return ctx.Err()
