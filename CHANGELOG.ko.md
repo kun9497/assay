@@ -18,6 +18,11 @@
   epoch를 받습니다. 피드는 같은 nginx 빌드를 어떤 문서에서는 purl의 `epoch` qualifier 없이, 다른
   문서에서는 붙여서 적습니다. epoch 없는 fix는 설치된 모든 빌드보다 아래로 정렬되어 해당 CVE가
   Hummingbird 이미지에서 보고되지 않았습니다. 이 버전부터 빌드한 데이터베이스에 적용됩니다.
+- Oracle provider: Oracle Linux major를 둘 이상 덮는 ELSA를 이제 레코드 하나로 저장합니다.
+  이전에는 major마다 같은 id의 레코드를 따로 냈는데 데이터베이스는 id마다 레코드 하나만 남기므로,
+  가장 높은 major의 레코드만 살아남고 낮은 major의 패키지는 취약점 없음으로 보고됐습니다(Oracle
+  아카이브 기준 affected 항목 4,838개, 그중 Oracle Linux 8이 1,507개). 이 버전부터 빌드한
+  데이터베이스에 적용됩니다.
 
 ## [0.18.6] - 2026-11-19
 

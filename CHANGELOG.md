@@ -19,6 +19,11 @@ All notable changes to this project are documented here. The format follows
   without the purl's `epoch` qualifier and others for the same build with it; the epoch-less
   fix sorted below every installed build, so those CVEs were not reported on Hummingbird
   images. Takes effect in databases built from this version on.
+- Oracle provider: an ELSA that covers more than one Oracle Linux major is now stored as one
+  record. It was emitted as one record per major under the same id, and the database keeps
+  one record per id, so only the highest major's record survived and the lower majors'
+  packages were reported clean (4,838 affected entries on Oracle's archive, 1,507 of them on
+  Oracle Linux 8). Takes effect in databases built from this version on.
 
 ## [0.18.6] - 2026-11-19
 

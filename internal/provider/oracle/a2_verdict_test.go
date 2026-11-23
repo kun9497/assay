@@ -288,6 +288,11 @@ func TestA2_RHCKKernelKeepsTheDrop(t *testing.T) {
 	if st.AmbiguousGroups != 1 || st.WindowedGroups != 0 {
 		t.Errorf("AmbiguousGroups = %d, WindowedGroups = %d, want 1 and 0", st.AmbiguousGroups, st.WindowedGroups)
 	}
+	// Two definitions, each left with nothing on its one major: counted per
+	// (definition, major), the unit the progress line names.
+	if st.SkippedNoPackages != 2 {
+		t.Errorf("SkippedNoPackages = %d, want 2", st.SkippedNoPackages)
+	}
 }
 
 // A group holding an EVR the RPM comparer refuses cannot be cut into

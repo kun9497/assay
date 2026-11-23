@@ -3032,6 +3032,24 @@ decision Oracle still owes.
 
 ---
 
+**Revised (QA 2026-11-20).** "One `advisory.Advisory` per (ELSA, major)" put two records under
+one id, and the store keeps one record per id, the last written (D90's hazard, which this
+decision predates and was never checked against). An ELSA covering OL8 and OL9 kept its OL9
+record alone; the index rows for OL8's packages survived and pointed at it, the matcher
+filtered its entries on ecosystem and found none, and the package was judged clean with no
+skip. Measured on the live archive 2026-11-20: 759 ids emitted more than once, 841 records
+overwritten, 4,838 affected entries unreachable (OL8 1,507, OL9 299); `bpftool@5.15.0-0` on
+OL8, below ELSA-2026-500643's fix, returned no finding and exit 0. Nothing at record level
+differs between two majors of one ELSA, so `normalize` now emits one record per definition
+carrying every major's entries, the shape Red Hat's records have. After the change the same
+archive yields 10,038 records under 10,038 distinct ids. `SkippedNoPackages` is still counted
+per (definition, major). `Fetch` also refuses an archive that would emit an id twice (two
+definitions calling themselves one ELSA) instead of publishing it. The test that pinned the
+colliding shape now demands the joined one, and a second holds both majors through the store
+and the matcher. **Not done:** `dbcmd.Update` still accepts a repeated id from any provider.
+A general refusal there would also refuse Red Hat's and SUSE's deliberate second copy of a
+document (D129, D135), so it needs a rule for which repeats are intended.
+
 ### D75 — Fedora, shipped with its hazards counted
 
 **Decision.** Fedora's current releases are ingested from Bodhi's REST API (security
