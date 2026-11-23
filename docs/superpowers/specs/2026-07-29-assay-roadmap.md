@@ -4054,6 +4054,25 @@ records are wrong until the next nightly rebuilds it; grype-only tuples on the `
 target in the weekly diff are the trace to look for. SUSE's reader, which this one was copied
 from, had the identical gap (D77's revision of the same date).
 
+**Revised (QA 2026-11-20).** The qualifier is read, and the feed stopped writing it on part of
+its documents. Fetched 2026-11-20: cve-2026-95101 and cve-2026-97629 (both revised 2026-11-06)
+list nginx `1.30.6-1.hum1` with no `epoch=` and `nginx-0:` in the product id, while
+cve-2026-120993 (revised 2026-11-19) lists the same build as `nginx-2:` with `epoch=2`. The
+installed build on the project's own differential target (`hummingbird/nginx:1.30.4`) reads
+`2:1.30.4-2.hum1`, so the epoch-less documents are the wrong ones, and each stored a fix every
+installed nginx sorts above: clean, no skip. The counter did not collapse to zero, which is all
+the tripwire above watched for. One document cannot settle its own epoch, so the provider now
+holds every record carrying a Hummingbird entry until the feed has been read and restores the
+epoch in two steps: the epoch another document states for the same name and version-release
+(a build is one rpm), then, failing that, the single epoch every epoch-carrying statement in
+the feed gives the package. A package seen at two epochs is left as written and counted.
+**Gives up:** the second step errs toward reporting. A package whose early builds truly had
+no epoch would have those fixes raised, and an installed epoch-less build reported against a
+fix it carries; whether the feed holds such a package was not measured. Three counters on the
+progress line say how often each step ran, and a second copy of a held document is held too,
+so two copies still reach the store in the order D129 and D135 emit them. Held through `Fetch`
+off an archive with all four shapes, and by eight mutations.
+
 ---
 
 ### D99 — Bitnami: an app layer riding on someone else's distro

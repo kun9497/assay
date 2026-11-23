@@ -14,6 +14,10 @@
   읽지 않아, `libssl3`(source `openssl`) 같은 패키지가 취약점 없음으로 보고되고 evaluated로
   집계됐습니다. 이미지를 직접 스캔하는 경로는 영향이 없었습니다. Trivy의 SPDX 출력은 아직
   다루지 않습니다(`docs/deferred-decisions.md`).
+- Red Hat provider: Red Hat 피드가 epoch 없이 적은 Hummingbird fix가 이제 피드의 다른 곳에 적힌
+  epoch를 받습니다. 피드는 같은 nginx 빌드를 어떤 문서에서는 purl의 `epoch` qualifier 없이, 다른
+  문서에서는 붙여서 적습니다. epoch 없는 fix는 설치된 모든 빌드보다 아래로 정렬되어 해당 CVE가
+  Hummingbird 이미지에서 보고되지 않았습니다. 이 버전부터 빌드한 데이터베이스에 적용됩니다.
 
 ## [0.18.6] - 2026-11-19
 

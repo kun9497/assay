@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
   properties rather than in the purl, and those were not read, so a package such as `libssl3`
   (source `openssl`) was reported clean and counted as evaluated. Scanning the image directly
   was not affected. Trivy's SPDX output is not covered (`docs/deferred-decisions.md`).
+- Red Hat provider: a Hummingbird fix that Red Hat's feed states without its epoch now takes
+  the epoch the feed states elsewhere. The feed writes some documents for an nginx build
+  without the purl's `epoch` qualifier and others for the same build with it; the epoch-less
+  fix sorted below every installed build, so those CVEs were not reported on Hummingbird
+  images. Takes effect in databases built from this version on.
 
 ## [0.18.6] - 2026-11-19
 
