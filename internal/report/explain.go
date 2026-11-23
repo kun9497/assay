@@ -174,6 +174,9 @@ func explainOne(w io.Writer, f matcher.Finding) error {
 		// NOT listed here.
 		lines = append(lines, fmt.Sprintf("waived:   %s by %s: %s", wv.CVE, wv.Source, wv.Reason))
 	}
+	if len(f.Notices) > 0 {
+		lines = append(lines, "notices:  "+strings.Join(f.Notices, ", "))
+	}
 	if ids := otherIDs(f); len(ids) > 0 {
 		lines = append(lines, fmt.Sprintf("also known as: %s", strings.Join(ids, ", ")))
 	}

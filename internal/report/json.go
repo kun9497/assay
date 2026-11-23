@@ -58,7 +58,7 @@ import (
 // what it does mean is that a consumer reading 2 or later can rely on every
 // field below being present, which is the guarantee the constant exists to
 // give.
-const schemaVersion = 23
+const schemaVersion = 24
 
 // Document is the stable shape of `assay scan --output json` (design goal
 // #3). It carries what Table shows plus what Table cannot: the full
@@ -193,6 +193,10 @@ type FindingRecord struct {
 	// bundles is waived, or when a waiver names the errata itself. omitempty:
 	// almost no finding carries one.
 	Waived []WaivedRecord `json:"waived,omitempty"`
+	// Notices (schema 24, D172) is the distributor notices -- USN, DSA, DLA --
+	// whose every CVE is reported for this package, this finding's among
+	// them. They were findings of their own before.
+	Notices []string `json:"notices,omitempty"`
 	// Severity is severity.Band's String() form (D17's own
 	// none/low/medium/high/critical/unknown), never the numeric iota — a
 	// numeric band would make the document depend on Band's declaration
@@ -559,6 +563,7 @@ func findingRecord(f matcher.Finding) FindingRecord {
 	}
 	return FindingRecord{
 		Waived:             waived,
+		Notices:            f.Notices,
 		Package:            packageRecord(f.Package),
 		MatchedName:        f.MatchedName,
 		MatchedViaProvides: f.MatchedViaProvides,

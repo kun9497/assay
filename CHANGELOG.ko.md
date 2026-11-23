@@ -18,6 +18,12 @@
   23입니다: `findings[].waived`가 추가됐습니다(추가). 한 errata의 서로 다른 CVE에 대한 VEX
   statement가 순서에 따라 서로를 덮어쓰지 않습니다.
 
+- CVE가 모두 같은 패키지에 대해 보고된 Ubuntu·Debian 공지(USN, DSA, DLA)는 더 이상 등급 없는 두 번째
+  finding이 아니며, 그 finding들에 이름이 적힙니다(D172). **Ubuntu와 Debian에서 finding 수와 unknown 수가
+  줄어듭니다.** 보고에서 빠지는 취약점은 없습니다. 남는 공지는 errata처럼 CVE별로 waive되고(D171), 접힌
+  USN을 지목한 waiver는 아무것도 매칭하지 않습니다. JSON `schemaVersion`은 24입니다:
+  `findings[].notices`(추가).
+
 - `assay db update`가 이미 설치된 데이터베이스보다 먼저 빌드된 아티팩트를 exit 2로 거부하고
   설치된 데이터베이스를 그대로 둡니다(D169). 서명에는 만료가 없어서, 오래된 아티팩트를 내주는
   레지스트리나 미러가 더 새로운 데이터베이스를 exit 0으로 교체할 수 있었습니다. 의도적으로

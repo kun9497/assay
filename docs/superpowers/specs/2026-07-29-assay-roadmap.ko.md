@@ -8969,6 +8969,27 @@ grype 식 opt-in 은 제공하지 않는다. errata id 를 지목하면 같은 �
 **지키는 것은** `Run` 을 통한 테스트 다섯(ignore 규칙; 섞인 문서의 네 가지 순서를 포함한 VEX; 두
 메커니즘 함께; finding 을 지목하는 CVE; 모든 렌더러)과 mutation 열네 개다.
 
+### D172 — CVE가 모두 보고된 배포판 공지는 두 번째 finding이 아니다
+
+**결정 (2026-11-23).** USN, DSA, DLA 뿐인 finding 은 그 `upstream` 이 지목한 CVE 가 같은 패키지에 대해 모두
+보고돼 있으면 제거하고, 그 finding 들에 공지 이름을 적는다(`Notices`; JSON `findings[].notices`, 스키마 24;
+`--explain`).
+
+**이유.** OSV 는 Ubuntu·Debian 업데이트를 두 번 발행한다: CVE 마다 하나, 공지로 하나. 둘은 `upstream` 으로
+이어지는데 이는 동일성이 아니다(D3). 각 취약점이 같은 수정 버전과 함께, 심각도 없이 공지 이름으로 다시
+보고됐다: jammy 의 openssl 에서 finding 56건 중 13건이 그랬고(QA 2026-11-20) 모두 unknown 이어서, 모든
+취약점에 등급이 있는 집합에 `--fail-on-unknown` 이 걸렸다.
+
+**아무것도 잃지 않아야 한다.** 공지가 CVE 를 지목하지 않거나, upstream 에 CVE 가 아닌 것이 있거나, CVE 중
+하나라도 그 패키지에 대해 보고되지 않았거나(평가할 수 없던 레코드 포함), 공지는 수정을 말하는데 그 CVE 의
+finding 은 말하지 않으면 공지는 남는다.
+
+**남은 공지는 CVE 를 묶는다(D171).** upstream 을 자기 이름으로 읽었으므로 CVE 하나의 waiver 가 공지와 그
+옆의 CVE 들을 함께 억제했다.
+
+**포기하는 것.** 공지가 접히고 나면 USN id 를 지목한 waiver 는 아무것도 매칭하지 않는다. 그 id 를 CVE
+finding 의 이름으로 삼지는 않는다. 그러면 같은 waiver 가 그것들을 억제하게 되기 때문이다.
+
 ---
 
 ## 6. 벤치마킹 노트

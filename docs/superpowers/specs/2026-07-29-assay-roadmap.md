@@ -9667,6 +9667,28 @@ what it does.
 document; the two mechanisms together; a CVE that names the finding; every renderer) and
 fourteen mutations.
 
+### D172 — A distributor notice whose every CVE is reported is not a second finding
+
+**Decision (2026-11-23).** A finding that is only a USN, DSA or DLA is removed when every CVE its
+`upstream` names is already reported for the same package, and the notice is named on those
+findings (`Notices`; JSON `findings[].notices`, schema 24; `--explain`).
+
+**Why.** OSV publishes an Ubuntu or Debian update twice: one record per CVE and one for the
+notice, linked by `upstream`, which is not identity (D3). Each vulnerability was reported again
+under the notice, with the same fix and no severity: 13 of 56 findings for jammy's openssl
+(QA 2026-11-20), all unknown, so `--fail-on-unknown` failed on a set whose every vulnerability
+was rated.
+
+**Nothing may be lost.** The notice stays if it names no CVE, if its upstream holds anything that
+is not one, if any of its CVEs is not reported for that package (which includes a record that
+could not be evaluated), or if it states a fix and one of its CVEs' findings states none.
+
+**A kept notice bundles its CVEs (D171).** Its upstream had been read as names of its own, so a
+waiver for one CVE suppressed the notice and the CVEs beside it.
+
+**Gives up.** A waiver naming a USN id matches nothing once the notice is folded. The id is not
+made a name of the CVE findings, because the same waiver would then suppress them.
+
 ---
 
 ## 6. Benchmarking notes
