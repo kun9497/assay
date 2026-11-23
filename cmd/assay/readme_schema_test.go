@@ -219,3 +219,19 @@ func TestSource_CLIMessagesDeriveTheArtifactTag(t *testing.T) {
 		}
 	})
 }
+
+// QA 2026-11-20. DESIGN.md's bootstrap and backfill commands named :v8 while
+// the binary reads and publishes :v9. A command names the tag through
+// `assay db ref`, never by number.
+func TestDocs_DBCommandsDoNotNameASchemaTag(t *testing.T) {
+	re := regexp.MustCompile(`assay db (push|build|update)[^\n]*assay-db:v[0-9]+`)
+	for _, name := range []string{"../../docs/DESIGN.md", "../../docs/DESIGN.ko.md", "../../README.md", "../../README.ko.md"} {
+		b, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m := re.Find(b); m != nil {
+			t.Errorf("%s: %q names a schema tag", name, m)
+		}
+	}
+}

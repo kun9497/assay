@@ -655,3 +655,40 @@ func TestCarryForward_T15e_RenamedKeyWithNoSeedRecordsIsStillReported(t *testing
 		t.Errorf("stderr lacks %q:\n%s", line, logs)
 	}
 }
+
+// QA 2026-11-20. Carrying a retired key rebuilt the provider's KeyAsOf, and
+// dropping every live key's date while doing so left the suite green; a
+// reader then judged live keys by the provider's stalest date (D113).
+func TestUpdate_CarryKeepsTheLiveKeysDates(t *testing.T) {
+	seed, code, errOut := build(t, "", fakeProvider{name: "osv", covers: []string{"Go", "Retired-Eco"},
+		keyAsOf: map[string]time.Time{"Go": time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)},
+		advs: []advisory.Advisory{
+			adv("OSV-GO-1", affects("Go", "alpha")), adv("OSV-RET-1", affects("Retired-Eco", "beta")),
+		}})
+	if code != 0 {
+		t.Fatal(errOut)
+	}
+	live := time.Date(2026, 7, 28, 0, 0, 0, 0, time.UTC)
+	p := goOnly()
+	p.keyAsOf = map[string]time.Time{"Go": live}
+	out, code, errOut := build(t, seed, p)
+	if code != 0 {
+		t.Fatal(errOut)
+	}
+	db, err := store.Open(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	m, err := db.Meta()
+	if err != nil {
+		t.Fatal(err)
+	}
+	osv := m.Providers["osv"]
+	if got := osv.KeyAsOf["Go"]; !got.Equal(live) {
+		t.Errorf("KeyAsOf[Go] = %v, want this run's %v", got, live)
+	}
+	if got, want := osv.KeyAsOf["Retired-Eco"], osv.Frozen["Retired-Eco"]; want.IsZero() || !got.Equal(want) {
+		t.Errorf("KeyAsOf[Retired-Eco] = %v, want its freeze date %v", got, want)
+	}
+}

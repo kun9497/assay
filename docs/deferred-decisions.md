@@ -1771,7 +1771,10 @@ that sits for two weeks is worse than an honest "unmeasured".
 
 ---
 
-### Flags on the `db` subcommands
+### ~~Flags on the `db` subcommands~~ — resolved in D147
+
+`db status --output json` writes one versioned document, and every `db` subcommand refuses an
+argument it does not take. What follows is the entry as it stood.
 
 `assay db status --output json` exits 0 and prints the human table; `assay db status
 --bogus` does the same. The `db` arm has never parsed flags, so anything after the

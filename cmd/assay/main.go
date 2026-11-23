@@ -248,6 +248,10 @@ directory scan reads none of it):
   pull is anonymous. Values are never printed; stderr names only which source
   answered.
 
+Environment (every command):
+  ASSAY_DB_DIR=<dir>    Directory holding vulnerability.db. Default: assay/db/v<schema>
+                        under the user cache directory; db status prints the path.
+
 Environment (db build only):
   NVD_ENABLE=1         Also fetch NIST's CVSS scores, so findings whose
                         advisory carries no severity can still be rated.
@@ -269,15 +273,13 @@ Environment (db build only):
                         narrower database than db update delivers.
                         Set this to 0 for a local build that does not scan RHEL
                         and wants to be about twenty minutes shorter.
-  AMAZON_ENABLE=0       Skip Amazon Linux's ALAS feed (AL2 core+extras and AL2023 core). ON BY
-                        DEFAULT (D73, D78), for the same reason as Red Hat: the published
+  AMAZON_ENABLE=0       Skip Amazon Linux's ALAS feed (AL2 core+extras, and AL2023
+                        core, NVIDIA and kernel-livepatch). ON BY DEFAULT (D73, D78, D100), for the same reason as Red Hat: the published
                         artifact carries it, so a build without it produces a narrower database
                         than db update delivers.
                         AL2's 73 extras topics (D78) are fetched alongside core -- docker, ecs,
                         livepatch, nitro-enclaves, firefox and more. AL2023's NVIDIA and
-                        livepatch repos are NOT fetched: 306 + 286 advisories live outside
-                        AL2023 core in a different repo layout, so a package installed from
-                        either is evaluated only against AL2023 core data.
+                        kernel-livepatch repos (D100) are fetched under the same key as core.
                         Set this to 0 for a local build that does not scan Amazon Linux.
   ORACLE_ENABLE=0       Skip Oracle Linux's OVAL feed (ELSA/ELBA errata,
                         Oracle Linux 5-10). ON BY DEFAULT (D74), for the
@@ -309,6 +311,10 @@ Environment (db build only):
                         rather than hidden.
                         Set this to 0 for a local build that does not scan
                         Fedora.
+  SUSE_ENABLE=0         Skip SUSE's CSAF VEX feed (SLES and openSUSE Leap).
+                        ON BY DEFAULT (D77), for the same reason as Red Hat.
+                        Its archive is about 445 MB, so a local build that
+                        does not scan SLES or Leap is shorter without it.
   PHOTON_ENABLE=0       Skip VMware/Broadcom Photon OS's own CVE metadata
                         feed (Photon OS 3.0/4.0/5.0). ON BY DEFAULT (D96),
                         for the same reason as Red Hat, Amazon Linux, Oracle

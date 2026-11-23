@@ -119,12 +119,19 @@ func TestTrustedKeys_FileNamesAreTheirKeyIDs(t *testing.T) {
 	}
 }
 
-// install.sh carries the same keys as a PEM literal between its BEGIN/END
+// install.sh and install.ps1 carry the same keys as a PEM literal between its BEGIN/END
 // TRUSTED KEYS markers; nothing else ties the two trust roots together, so
 // this does (D137's review): the set of ids in the script equals the set
 // the binary embeds.
 func TestInstallScript_EmbedsExactlyTheTrustedKeys(t *testing.T) {
-	script, err := os.ReadFile(filepath.Join("..", "..", "..", "install.sh"))
+	for _, name := range []string{"install.sh", "install.ps1"} {
+		t.Run(name, func(t *testing.T) { embedsTrustedKeys(t, name) })
+	}
+}
+
+func embedsTrustedKeys(t *testing.T, name string) {
+	t.Helper()
+	script, err := os.ReadFile(filepath.Join("..", "..", "..", name))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +139,7 @@ func TestInstallScript_EmbedsExactlyTheTrustedKeys(t *testing.T) {
 	start := strings.Index(s, "# BEGIN TRUSTED KEYS")
 	end := strings.Index(s, "# END TRUSTED KEYS")
 	if start < 0 || end < 0 || end < start {
-		t.Fatal("install.sh lacks the TRUSTED KEYS markers")
+		t.Fatal(name + " lacks the TRUSTED KEYS markers")
 	}
 	block := s[start:end]
 	got := map[string]bool{}
@@ -145,7 +152,7 @@ func TestInstallScript_EmbedsExactlyTheTrustedKeys(t *testing.T) {
 		}
 		k, err := ParsePublicKeyPEM(pem.EncodeToMemory(p))
 		if err != nil {
-			t.Fatalf("install.sh key block: %v", err)
+			t.Fatalf("%s key block: %v", name, err)
 		}
 		got[k.ID] = true
 	}
@@ -154,11 +161,11 @@ func TestInstallScript_EmbedsExactlyTheTrustedKeys(t *testing.T) {
 		want[k.ID] = true
 	}
 	if len(got) != len(want) {
-		t.Fatalf("install.sh embeds %d key(s) %v, the binary trusts %d %v", len(got), got, len(want), want)
+		t.Fatalf("%s embeds %d key(s) %v, the binary trusts %d %v", name, len(got), got, len(want), want)
 	}
 	for id := range want {
 		if !got[id] {
-			t.Errorf("install.sh does not embed key %s, which the binary trusts", id)
+			t.Errorf("%s does not embed key %s, which the binary trusts", name, id)
 		}
 	}
 }
