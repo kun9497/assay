@@ -33,6 +33,11 @@ All notable changes to this project are documented here. The format follows
   one record per id, so only the highest major's record survived and the lower majors'
   packages were reported clean (4,838 affected entries on Oracle's archive, 1,507 of them on
   Oracle Linux 8). Takes effect in databases built from this version on.
+- `db build`: a past-end-of-life key the upstream serves only a remnant of keeps its carried
+  advisories when the upstream adds a record to it (D110 revised). Since 2026-11-20 one such
+  change to OSV's Debian export had dropped 43,600 Debian 11 advisories from every nightly
+  candidate, and the publish gate refused each one; the published database stayed at
+  2026-11-19 until this fix.
 
 ## [0.18.6] - 2026-11-19
 
