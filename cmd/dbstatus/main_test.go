@@ -293,3 +293,15 @@ func TestRun_ASuccessfulReadClearsThePreviousError(t *testing.T) {
 		t.Errorf("publishedError = %q, published = %+v; want the error cleared by the fresh read", s.PublishedError, s.Published)
 	}
 }
+
+// QA 2026-11-20: a signature no trusted key made is signed:false too, not a
+// read error that keeps the previous description.
+func TestRun_AnArtifactSignedByAnotherKeyIsReportedUnsigned(t *testing.T) {
+	trustKey(t, trusttest.NewKey(t))
+	fixedNow(t, t0)
+	ref, _ := publish(t, trusttest.NewKey(t))
+	s, _ := runStatus(t, "-ref", ref, "-workflow", "db-publish", "-result", "success", "-run-url", "u")
+	if s.Published == nil || s.Published.Signed || s.Published.SignatureError == "" || s.PublishedError != "" {
+		t.Errorf("published = %+v, error %q; want signed=false with its reason", s.Published, s.PublishedError)
+	}
+}

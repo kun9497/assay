@@ -211,6 +211,7 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 			raw, err = os.ReadFile(filepath.Join(*offlineDir, c.name+".scan.json"))
 			if err != nil {
 				fatal[c.name] = fmt.Sprintf("offline: %v", err)
+				fmt.Fprintf(stderr, "error: case=%s %s\n", c.name, fatal[c.name])
 				continue
 			}
 		} else {
@@ -335,6 +336,11 @@ func run(args []string, stdout, stderr io.Writer, execScan execFunc) int {
 	// not read "found nothing" as "held" (D11).
 	if total.Labels == 0 && len(results) > 0 {
 		fmt.Fprintln(stderr, "error: no label could be judged: the database's data predates every label's validFrom")
+		return exitError
+	}
+	// Every ERROR row has a fatal entry today; this holds the exit to the
+	// count the table prints rather than to that staying true.
+	if total.Errors > 0 {
 		return exitError
 	}
 	if total.FP+total.FN+total.Mismatch+total.Unevaluated > 0 {

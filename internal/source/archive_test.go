@@ -387,3 +387,16 @@ func TestOpen_DockerArchiveWithTwoMetadataMembersIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// QA 2026-11-20: an archive that names no image is refused, not a panic.
+func TestOpen_DockerArchiveManifestShapes(t *testing.T) {
+	for body, want := range map[string]string{"[]": "exactly one image, found 0", "{": "read archive manifest"} {
+		p := filepath.Join(t.TempDir(), "x.tar")
+		if err := os.WriteFile(p, archiveTestBytes(t, archiveTestFile("manifest.json", []byte(body))), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Open(context.Background(), "docker-archive:"+p, "linux/amd64"); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: err = %v, want %q", body, err, want)
+		}
+	}
+}
