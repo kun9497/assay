@@ -38,6 +38,15 @@ All notable changes to this project are documented here. The format follows
   change to OSV's Debian export had dropped 43,600 Debian 11 advisories from every nightly
   candidate, and the publish gate refused each one; the published database stayed at
   2026-11-19 until this fix.
+- Image scans: an image that carries a second package database is no longer cataloged from
+  the wrong one (D170). The inventory was the first database found in a fixed order, so a
+  Debian image with a stray `lib/apk/db/installed` was scanned as that one apk record and
+  reported clean. The database of the image's own package format is read, and any other
+  database that holds something is reported not read (stderr, JSON `unread[]`, SARIF, and
+  `--fail-on-incomplete`).
+- Image scans: an RPM image with an empty `/var/lib/dpkg/status`, which Fedora's `dpkg`
+  package installs, is scanned from its rpm database instead of failing with "none of [...]
+  holds an rpm database".
 
 ## [0.18.6] - 2026-11-19
 

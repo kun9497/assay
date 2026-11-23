@@ -9432,6 +9432,48 @@ left; the flag; the digest; a newer and an identical artifact need no flag), one
 
 ---
 
+### D170 — An image's inventory is the database of its own package format
+
+Decided 2026-11-23, from the 2026-11-20 QA audit. `catalogFromImage` read the first package
+database it found in a fixed order — apk, dpkg status, status.d, rpm, pacman — and nothing
+else. No decision recorded that order; it was the order the formats were added in. An image
+carries one database, so it was right on every image measured, and wrong on the two shapes
+that carry a second:
+
+- A Debian 12 image with a one-record `lib/apk/db/installed`: the apk record was the whole
+  inventory, the three dpkg packages and their findings were gone, and the scan printed "No
+  known vulnerabilities found in 1 package(s)" with exit 0 under every gate. One file, added in
+  any layer, hid an image from the scanner.
+- Fedora's `dpkg` rpm ships an empty `/var/lib/dpkg/status`. The dpkg branch read nothing and
+  the scan failed with "none of [...] holds an rpm database" while the rpmdb held every
+  package.
+
+**Decision.** The database read is the one of the format the image's own identity implies.
+The format is read off the comparer the image's ecosystem key resolves to (`version.For`), so
+the table that orders a distro's versions also names its inventory, and an RPM distro this
+build has no key for (centos, openEuler) is still an RPM distro. When the identity implies no
+format, or its database is absent, the old order decides, except that an empty dpkg status
+never outranks a database holding something. Every other database found with something in it
+is reported not read — stderr, JSON `unread[]`, SARIF `assay/not-read`, and
+`--fail-on-incomplete` in both scopes, since an image is the caller's to fix (D36, D109).
+
+**Not merged.** Reading both and joining them was considered and refused. The packages are
+keyed by the image's one ecosystem (D7), so an apk package beside a Debian inventory would be
+looked up under `Debian:12` and ordered by the deb comparer: a wrong answer in either
+direction, presented as an evaluated package.
+
+**Gives up.** An image whose os-release lies gets the database its lie names; the real one is
+then the second database and is reported, so the scan is loud rather than right. Without
+`--fail-on-incomplete` that is a stderr line and an `unread[]` entry beside exit 0, the same
+standing every unread path has. A genuinely dual image (an rpm base with a full Debian chroot)
+has one of its two inventories reported, not scanned. No JSON schema change: `unread[]`
+already exists.
+
+**Held by** two tests through `Run` (the Debian shape, and the gate), a table of seven images
+through `catalogFromImage`, the Fedora shape in two spellings, and eight mutations.
+
+---
+
 ## 6. Benchmarking notes
 
 Design elements taken from existing tools, and what was left behind.
