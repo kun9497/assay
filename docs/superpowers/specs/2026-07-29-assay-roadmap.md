@@ -4534,6 +4534,38 @@ idea and the `force` dispatch input (deferred-decisions,
 "Normal retirement and the publish guard") are superseded: the guard needs no exception when
 the key never disappears.
 
+**Revised 2026-11-23.** "Gained a record" was the test for "the upstream still serves this
+key", and it failed on Debian:11 itself. On 2026-11-20 OSV rewrote its Debian export (16,920
+records modified that day) and 202 DLA records published between April and August 2026 gained
+a Debian:11 entry they had been missing. Each is a record the seed did not hold under the key,
+so the key read as live, the entry-level rule stood down, and none of the 43,600 entries the
+export has withheld since August was restored: `Debian:11: 46364 -> 2764 advisories`. The
+promotion gate (D114) refused the candidate, correctly, and went on refusing it every night,
+because the seed a candidate is compared with is the last published artifact and cannot move
+while the publish fails. The limit accepted above ("the next record it gains makes it live
+again") assumed a live key; applied to a key the upstream had abandoned it was not a one-night
+cost but a lock.
+
+A key that grew is now judged a second way before it is left alone: if this run holds fewer
+than half the records the seed holds under it, it is a **remnant**. The upstream is not
+serving the key, whatever it added tonight, and the seed's entries are restored exactly as on
+a flat night; records new to the key keep this run's own entry. Debian:11 on 2026-11-20 is
+2,764 of 46,364. A live key that narrows a record on a quiet night still heals the next
+night, because it holds all of its seed's records, not a fraction. The count is taken from the
+seed's records in one extra pass, paid only on a night a past-EOL key grew. The stderr line
+names the reason (`this run holds N of the seed's M records under it`) in place of
+`no record new to it this run`.
+
+**Gives up.** A remnant key's genuine narrowing is restored, the same cost the flat rule
+already carries. Half is a judgement, not a measurement: the one event measured is 6%, and a
+key between a remnant and a live one has not been seen. A key that recovers past half is live
+again and its restored entries are no longer carried, which is right only if the upstream
+brought them back; the per-key count lines show it either way.
+
+**Held by** a seventh row in the entry-level table (two of seven records, restored, with the
+record that gained the key keeping its own entry) beside the existing row at exactly half,
+which stays live and holds the comparison strict; five mutations.
+
 ---
 
 ### D111 — A scan states what it covered, per key, whether or not it found anything

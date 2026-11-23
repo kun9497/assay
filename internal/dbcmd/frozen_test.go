@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -206,6 +207,10 @@ func TestCarryForward_T9b_PastEOLFromAndFlat(t *testing.T) {
 		row                         store.EOLRelease
 		seedExtra, runExtra         []advisory.Advisory
 		since                       string
+		// why and restored are the stderr line's reason and count when
+		// they are not the flat night's "no record new" and 3.
+		why      string
+		restored int
 	}{
 		{
 			name: "debian 11, 08-30 catalog shape, flat", provider: "osv",
@@ -227,6 +232,30 @@ func TestCarryForward_T9b_PastEOLFromAndFlat(t *testing.T) {
 			gone: "Debian:11", stays: "Debian:12", row: debian11Sep,
 			seedExtra: []advisory.Advisory{adv("REC-S1", affects("Debian:12", "libnew"))},
 			runExtra:  []advisory.Advisory{adv("REC-S1", affects("Debian:11", "libnew"), affects("Debian:12", "libnew"))},
+		},
+		{
+			// 2026-11-20, in small: OSV rewrote its Debian export and 202
+			// old DLA records gained a Debian:11 entry, so the key "grew"
+			// while the export still withheld 43,600 entries. A run holding
+			// under half the seed's records for the key is a remnant, and
+			// the seed's entries are restored whatever was added. Two of
+			// seven here; the case above is two of four, exactly half, and
+			// stays live -- which holds the comparison strict.
+			name: "debian 11, a held record gains the key, but the run holds a remnant", provider: "osv",
+			gone: "Debian:11", stays: "Debian:12", row: debian11Sep, since: "2026-08-31",
+			seedExtra: []advisory.Advisory{
+				adv("REC-S1", affects("Debian:12", "libnew")),
+				adv("REC-Q1", affects("Debian:11", "libqux"), affects("Debian:12", "libqux")),
+				adv("REC-Q2", affects("Debian:11", "libqux"), affects("Debian:12", "libqux")),
+				adv("REC-Q3", affects("Debian:11", "libqux"), affects("Debian:12", "libqux")),
+			},
+			runExtra: []advisory.Advisory{
+				adv("REC-S1", affects("Debian:11", "libnew"), affects("Debian:12", "libnew")),
+				adv("REC-Q1", affects("Debian:12", "libqux")),
+				adv("REC-Q2", affects("Debian:12", "libqux")),
+				adv("REC-Q3", affects("Debian:12", "libqux")),
+			},
+			why: "this run holds 2 of the seed's 7 records under it", restored: 6,
 		},
 		{
 			name: "debian 12, EOLFrom 2028, flat", provider: "osv",
@@ -286,7 +315,18 @@ func TestCarryForward_T9b_PastEOLFromAndFlat(t *testing.T) {
 			if since, ok := frozen[tc.gone]; !ok || !since.Equal(seedFreezeTime) || len(frozen) != 1 {
 				t.Errorf("Frozen = %v, want only %s at the seed's DataAsOf %v", frozen, tc.gone, seedFreezeTime)
 			}
-			line := tc.gone + " (past EOL since " + tc.since + ", no record new to it this run): restored its entry on 3 advisories re-emitted without it"
+			why, restored := "no record new to it this run", 3
+			if tc.why != "" {
+				why, restored = tc.why, tc.restored
+				// The record that gained the key keeps this run's own entry.
+				if got := lookupIDs(t, db, tc.gone, "libnew"); !slices.Equal(got, []string{"REC-S1"}) {
+					t.Errorf("Lookup(%s, libnew) = %v, want the record this run added", tc.gone, got)
+				}
+				if got, want := lookupIDs(t, db, tc.gone, "libqux"), []string{"REC-Q1", "REC-Q2", "REC-Q3"}; !slices.Equal(got, want) {
+					t.Errorf("Lookup(%s, libqux) = %v, want %v restored", tc.gone, got, want)
+				}
+			}
+			line := fmt.Sprintf("%s (past EOL since %s, %s): restored its entry on %d advisories re-emitted without it", tc.gone, tc.since, why, restored)
 			if !strings.Contains(logs, line) {
 				t.Errorf("stderr lacks %q:\n%s", line, logs)
 			}

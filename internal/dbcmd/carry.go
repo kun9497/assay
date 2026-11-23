@@ -229,6 +229,11 @@ func keyFreezeDate(p store.Provenance, key string) time.Time {
 //     is the upstream correcting itself (Canonical's tracker, D85), measured
 //     as every live-key entry removal but Debian:11's in 28 days.
 //
+//     A key that DID gain a record is restored all the same when this run
+//     holds fewer than half the seed's records under it (revised
+//     2026-11-23, at the judgement below): a remnant the upstream is not
+//     serving, whatever it added that night.
+//
 //     Known limit, accepted: a live key that gains no record on some night
 //     and narrows a record that same night reads as flat, so that narrowing
 //     is restored and the key marked Frozen for the night. The next night it
@@ -312,7 +317,11 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 	}
 	defer src.Close()
 
-	entry := map[string]string{} // live, past-EOL, flat key -> its EOLFrom
+	entry := map[string]string{} // live, past-EOL, flat or remnant key -> its EOLFrom
+	// remnant is why a key that grew is restored anyway, for its stderr
+	// line; grown is the keys still to be judged that way.
+	remnant := map[string]string{}
+	var grown []string
 	if len(eolRows) == 0 {
 		// EOL_ENABLE=0 (a failed EOL fetch aborts the build, D87, so it never
 		// reaches here). Without a catalog no key can be judged past EOL, and
@@ -335,6 +344,37 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 			}
 			if !grew {
 				entry[key] = past[key]
+				continue
+			}
+			grown = append(grown, key)
+		}
+		// D110 revised 2026-11-23. "Gained a record" was read as "the
+		// upstream still serves this key", and on 2026-11-20 it stopped
+		// being true: OSV rewrote its Debian export and 202 DLA records from
+		// before bullseye's end of life gained a Debian:11 entry they had
+		// been missing. The key therefore counted as live, none of the
+		// 43,600 entries the export has withheld since August was restored,
+		// and the publish gate refused the result -- every night, because
+		// the seed it is compared with cannot move while the publish fails.
+		// A key under which this run holds fewer than half the records the
+		// seed holds is a remnant: whatever was added tonight, the upstream
+		// is not serving it, and the seed's entries are restored as on a
+		// flat night. Counted from the seed's records, never its index, in
+		// one extra pass that is paid only on a night a past-EOL key grew.
+		if len(grown) > 0 {
+			held, err := seedRecordsUnder(src, grown)
+			if err != nil {
+				return carryResult{}, fmt.Errorf("count seed %s: %w", label, err)
+			}
+			for _, key := range grown {
+				ids, err := w.IDsUnder(key)
+				if err != nil {
+					return carryResult{}, fmt.Errorf("count %s: %w", key, err)
+				}
+				if len(ids)*2 < held[key] {
+					entry[key] = past[key]
+					remnant[key] = fmt.Sprintf("this run holds %d of the seed's %d records under it", len(ids), held[key])
+				}
 			}
 		}
 	}
@@ -511,9 +551,28 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 		if withdrawn[key] > 0 {
 			parts = append(parts, fmt.Sprintf("%d not re-emitted at all, left withdrawn (D16)", withdrawn[key]))
 		}
-		fmt.Fprintf(stderr, "%s (past EOL since %s, no record new to it this run): %s\n", key, entry[key], strings.Join(parts, "; "))
+		why := "no record new to it this run"
+		if r, ok := remnant[key]; ok {
+			why = r
+		}
+		fmt.Fprintf(stderr, "%s (past EOL since %s, %s): %s\n", key, entry[key], why, strings.Join(parts, "; "))
 	}
 	return res, nil
+}
+
+// seedRecordsUnder counts the seed's records carrying an entry under each of
+// keys, the measure printKeyCounts reports as a key's old count.
+func seedRecordsUnder(seed *store.Bolt, keys []string) (map[string]int, error) {
+	counts := make(map[string]int, len(keys))
+	err := seed.EachAdvisory(func(a advisory.Advisory) error {
+		for _, key := range keys {
+			if slices.ContainsFunc(a.Affected, func(x advisory.Affected) bool { return x.Ecosystem == key }) {
+				counts[key]++
+			}
+		}
+		return nil
+	})
+	return counts, err
 }
 
 // entriesUnder is a's Affected entries under key, in their stored order.
