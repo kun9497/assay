@@ -215,7 +215,7 @@ func TestRun_D111_FrozenKeyWithNoFindingIsDisclosedEverywhere(t *testing.T) {
 			t.Fatalf("Run = %d, want 0 (D111 discloses, it does not gate)\nstderr: %s", code, errOut)
 		}
 		doc, _ := decodeD111(t, out)
-		if doc.SchemaVersion != 23 {
+		if doc.SchemaVersion != 24 {
 			t.Errorf("schemaVersion = %d, want 23", doc.SchemaVersion)
 		}
 		want := []d111Coverage{{

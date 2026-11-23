@@ -9,7 +9,7 @@ with a version bump, a **Breaking** entry in the [changelog](../CHANGELOG.md), a
 
 | Contract | What it is | Version field | Current |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 23 |
+| `report` | `assay scan --output json` | `schemaVersion` | 24 |
 | `provenance sidecar` | the file `--provenance <path>` writes (D120) | `schemaVersion` | 1 |
 | `status.json` | the published database's status, on the `status` branch (D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json` (D147) | `schemaVersion` | 1 |

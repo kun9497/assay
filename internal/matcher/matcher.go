@@ -140,6 +140,11 @@ type Finding struct {
 	// self and related are the two halves Bundled is cut from, gathered
 	// while records join. No renderer reads them.
 	self, related []string
+	// pkg is the position in Target.Packages this finding is for.
+	pkg int
+	// Notices is the distributor notices (USN, DSA, DLA) that announced this
+	// finding's fix and said nothing it does not (D172, foldRollups).
+	Notices []string
 	// Enrichment is what other authorities wrote ABOUT this vulnerability in
 	// prose — KISA's Korean headline, overview and notice link — joined on the
 	// CVE exactly the way Ratings are (D3).
@@ -674,7 +679,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 		return Result{}, err
 	}
 
-	for _, p := range t.Packages {
+	for pkgIndex, p := range t.Packages {
 		if p.OSConflict != "" {
 			res.Skipped = append(res.Skipped, Skipped{Package: p, Cause: SkipTarget,
 				Reason: p.OSConflict})
@@ -1164,15 +1169,16 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 								Score:              score,
 								Ratings:            []Rating{r},
 								Identifiers:        lookupIDs(a),
-								self:               selfIDs(a),
-								related:            a.Related,
+								self:               selfOf(a),
+								related:            relatedOf(a),
+								pkg:                pkgIndex,
 							})
 						} else {
 							f := &res.Findings[idx]
 							f.Ratings = append(f.Ratings, r)
 							f.Identifiers = append(f.Identifiers, lookupIDs(a)...)
-							f.self = append(f.self, selfIDs(a)...)
-							f.related = append(f.related[:len(f.related):len(f.related)], a.Related...)
+							f.self = append(f.self, selfOf(a)...)
+							f.related = append(f.related[:len(f.related):len(f.related)], relatedOf(a)...)
 							if beats(r, winnerOf(*f)) {
 								f.Advisory, f.Evidence = a, ev
 								f.MatchedName = lookupName
@@ -1207,7 +1213,7 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 			live = append(live, f)
 		}
 	}
-	res.Findings = live
+	res.Findings = foldRollups(live)
 
 	for i := range res.Findings {
 		res.Findings[i].Identifiers = dedupSorted(res.Findings[i].Identifiers)

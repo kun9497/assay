@@ -9,7 +9,7 @@
 
 | 계약 | 무엇인가 | 버전 필드 | 현재 |
 |---|---|---|---|
-| `report` | `assay scan --output json` | `schemaVersion` | 23 |
+| `report` | `assay scan --output json` | `schemaVersion` | 24 |
 | `provenance sidecar` | `--provenance <path>`가 쓰는 파일(D120) | `schemaVersion` | 1 |
 | `status.json` | 배포 데이터베이스의 상태, `status` 브랜치(D138) | `schemaVersion` | 1 |
 | `db status` | `assay db status --output json`(D147) | `schemaVersion` | 1 |
