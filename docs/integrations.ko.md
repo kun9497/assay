@@ -241,7 +241,7 @@ waiver가 당신이 아니라 소프트웨어의 '생산자'로부터 온 것이
 결코 아무것도 억제하지 않습니다.
 
 ```sh
-assay scan my-image.tar --vex vendor.openvex.json --fail-on high
+assay scan docker-archive:my-image.tar --vex vendor.openvex.json --fail-on high
 ```
 
 ## 결과 확인

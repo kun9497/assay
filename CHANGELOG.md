@@ -99,6 +99,10 @@ All notable changes to this project are documented here. The format follows
 - An image is no longer refused because a dpkg, apk or pacman database line exceeds 64 KiB.
 - pnpm: a registry release whose lockfile entry names a mirror's or private registry's tarball is
   evaluated; every package of such a lockfile was reported not evaluated.
+- SPDX: a package naming several purls no longer cancels a component that was not evaluated, so
+  `--fail-on-incomplete` fires where it was passed over.
+- A Composer package installed from a `dev-` branch is the target's incompleteness, so
+  `--fail-on-incomplete=target` fires for it; it was blamed on the advisory.
 
 ## [0.18.6] - 2026-11-19
 
