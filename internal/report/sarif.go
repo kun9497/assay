@@ -857,8 +857,9 @@ func summaryLevelOf(sum Summary, cov Coverage) string {
 func groupRule(id string, fs []matcher.Finding) sarifRule {
 	worst := fs[0]
 	for _, f := range fs[1:] {
-		if f.Severity != severity.Unknown && (worst.Severity == severity.Unknown ||
-			securitySeverity(f.Severity, f.Score) > securitySeverity(worst.Severity, worst.Score)) {
+		// An unrated finding replaces nothing but another one.
+		if worst.Severity == severity.Unknown || f.Severity != severity.Unknown &&
+			securitySeverity(f.Severity, f.Score) > securitySeverity(worst.Severity, worst.Score) {
 			worst = f
 		}
 	}

@@ -1073,6 +1073,10 @@ PYSEC-2009-17 carries one `introduced` and five `last_affected` events, so the w
 at the first and only the enumerated list still names plone 3.2 and 3.3. Trading a loud miss
 for a silent one is the one thing this package exists to prevent.
 
+**Reaffirmed (2026-11-23).** An entry whose range bound cannot be read is a reported skip even when
+its `versions[]` names the installed version. The list is enumerated from the same bound. Falling
+through to it was measured on PyPI (QA 2026-11-20): five more hits, about 300 false positives.
+
 ### D31 — An apk letter may carry a numeric patch level, and it follows apk-tools 2.x
 
 The apk grammar gains exactly one production — digits, once, immediately after the single
@@ -5012,6 +5016,10 @@ decision this revision does not take.
 and CBL-Mariner 2.0's stopped being regenerated on 2026-05-06 while Azure Linux 3's is daily, so
 `--db-max-age` refused Azure Linux 3 scans for CBL-Mariner's date. Each key now carries its own
 file's date.
+
+**Revised (2026-11-23).** The age flags, `--timeout` and `--config` are accepted once. D113 had pinned
+"last one wins" for the rating age; a later, looser value silently replacing a gate is what
+`--fail-on` refuses.
 
 ---
 

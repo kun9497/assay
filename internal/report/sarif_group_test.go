@@ -80,3 +80,18 @@ func TestSARIF_ARuleIsBuiltFromEveryFindingThatSharesIt(t *testing.T) {
 		}
 	}
 }
+
+// The worst finding has a fix and another does not: the rule says so.
+func TestSARIF_ARuleIsUnfixableWhenAnyOfItsFindingsIs(t *testing.T) {
+	f := func(v, fixed string, score float64, state advisory.FixState) matcher.Finding {
+		return matcher.Finding{
+			Package: pkgmeta.Package{Name: "x", Version: v, Ecosystem: "PyPI"}, Advisory: advisory.Advisory{ID: "CVE-1"},
+			Severity: severity.High, Score: score, Evidence: version.Evidence{Fixed: fixed, FixState: state},
+			Ratings: []matcher.Rating{{Fixed: fixed, FixState: state}},
+		}
+	}
+	r := groupRule("r", []matcher.Finding{f("1", "2", 8.9, advisory.FixStateFixed), f("3", "", 7.1, advisory.FixStateWontFix)})
+	if r.Properties["unfixable"] != true || r.Properties["fixState"] != "wont-fix" || r.Properties["security-severity"] != "8.9" {
+		t.Errorf("properties %v", r.Properties)
+	}
+}

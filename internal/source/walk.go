@@ -485,7 +485,6 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 							above[k] = layerHit{kind: hitLink, linkname: h.Linkname, pos: pos, rest: strings.TrimPrefix(q.path, name+"/")}
 						}
 						aboveName[k] = name
-						delete(layerDirs[k], name)
 					case tar.TypeDir:
 						if layerDirs[k] == nil {
 							layerDirs[k] = map[string]bool{}
@@ -496,7 +495,6 @@ func (img *Image) resolvePass(ctx context.Context, qs []query, out map[string]Fi
 						}
 					default:
 						above[k], aboveName[k] = layerHit{kind: hitGone}, name
-						delete(layerDirs[k], name)
 					}
 				case name == q.path:
 					switch h.Typeflag {
