@@ -1,6 +1,9 @@
 package version
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 // TestFor_ResolvesEachLanguageEcosystemToItsOwnComparer drives the CALLER --
 // For(), the registry's only entry point -- for the four ecosystems no other
@@ -171,5 +174,26 @@ func TestFor_CleanStartResolvesAPK(t *testing.T) {
 	}
 	if got != 1 {
 		t.Errorf(`Compare("18.6-r0", "17.6-r0") via For("CleanStart") = %d, want 1`, got)
+	}
+}
+
+// QA 2026-11-20. Eight families routed to the wrong comparer at once left the
+// suite green. Every key this build makes, through For, by type: the order
+// each type gives is its own table's job.
+func TestFor_RoutesEveryKeyToItsComparer(t *testing.T) {
+	for eco, want := range map[string]Comparer{
+		"Alpine:v3.20": APK{}, "Wolfi": APK{}, "Chainguard": APK{}, "MinimOS": APK{}, "Alpaquita:23": APK{},
+		"BellSoft Hardened Containers:23": APK{}, "CleanStart": APK{},
+		"Debian:12": Deb{}, "Ubuntu:22.04:LTS": Deb{}, "Ubuntu:26.10": Deb{}, "Echo": Deb{},
+		"Red Hat:9": RPM{}, "Rocky Linux:9": RPM{}, "AlmaLinux:9": RPM{}, "Amazon Linux:2023": RPM{}, "Oracle Linux:9": RPM{},
+		"Fedora:45": RPM{}, "SLES:15.SP6": RPM{}, "openSUSE Leap:15.6": RPM{}, "Azure Linux:3": RPM{}, "Photon OS:5": RPM{},
+		"Hummingbird": RPM{}, "Arch:rolling": Pacman{},
+		"Go": SemVer{}, "npm": SemVer{}, "crates.io": SemVer{}, "PyPI": PEP440{}, "RubyGems": Gem{}, "Packagist": Composer{},
+		"NuGet": NuGet{}, "Maven": Maven{},
+	} {
+		got, ok := For(eco)
+		if !ok || fmt.Sprintf("%T", got) != fmt.Sprintf("%T", want) {
+			t.Errorf("For(%q) = %T, %v; want %T", eco, got, ok, want)
+		}
 	}
 }

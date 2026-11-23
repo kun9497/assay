@@ -84,6 +84,8 @@ type fakeProvider struct {
 	// reporting none builds a database that refuses every scan, so a test
 	// leaving it empty is testing that rather than what it means to.
 	covers []string
+	// keyAsOf is what this provider dates each key (D113).
+	keyAsOf map[string]time.Time
 }
 
 func (f fakeProvider) Name() string { return f.name }
@@ -99,6 +101,7 @@ func (f fakeProvider) Fetch(_ context.Context, emit func(advisory.Advisory) erro
 		Source:     "https://example.test/all.zip",
 		DataAsOf:   time.Date(2026, 7, 29, 0, 0, 0, 0, time.UTC),
 		Records:    len(f.advs),
+		KeyAsOf:    f.keyAsOf,
 	}, nil
 }
 
