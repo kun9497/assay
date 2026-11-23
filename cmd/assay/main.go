@@ -164,8 +164,9 @@ Scan flags (any order, before or after the target):
   --vex <path>          An OpenVEX document (v0.2.0 or legacy v0.0.1) whose
                         not_affected/fixed statements suppress the findings
                         they exonerate, the same shown-and-counted way
-                        --config's ignore rules do. Repeatable; applies in
-                        the order given, after --config's rules. A statement
+                        --config's ignore rules do. Repeatable; the latest
+                        statement wins across all of them (a tie goes to the
+                        last given), after --config's rules. A statement
                         with no stated justification/impact is skipped with
                         a warning rather than suppressing, and a document
                         that cannot be read or parsed fails the scan

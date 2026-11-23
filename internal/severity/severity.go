@@ -165,7 +165,35 @@ func HighestDetail(vectors []string) (Band, float64, bool) {
 			best, bestScore, fromV2 = band, score, true
 		}
 	}
-	return best, bestScore, fromV2
+	if fromV2 {
+		return best, bestScore, true
+	}
+	// Last of all, Canonical's priority word. Canonical says it schedules
+	// fixes rather than rates severity, so it never outweighs a vector in the
+	// same record; but a record holding nothing else was Unknown, which no
+	// --fail-on band counts, whatever Canonical had said (QA 2026-11-20).
+	for _, v := range vectors {
+		if p, ok := ubuntuPriorities[v]; ok && (best == Unknown || p.score > bestScore) {
+			best, bestScore = p.band, p.score
+		}
+	}
+	return best, bestScore, false
+}
+
+// ubuntuPriorities bands the words OSV carries under severity type "Ubuntu",
+// lower-case as published. Separate from vendorSeverityWords because those
+// enter the maximum beside a vector and these only stand in for one.
+// "negligible" is Low: there is no band between None and Low, and None would
+// say the CVE was rated harmless.
+var ubuntuPriorities = map[string]struct {
+	band  Band
+	score float64
+}{
+	"critical":   {Critical, 9.0},
+	"high":       {High, 7.0},
+	"medium":     {Medium, 4.0},
+	"low":        {Low, 0.1},
+	"negligible": {Low, 0.1},
 }
 
 // Band is a severity class. The ordering is None < Low < Medium < High <

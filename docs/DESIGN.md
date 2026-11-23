@@ -204,6 +204,7 @@ which and why.
 assay scan alpine:3.19                # a registry reference
 assay scan docker-archive:app.tar     # a `docker save` tarball
 assay scan oci-dir:./layout           # an OCI layout directory
+assay scan oci-dir:./layout@2.0       # one entry of it, by ref name or digest
 assay scan sbom.cdx.json              # a CycloneDX SBOM
 assay scan sbom.spdx.json             # an SPDX 2.2/2.3 JSON SBOM
 assay scan ./bin/assay                # a Go binary

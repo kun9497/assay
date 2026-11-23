@@ -191,6 +191,7 @@ assay scan ./my-project
 assay scan alpine:3.19                # 레지스트리 참조
 assay scan docker-archive:app.tar     # `docker save` 타르볼
 assay scan oci-dir:./layout           # OCI 레이아웃 디렉터리
+assay scan oci-dir:./layout@2.0       # 그 안의 한 항목, ref 이름 또는 digest로
 assay scan sbom.cdx.json              # CycloneDX SBOM
 assay scan sbom.spdx.json             # SPDX 2.2/2.3 JSON SBOM
 assay scan ./bin/assay                # Go 바이너리
