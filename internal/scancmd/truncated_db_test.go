@@ -80,3 +80,37 @@ func TestRun_ADanglingIndexEntryIsExitTwo(t *testing.T) {
 		t.Errorf("exit %d, stdout %q, want 2 and a match error; stderr:%s", code, stdout, stderr)
 	}
 }
+
+// D173. With its root page damaged the first read of the file panicked inside
+// store.Open; it is an error with the remedy, like the truncated file.
+func TestRun_ADamagedPageIsAnError(t *testing.T) {
+	dir := t.TempDir()
+	db := provDB(t, dir)
+	sbom := filepath.Join(dir, "s.cdx.json")
+	provSBOM(t, sbom, "1.0.0")
+	whole, err := os.ReadFile(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := 0
+	for id := 2; (id+1)*os.Getpagesize() <= len(whole); id++ {
+		b := append([]byte(nil), whole...)
+		for i := id*os.Getpagesize() + 16; i < (id+1)*os.Getpagesize(); i++ {
+			b[i] = 0xff
+		}
+		cut := filepath.Join(dir, "cut.db")
+		if err := os.WriteFile(cut, b, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, stderr, code := provRun(t, cut, sbom, Options{VerifyDB: true})
+		if strings.Contains(stderr, "error: vulnerability database is damaged: reading it failed") {
+			seen++
+			if code != 2 || !strings.Contains(stderr, "run `assay db update`") {
+				t.Errorf("page %d: exit %d%s%s", id, code, string(rune(10)), stderr)
+			}
+		}
+	}
+	if seen == 0 {
+		t.Error("no page's damage reached Open's guard; the test holds nothing")
+	}
+}

@@ -85,6 +85,8 @@ Commands:
   db build        Build the vulnerability database from its upstream sources
   db status       Show what is in the database and how current it is
                   (--output json for a machine-readable document)
+  db verify       Read the whole database and compare it with what its build
+                  recorded; exit 2 if it is damaged or records nothing
   db push <ref>   Publish the built database as an OCI artifact (builders only).
                   Refuses to narrow the published coverage; --force overrides.
   db ref          Print the registry tag this binary's schema reads (CI only)
@@ -121,6 +123,8 @@ Scan flags (any order, before or after the target):
                         =target narrows it to causes you can act on (a version
                         in the scanned artifact that will not parse), leaving
                         out malformed advisory data you cannot fix.
+  --verify-db           Run db verify before scanning and exit 2 if it fails.
+                        Off by default: it reads the whole file.
   --db-max-age=<dur>    Exit 2 if the vulnerability data is older than <dur>
                         (24h, 168h). Measured from the UPSTREAM data, not from
                         when the database was built, so a mirror serving a stale
@@ -576,6 +580,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 				// which has already refused every flag it does not know.
 				AllowOlder: slices.Contains(args[2:], "--allow-older"),
 			}, stdout, stderr)
+		case "verify":
+			if len(args) > 2 {
+				fmt.Fprintf(stderr, "error: unexpected argument %q: db verify takes none\n", args[2])
+				return exitError
+			}
+			return dbcmd.Verify(path, stdout, stderr)
 		case "status":
 			format, ok := resolveStatusFormat(args, stderr)
 			if !ok {
@@ -1367,6 +1377,9 @@ func parseScanArgs(args []string) (target string, opts scancmd.Options, err erro
 
 		case a == "--fail-on-unknown":
 			opts.FailOnUnknown = true
+
+		case a == "--verify-db":
+			opts.VerifyDB = true
 
 		// D48. Beside --fail-on-unknown because it is the same shape of ask:
 		// a property of the finding that no severity threshold can express.

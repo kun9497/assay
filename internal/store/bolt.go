@@ -63,8 +63,9 @@ func openReadOnly(path string) (*Bolt, Meta, error) {
 		return nil, Meta{}, err
 	}
 	b := &Bolt{db: db}
-	m, err := b.Meta()
-	if err != nil {
+	var m Meta
+	// Guarded: with the root page damaged this first read panics (D173).
+	if err := guarded(func() (err error) { m, err = b.Meta(); return err }); err != nil {
 		db.Close()
 		return nil, Meta{}, err
 	}
@@ -502,6 +503,9 @@ func (b *Bolt) SetMeta(m Meta) error {
 			return err
 		}
 		m.Databases = slices.Sorted(maps.Keys(dbs))
+		if err := recordDigests(tx, &m); err != nil {
+			return err
+		}
 
 		// RatingCounts (D27) is read from the ratings bucket actually
 		// stored, not from annotator self-report, exactly the reasoning
@@ -626,6 +630,16 @@ func StripEnrichment(path string) error {
 			return fmt.Errorf("decode metadata: %w", err)
 		}
 		m.Enrichment, m.EnrichmentCounts = nil, nil
+		// The contents just changed, so what they are recorded as must
+		// (D173). Only a record that has digests: one that has none was
+		// never checked, and digests taken now would vouch for it.
+		if len(m.Digests) > 0 {
+			d, _, err := bucketDigest(tx.Bucket(bucketEnrichment))
+			if err != nil {
+				return err
+			}
+			m.Digests[string(bucketEnrichment)] = d
+		}
 		// D127: a database that was itself pulled carries the record of
 		// THAT pull. Published, it would name the upstream artifact inside
 		// a layer that is a different artifact, and a pre-D127 binary's
