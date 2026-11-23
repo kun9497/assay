@@ -47,20 +47,39 @@ func (d *Document) Apply(findings []matcher.Finding, target Target, warn func(st
 	matched := make([]bool, len(d.Statements))
 
 	for _, f := range findings {
-		st, ok := resolve(live, f, target, matched)
-		if !ok {
-			kept = append(kept, f)
+		// The finding's own names first: a statement about the errata id, or
+		// about a record that IS one vulnerability, exonerates the finding.
+		if st, ok := resolve(live, f, ownIdentifiers(f), target, matched); ok {
+			suppressed = append(suppressed, matcher.Suppressed{
+				Finding: f,
+				Reason:  st.reason,
+				// D104: distinguishes a VEX exoneration from a D102 ignore-file
+				// waiver in the report, so a reader (and a future second VEX-like
+				// source) can tell suppressions apart by origin, not just by
+				// reason text.
+				Source: "vex",
+			})
 			continue
 		}
-		suppressed = append(suppressed, matcher.Suppressed{
-			Finding: f,
-			Reason:  st.reason,
-			// D104: distinguishes a VEX exoneration from a D102 ignore-file
-			// waiver in the report, so a reader (and a future second VEX-like
-			// source) can tell suppressions apart by origin, not just by
-			// reason text.
-			Source: "vex",
-		})
+		// D171. Then each CVE the finding bundles, by itself: a statement
+		// about one CVE of an errata says nothing about the others, and
+		// "latest statement wins" is a contest between statements about ONE
+		// vulnerability -- resolved across the lot, not_affected for one CVE
+		// and affected for its sibling beat each other by document order.
+		for _, cve := range f.Bundled {
+			if f.IsWaived(cve) {
+				continue
+			}
+			if st, ok := resolve(live, f, []string{cve}, target, matched); ok {
+				f = f.WithWaived(matcher.Waived{CVE: cve, Reason: st.reason, Source: "vex"})
+				stats.Waived++
+			}
+		}
+		if f.FullyWaived() {
+			suppressed = append(suppressed, matcher.Suppressed{Finding: f, Reason: f.WaivedReason(), Source: "vex"})
+			continue
+		}
+		kept = append(kept, f)
 	}
 	stats.Applied = len(suppressed)
 	for _, m := range matched {
@@ -83,6 +102,23 @@ type Stats struct {
 	OutOfScope int
 	// Applied is how many findings this document suppressed.
 	Applied int
+	// Waived is how many bundled CVEs this document exonerated one at a
+	// time (D171), on findings suppressed or still reported.
+	Waived int
+}
+
+// ownIdentifiers is the finding's identifiers less the CVEs it only bundles.
+func ownIdentifiers(f matcher.Finding) []string {
+	if len(f.Bundled) == 0 {
+		return f.Identifiers
+	}
+	out := make([]string, 0, len(f.Identifiers))
+	for _, id := range f.Identifiers {
+		if _, bundled := f.BundledCVE(id); !bundled {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // liveProduct is a Product with its purl-or-exact matching precomputed once
@@ -659,7 +695,10 @@ func (d *Document) liveStatements(target Target, warn func(string)) ([]liveState
 // matched[i] is set for every statement i whose vulnerability and product
 // both match f, whether or not it wins — Apply's count of statements that
 // matched nothing reads it.
-func resolve(live []liveStatement, f matcher.Finding, target Target, matched []bool) (result, bool) {
+//
+// identifiers is the names the statements are matched against: the finding's
+// own, or one CVE it bundles (D171).
+func resolve(live []liveStatement, f matcher.Finding, identifiers []string, target Target, matched []bool) (result, bool) {
 	pkgPURL := f.Package.PURL
 	pkgParsed, pkgErr := pkgmeta.ParsePURL(pkgPURL)
 	s := subject{
@@ -677,7 +716,7 @@ func resolve(live []liveStatement, f matcher.Finding, target Target, matched []b
 		haveBest bool
 	)
 	for _, ls := range live {
-		if !vulnerabilityMatches(ls.stmt.Vulnerability, f.Identifiers) {
+		if !vulnerabilityMatches(ls.stmt.Vulnerability, identifiers) {
 			continue
 		}
 		var (

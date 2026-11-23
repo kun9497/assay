@@ -168,9 +168,33 @@ func (c *Config) Apply(findings []matcher.Finding, now time.Time, warn func(stri
 			// and an OpenVEX document statement are read by different people
 			// for different reasons.
 			suppressed = append(suppressed, matcher.Suppressed{Finding: f, Reason: r.Reason, Source: "ignore-file"})
-		} else {
-			kept = append(kept, f)
+			continue
 		}
+		// D171. No rule names the finding itself. A rule naming one of the
+		// CVEs it bundles waives that CVE alone: the errata is still
+		// reported for the others, and is suppressed only once none is
+		// left. A rule is counted once per finding it touched, however many
+		// of its CVEs it named.
+		counted := map[int]bool{}
+		for _, cve := range f.Bundled {
+			if f.IsWaived(cve) {
+				continue
+			}
+			r, ok := firstBundledMatch(live, f, cve)
+			if !ok {
+				continue
+			}
+			if !counted[r.index] {
+				counted[r.index] = true
+				results[r.index].Matched++
+			}
+			f = f.WithWaived(matcher.Waived{CVE: cve, Reason: r.Reason, Source: "ignore-file"})
+		}
+		if f.FullyWaived() {
+			suppressed = append(suppressed, matcher.Suppressed{Finding: f, Reason: f.WaivedReason(), Source: "ignore-file"})
+			continue
+		}
+		kept = append(kept, f)
 	}
 	return kept, suppressed, results
 }
@@ -195,11 +219,27 @@ func firstMatch(rules []liveRule, f matcher.Finding) (liveRule, bool) {
 	return liveRule{}, false
 }
 
+// firstBundledMatch returns the first live rule that names cve, one of the
+// CVEs f bundles, and whose other fields f satisfies.
+func firstBundledMatch(rules []liveRule, f matcher.Finding, cve string) (liveRule, bool) {
+	for _, r := range rules {
+		if strings.EqualFold(r.Vulnerability, cve) && r.matchesPackage(f) {
+			return r, true
+		}
+	}
+	return liveRule{}, false
+}
+
 // matches reports whether every field the rule names is satisfied by f.
 func (r Rule) matches(f matcher.Finding) bool {
 	if r.Vulnerability != "" && !identifierMatches(f, r.Vulnerability) {
 		return false
 	}
+	return r.matchesPackage(f)
+}
+
+// matchesPackage is the package and ecosystem half of matches.
+func (r Rule) matchesPackage(f matcher.Finding) bool {
 	if r.Package != "" && f.Package.Name != r.Package {
 		return false
 	}
@@ -209,11 +249,18 @@ func (r Rule) matches(f matcher.Finding) bool {
 	return true
 }
 
-// identifierMatches reports whether want is one of the finding's
-// identifiers. Compared case-insensitively: a user writing `cve-2024-1234`
+// identifierMatches reports whether want is one of the finding's own
+// names. Compared case-insensitively: a user writing `cve-2024-1234`
 // should waive `CVE-2024-1234`, and advisory IDs are not case-normalized
 // upstream.
+//
+// A CVE the finding only bundles is not one of its names (D171): an errata
+// is not any single CVE it fixes, and a rule naming one of them had waived
+// the whole update, siblings included. Apply waives such a CVE by itself.
 func identifierMatches(f matcher.Finding, want string) bool {
+	if _, bundled := f.BundledCVE(want); bundled {
+		return false
+	}
 	for _, id := range f.Identifiers {
 		if strings.EqualFold(id, want) {
 			return true
