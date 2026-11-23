@@ -58,6 +58,10 @@ func openReadOnly(path string) (*Bolt, Meta, error) {
 	if err != nil {
 		return nil, Meta{}, fmt.Errorf("open %s: %w", path, err)
 	}
+	if err := refuseTruncated(db, path); err != nil {
+		db.Close()
+		return nil, Meta{}, err
+	}
 	b := &Bolt{db: db}
 	m, err := b.Meta()
 	if err != nil {
@@ -74,6 +78,27 @@ func openReadOnly(path string) (*Bolt, Meta, error) {
 		return nil, Meta{}, fmt.Errorf("%w at %s: no metadata record, so the last `assay db build` or `assay db update` did not finish", ErrIncomplete, path)
 	}
 	return b, m, nil
+}
+
+// refuseTruncated compares the file with the extent its own meta page records.
+// bbolt reads through a memory map and checks nothing but the two meta pages,
+// so touching a page past the end of a short file is a fault the Go runtime
+// cannot recover from: the process died inside Open with a goroutine dump, no
+// "error:" line and no provenance sidecar (D120), and exit 2 only because that
+// is the runtime's own crash code (QA 2026-11-20). It must run before anything
+// reads a bucket. Beginning a transaction reads only the meta already checked.
+func refuseTruncated(db *bolt.DB, path string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", path, err)
+	}
+	return db.View(func(tx *bolt.Tx) error {
+		if want := tx.Size(); fi.Size() < want {
+			return fmt.Errorf("%w at %s: the file is truncated, %d bytes of the %d its own header records",
+				ErrIncomplete, path, fi.Size(), want)
+		}
+		return nil
+	})
 }
 
 // Open opens an existing database read-only. A missing or schema-mismatched
