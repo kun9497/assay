@@ -29,6 +29,7 @@ func TestMatch_D175_ABuildIsJudgedByItsOwnMinorsFix(t *testing.T) {
 		{"a minor with no fix of its own", "Red Hat:10", "8.12.1-4.el10_1.9", curl, false, "0:8.12.1-9.el10_3"},
 		{"el10_20 is not el10_2", "Red Hat:10", "8.12.1-4.el10_20.7", curl, false, "0:8.12.1-9.el10_3"},
 		{"no minor in the release", "Red Hat:10", "8.12.1-8.el10", curl, false, "0:8.12.1-9.el10_3"},
+		{"a bare build above a bare fix", "Red Hat:9", "1-5.el9", []string{"0:1-3.el9", "0:1-9.el9_4"}, false, "0:1-9.el9_4"},
 		{"a bare fix above it", "Red Hat:9", "3.9.18-3.el9_4.5", python, false, ""},
 		{"a bare build is not el9_4's", "Red Hat:9", "3.9.19-1.el9", python, false, "0:3.9.19-8.el9"},
 		{"below both fixes of one minor", "Red Hat:9", "1-1.el9_4.1", []string{"0:1-1.el9_4.2", "0:1-1.el9_4.5"}, false, "0:1-1.el9_4.5"},
@@ -72,6 +73,27 @@ func TestMatch_D175_ABuildIsJudgedByItsOwnMinorsFix(t *testing.T) {
 				t.Errorf("skipped %v", res.Skipped)
 			}
 		})
+	}
+}
+
+// An open range is not a fix of the installed minor, so it takes no fixed range
+// away: the reason still names the build the record released (D163).
+func TestMatch_D175_AnOpenRangeNamesNoMinor(t *testing.T) {
+	s := fakeStore{byKey: map[string][]advisory.Advisory{"Red Hat:10\x00curl": {{
+		ID: "REDHAT-CVE-2026-1", Database: "REDHAT", Kind: advisory.KindVulnerability, Affected: []advisory.Affected{{
+			Ecosystem: "Red Hat:10", Name: "curl", Ranges: []advisory.Range{
+				{Type: advisory.RangeEcosystem, Events: []advisory.Event{{Introduced: "0"}, {Fixed: "0:8.12.1-4.el10_2.3"}}},
+				{Type: advisory.RangeEcosystem, Events: []advisory.Event{{Introduced: "0"}}, FixState: advisory.FixStateNotFixed},
+			}}}}}}}
+	res, err := New(s).Match(pkgmeta.Target{
+		Distro:   &pkgmeta.Distro{ID: "rhel", VersionID: "10"},
+		Packages: []pkgmeta.Package{{Name: "curl", Version: "8.12.1-9.el10_3", Type: "rpm", Ecosystem: "Red Hat:10"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Findings) != 1 || !strings.Contains(res.Findings[0].Evidence.Reason, "released fix 0:8.12.1-4.el10_2.3") {
+		t.Errorf("findings %+v, want one naming the released fix", res.Findings)
 	}
 }
 

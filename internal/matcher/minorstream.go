@@ -10,7 +10,7 @@ import (
 // rhelMinorTag is a RHEL release's minor, as a z-stream build's dist tag names
 // it: "el10_2" in 8.12.1-4.el10_2.7. A build of no particular minor carries a
 // bare ".el10", and a module build's "+el8.5.0+" is not this.
-var rhelMinorTag = regexp.MustCompile(`\.(el[0-9]+_[0-9]+)(?:\.|$)`)
+var rhelMinorTag = regexp.MustCompile(`\.(el[0-9]+_[0-9]+)`)
 
 func minorTag(evr string) string {
 	if m := rhelMinorTag.FindStringSubmatch(evr); m != nil {
@@ -34,7 +34,7 @@ func minorTag(evr string) string {
 // fixed window are kept, so an open one (D48) still says affected. Red Hat's
 // own data only: a rebuild's advisory holds one build per record.
 func ownMinorOnly(aff advisory.Affected, installed string) advisory.Affected {
-	if len(aff.Ranges) < 2 || !strings.HasPrefix(aff.Ecosystem, "Red Hat:") {
+	if !strings.HasPrefix(aff.Ecosystem, "Red Hat:") {
 		return aff
 	}
 	own := minorTag(installed)
