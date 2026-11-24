@@ -9772,7 +9772,7 @@ been narrowed, and whether those are separate lines was not examined.
 installed release names a RHEL minor (`.el10_2`), only the fixes naming the same minor are
 compared, if the record has one. Otherwise every fix counts, as before. An open range (D48) is
 kept. The version is the one compared, so a binary judged on its source is judged on the source's
-minor (D134). Red Hat's keys only; applied at match time, so no database rebuild is needed.
+minor (D134). Red Hat's keys only, at match time.
 
 **Why.** Red Hat fixes a CVE once per live minor and its CSAF keys each build to the major. curl's
 CVE-2026-1965 is 8.12.1-4.el10_2.3 and, since 10.3, 8.12.1-9.el10_3; 4.el10_2.7 carries the fix and
@@ -9791,8 +9791,17 @@ evidence about the build, it is in an SBOM, and a 10.3 host that still has 4.el1
 **D144's windows were rejected here.** Cutting the range below the next minor's fix clears an
 unfixed 8.12.1-7.el10_3.
 
-**Gives up.** A CVE Red Hat fixed in one minor and fixed again, for the same CVE, only in a later
-one is no longer reported on the first. Nothing in the feed tells that from an ordinary fix.
+**A support channel's second fix of the same minor is kept.** The branch review found 8 CVEs (193
+entries) whose minor was fixed on mainline and again in EUS, E4S or TUS: CVE-2026-93520 is
+xorg-x11-server 34.el9_8.5 and later 34.el9_8.6. D47 does not key a channel's builds, so the rule
+would have cleared the first. The provider now adds such a build to the fixes, only where another
+minor's mainline fix is above it, so that no build is reported that was not before this decision. It
+takes effect in databases built from this version.
+
+**Gives up.** A CVE Red Hat fixed in one minor and fixed again only in a later one is no longer
+reported on the first, and nothing in the feed tells that from an ordinary fix: by dates, about 18
+CVEs. CVE-2022-32885 is the one channel refix left out, 2.46.3 being above every mainline fix. With
+a database from before this version the 8 CVEs above are cleared as well.
 
 ---
 
