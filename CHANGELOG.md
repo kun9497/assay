@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Red Hat: a build that names a RHEL minor (`.el10_2`) is judged by that minor's fix (D175). One
+  that carried its own minor's fix was reported for being below a later minor's build, 56 findings
+  on ubi10 once RHEL 10.3 shipped. A finding on such a build names its own minor's fix. Applies to
+  databases already installed.
+
 ## [0.19.0] - 2026-11-24
 
 ### Changed
