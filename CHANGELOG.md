@@ -9,6 +9,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Database builds: a Debian 11 advisory OSV withdrew because bullseye left Debian's tracker is kept
+  (D110 revised). 1,360 of them left the database of 2026-11-24 04:42 UTC (`sha256:b51b9974…`), and
+  packages such as gpac, asterisk, openjdk-11 and python2.7 read clean there. Any later database has
+  them back.
 - Red Hat: a build that names a RHEL minor (`.el10_2`) is judged by that minor's fix (D175). One
   that carried its own minor's fix was reported for being below a later minor's build, 56 findings
   on ubi10 once RHEL 10.3 shipped. A finding on such a build names its own minor's fix. Update the
