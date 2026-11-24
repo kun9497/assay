@@ -39,7 +39,7 @@ func TestCarryForward_AWithdrawalUnderAFrozenReleaseIsKept(t *testing.T) {
 		line   string
 	}{
 		{"frozen, still declared", frozen, []string{"Debian:11", "Debian:12"}, flat,
-			[]string{"REC-BOTH", "REC-ONLY"}, "2 not re-emitted at all, kept: the key was frozen and is served no more"},
+			[]string{"REC-BOTH", "REC-ONLY"}, "no record new to it this run): restored its entry on 1 advisories re-emitted without it, frozen since 2026-08-19; 2 not re-emitted at all, kept: the key was frozen and is served no more"},
 		{"frozen, a remnant that grew", frozen, []string{"Debian:11", "Debian:12"}, []advisory.Advisory{adv("REC-R1", affects("Debian:12", "libfoo")), adv("REC-NEW", affects("Debian:11", "libnew"))},
 			[]string{"REC-BOTH", "REC-ONLY"}, "kept: the key was frozen and is served no more"},
 		{"frozen, declared no more", frozen, []string{"Debian:12"}, flat[:1],
@@ -51,6 +51,8 @@ func TestCarryForward_AWithdrawalUnderAFrozenReleaseIsKept(t *testing.T) {
 		// Ubuntu:25.10: frozen by one restored entry, and served all the same.
 		{"frozen, but this run holds half of it", frozen, []string{"Debian:11", "Debian:12"}, []advisory.Advisory{adv("REC-R1", affects("Debian:11", "libfoo")), adv("REC-DLA", affects("Debian:11", "libbar"))},
 			nil, "2 not re-emitted at all, left withdrawn (D16)"},
+		{"the first night it is a remnant that grew", nil, []string{"Debian:11", "Debian:12"}, []advisory.Advisory{adv("REC-R1", affects("Debian:12", "libfoo")), adv("REC-NEW", affects("Debian:11", "libnew"))},
+			nil, "left withdrawn (D16)"},
 		{"another provider's freeze is not this one's", map[string]time.Time{"Debian:12": frozenEarlier}, []string{"Debian:11", "Debian:12"}, flat,
 			nil, "left withdrawn (D16)"},
 	} {
