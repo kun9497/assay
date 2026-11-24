@@ -32,28 +32,27 @@ func channelFix(id string, cpe map[string]string) (productKey, string, bool) {
 // mainline 9.8 and, three weeks later, 34.el9_8.6 on 9.8 EUS: judged by its own
 // minor's fix, 34.el9_8.5 would be clean of what Red Hat found it still has.
 //
-// Only where another minor's mainline fix is at or above the build, which is
+// Only where another minor's mainline fix is above the build, which is
 // where the matcher's own-minor rule takes that fix away. [0, build) is then
 // inside a window the record already holds, so no build is reported that was
 // not before the rule, and a channel's builds are still not keyed otherwise.
 func refixes(mainline, channel map[string]bool) []string {
 	cmp := version.RPM{}
 	var out []string
+next:
 	for _, c := range sortedKeys(channel) {
 		above, covered := false, false
-		for m := range mainline {
+		for _, m := range sortedKeys(mainline) {
 			d, err := cmp.Compare(m, c)
 			if err != nil {
 				continue
 			}
 			if version.RHELMinor(m) != version.RHELMinor(c) {
-				covered = covered || d >= 0
+				covered = covered || d > 0
 				continue
 			}
 			if d >= 0 {
-				above = false
-				covered = false
-				break
+				continue next
 			}
 			above = true
 		}
