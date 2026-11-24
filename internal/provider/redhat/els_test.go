@@ -175,7 +175,7 @@ func TestResolveProduct_ELS(t *testing.T) {
 
 func TestStatsString_ReportsELSFixedBuildsOnTheirOwn(t *testing.T) {
 	got := stats{SkippedNonRHEL: 5, SkippedELSFixed: 71, SkippedImage: 2}.String()
-	want := "5 non-mainline products, 71 fixed builds on an ELS channel (D47), 2 container images"
+	want := "5 non-mainline products, 71 fixed builds on an ELS channel (D47), 0 channel builds kept as a mainline minor's second fix (D175), 2 container images"
 	if !strings.Contains(got, want) {
 		t.Errorf("stats.String() = %q, want it to contain %q", got, want)
 	}

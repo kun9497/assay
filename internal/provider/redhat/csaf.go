@@ -693,9 +693,11 @@ type stats struct {
 	// carry 242 such ids (71 distinct package/version tuples) in
 	// cve-2026-99999 alone.
 	SkippedELSFixed int
-	SkippedNoCPE    int
-	SkippedNoCVE    int
-	SkippedImage    int
+	// ChannelRefixes is the (package, build) pairs refixes kept (D175).
+	ChannelRefixes int
+	SkippedNoCPE   int
+	SkippedNoCVE   int
+	SkippedImage   int
 	// SkippedWholeProduct is an entry that names a PRODUCT and no package at
 	// all — "Red Hat Linux 6.2", "Red Hat Enterprise Linux AS (Advanced
 	// Server) version 2.1", "Red Hat Powertools 7.0". Red Hat used that form
@@ -810,6 +812,8 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 	// existing. Filled from the remediation lists, which are a separate section
 	// of the document from product_status and join to it by product id.
 	remedy := map[productKey]map[string]bool{}
+	// channel is the builds support channels shipped, see refixes.
+	channel := map[productKey]map[string]bool{}
 	order := []productKey{}
 	seen := map[productKey]bool{}
 	note := func(k productKey) {
@@ -884,6 +888,12 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		v := &d.Vulnerabilities[i]
 		for _, id := range v.ProductStatus.Fixed {
 			add(id, true)
+			if k, evr, ok := channelFix(id, cpe); ok {
+				if channel[k] == nil {
+					channel[k] = map[string]bool{}
+				}
+				channel[k][evr] = true
+			}
 		}
 		for _, id := range v.ProductStatus.KnownAffected {
 			add(id, false)
@@ -986,7 +996,9 @@ func convert(d *document, st *stats) (advisory.Advisory, bool) {
 		// documents ("name:stream"), so no further translation happens here.
 		a := advisory.Affected{Ecosystem: k.eco, Name: k.pkg, ModuleStream: k.stream}
 		if vs := fixed[k]; len(vs) > 0 {
-			for _, v := range sortedKeys(vs) {
+			again := refixes(vs, channel[k])
+			st.ChannelRefixes += len(again)
+			for _, v := range append(sortedKeys(vs), again...) {
 				a.Ranges = append(a.Ranges, advisory.Range{
 					Type:   advisory.RangeEcosystem,
 					Events: []advisory.Event{{Introduced: "0"}, {Fixed: v}},

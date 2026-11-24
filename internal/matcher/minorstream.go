@@ -1,23 +1,11 @@
 package matcher
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/kun9497/assay/internal/advisory"
+	"github.com/kun9497/assay/internal/version"
 )
-
-// rhelMinorTag is a RHEL release's minor, as a z-stream build's dist tag names
-// it: "el10_2" in 8.12.1-4.el10_2.7. A build of no particular minor carries a
-// bare ".el10", and a module build's "+el8.5.0+" is not this.
-var rhelMinorTag = regexp.MustCompile(`\.(el[0-9]+_[0-9]+)`)
-
-func minorTag(evr string) string {
-	if m := rhelMinorTag.FindStringSubmatch(evr); m != nil {
-		return m[1]
-	}
-	return ""
-}
 
 // ownMinorOnly leaves aff the fixes of the installed build's own RHEL minor,
 // when it names one (D175).
@@ -37,7 +25,7 @@ func ownMinorOnly(aff advisory.Affected, installed string) advisory.Affected {
 	if !strings.HasPrefix(aff.Ecosystem, "Red Hat:") {
 		return aff
 	}
-	own := minorTag(installed)
+	own := version.RHELMinor(installed)
 	if own == "" {
 		return aff
 	}
@@ -45,7 +33,7 @@ func ownMinorOnly(aff advisory.Affected, installed string) advisory.Affected {
 	named := false
 	for _, r := range aff.Ranges {
 		fix := fixOf(r)
-		if fix != "" && minorTag(fix) != own {
+		if fix != "" && version.RHELMinor(fix) != own {
 			continue
 		}
 		named = named || fix != ""
