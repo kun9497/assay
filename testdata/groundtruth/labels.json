@@ -2830,6 +2830,162 @@
         "fetchedAt": "2026-11-09T09:13:25Z"
       },
       "validFrom": "2026-07-14"
+    },
+    {
+      "id": "al2-livepatch-core-build/CVE-2019-15918",
+      "case": "al2-livepatch-core-build",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/kernel-livepatch-4.14.165-131.185@1.0-0.amzn2?arch=x86_64&distro=amzn-2&upstream=kernel-livepatch-4.14.165-131.185-1.0-0.amzn2.src.rpm",
+      "name": "kernel-livepatch-4.14.165-131.185",
+      "version": "1.0-0.amzn2",
+      "cve": "CVE-2019-15918",
+      "expect": {
+        "state": "affected",
+        "fixed": "1.0-2.amzn2"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2LIVEPATCH-2020-001 (Advisory Released Date: 2020-03-03) lists CVE-2019-15918; New Packages x86_64: kernel-livepatch-4.14.165-131.185-1.0-2.amzn2.x86_64. The 1.0-0 build was released in core by ALAS2-2020-1392 (2020-02-05), which does not list it.",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2LIVEPATCH-2020-001.html",
+        "fetchedAt": "2026-11-24T02:00:45Z"
+      },
+      "validFrom": "2020-03-03"
+    },
+    {
+      "id": "al2-livepatch-fixed/CVE-2019-15918",
+      "case": "al2-livepatch-fixed",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/kernel-livepatch-4.14.165-131.185@1.0-2.amzn2?arch=x86_64&distro=amzn-2&upstream=kernel-livepatch-4.14.165-131.185-1.0-2.amzn2.src.rpm",
+      "name": "kernel-livepatch-4.14.165-131.185",
+      "version": "1.0-2.amzn2",
+      "cve": "CVE-2019-15918",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2LIVEPATCH-2020-001 (Advisory Released Date: 2020-03-03) lists CVE-2019-15918; New Packages x86_64: kernel-livepatch-4.14.165-131.185-1.0-2.amzn2.x86_64. The 1.0-0 build was released in core by ALAS2-2020-1392 (2020-02-05), which does not list it. This label checks the fixed build itself.",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2LIVEPATCH-2020-001.html",
+        "fetchedAt": "2026-11-24T02:00:45Z"
+      },
+      "validFrom": "2020-03-03"
+    },
+    {
+      "id": "al2-core-kernel-fixed/CVE-2019-25162",
+      "case": "al2-core-kernel-fixed",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/kernel@4.14.291-218.527.amzn2?arch=x86_64&distro=amzn-2&upstream=kernel-4.14.291-218.527.amzn2.src.rpm",
+      "name": "kernel",
+      "version": "4.14.291-218.527.amzn2",
+      "cve": "CVE-2019-25162",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2-2022-1838 (Advisory Released Date: 2022-09-13) lists CVE-2019-25162; New Packages x86_64: kernel-4.14.291-218.527.amzn2.x86_64. The kernel-5.4, 5.10 and 5.15 topics fix the same CVE in builds of their own lines (D174), which are not a fix for this one.",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2-2022-1838.html",
+        "fetchedAt": "2026-11-24T02:00:45Z"
+      },
+      "validFrom": "2022-09-13"
+    },
+    {
+      "id": "al2-core-kernel-below/CVE-2019-25162",
+      "case": "al2-core-kernel-below",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/kernel@4.14.290-217.505.amzn2?arch=x86_64&distro=amzn-2&upstream=kernel-4.14.290-217.505.amzn2.src.rpm",
+      "name": "kernel",
+      "version": "4.14.290-217.505.amzn2",
+      "cve": "CVE-2019-25162",
+      "expect": {
+        "state": "affected",
+        "fixed": "4.14.291-218.527.amzn2"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2-2022-1838 (Advisory Released Date: 2022-09-13) lists CVE-2019-25162; New Packages x86_64: kernel-4.14.291-218.527.amzn2.x86_64. 4.14.290-217.505.amzn2 is an earlier build in the core repository.",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2-2022-1838.html",
+        "fetchedAt": "2026-11-24T02:00:45Z"
+      },
+      "validFrom": "2022-09-13"
+    },
+    {
+      "id": "al2-kernel510-fixed/CVE-2019-25162",
+      "case": "al2-kernel510-fixed",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/kernel@5.10.144-127.601.amzn2?arch=x86_64&distro=amzn-2&upstream=kernel-5.10.144-127.601.amzn2.src.rpm",
+      "name": "kernel",
+      "version": "5.10.144-127.601.amzn2",
+      "cve": "CVE-2019-25162",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2KERNEL-5.10-2022-020 (Advisory Released Date: 2022-10-11) lists CVE-2019-25162; New Packages x86_64: kernel-5.10.144-127.601.amzn2.x86_64. This label checks the fixed build itself; kernel-5.15 fixes the CVE in a later line (D174).",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2KERNEL-5.10-2022-020.html",
+        "fetchedAt": "2026-11-24T02:00:45Z"
+      },
+      "validFrom": "2022-10-11"
+    },
+    {
+      "id": "al2-kernel510-below/CVE-2019-25162",
+      "case": "al2-kernel510-below",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/kernel@5.10.135-122.509.amzn2?arch=x86_64&distro=amzn-2&upstream=kernel-5.10.135-122.509.amzn2.src.rpm",
+      "name": "kernel",
+      "version": "5.10.135-122.509.amzn2",
+      "cve": "CVE-2019-25162",
+      "expect": {
+        "state": "affected",
+        "fixed": "5.10.144-127.601.amzn2"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2KERNEL-5.10-2022-020 (Advisory Released Date: 2022-10-11) lists CVE-2019-25162; New Packages x86_64: kernel-5.10.144-127.601.amzn2.x86_64. 5.10.135-122.509.amzn2 is an earlier build in the kernel-5.10 topic.",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2KERNEL-5.10-2022-020.html",
+        "fetchedAt": "2026-11-24T02:00:45Z"
+      },
+      "validFrom": "2022-10-11"
+    },
+    {
+      "id": "al2-postgresql13-fixed/CVE-2024-10978",
+      "case": "al2-postgresql13-fixed",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/postgresql@13.17-1.amzn2.0.1?arch=x86_64&distro=amzn-2&upstream=postgresql-13.17-1.amzn2.0.1.src.rpm",
+      "name": "postgresql",
+      "version": "13.17-1.amzn2.0.1",
+      "cve": "CVE-2024-10978",
+      "expect": {
+        "state": "clean"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2POSTGRESQL13-2024-008 (Advisory Released Date: 2024-12-19) lists CVE-2024-10978; New Packages x86_64: postgresql-13.17-1.amzn2.0.1.x86_64. ALAS2POSTGRESQL14-2024-014 fixes the same CVE in 14.14, a build of another line (D174).",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2POSTGRESQL13-2024-008.html",
+        "fetchedAt": "2026-11-24T02:00:45Z"
+      },
+      "validFrom": "2024-12-19"
+    },
+    {
+      "id": "al2-postgresql13-below/CVE-2024-10978",
+      "case": "al2-postgresql13-below",
+      "family": "amzn",
+      "purl": "pkg:rpm/amzn/postgresql@13.16-1.amzn2.0.1?arch=x86_64&distro=amzn-2&upstream=postgresql-13.16-1.amzn2.0.1.src.rpm",
+      "name": "postgresql",
+      "version": "13.16-1.amzn2.0.1",
+      "cve": "CVE-2024-10978",
+      "expect": {
+        "state": "affected",
+        "fixed": "13.17-1.amzn2.0.1"
+      },
+      "class": "matcher",
+      "source": {
+        "statement": "ALAS2POSTGRESQL13-2024-008 (Advisory Released Date: 2024-12-19) lists CVE-2024-10978; New Packages x86_64: postgresql-13.17-1.amzn2.0.1.x86_64. 13.16-1.amzn2.0.1 is the build ALAS2POSTGRESQL13-2024-007 released.",
+        "url": "https://alas.aws.amazon.com/AL2/ALAS2POSTGRESQL13-2024-008.html",
+        "fetchedAt": "2026-11-24T02:00:45Z"
+      },
+      "validFrom": "2024-12-19"
     }
   ]
 }
