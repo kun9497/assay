@@ -1052,6 +1052,11 @@ Docker 데몬은 의도적으로 소스에서 제외했습니다. import하면 �
       데이터베이스는 읽지 않음으로 보고하며, 합치지도 대신 읽지도 않음
 - [x] errata의 CVE 하나에 대한 waiver는 그 CVE만 waive함 (D171) — finding은 `waived`에 그 CVE를
       적은 채 보고되고, 묶인 CVE가 모두 waive되어야 억제됨; 스키마 23
+- [x] 모든 CVE가 그 패키지에 대해 보고된 USN, DSA, DLA는 그 finding들에 이름으로 남음 (D172) —
+      `findings[].notices`, 스키마 24
+- [x] 데이터베이스의 내용 전체를 검증할 수 있음 (D173) — `assay db verify`, `scan --verify-db`
+- [x] Amazon Linux 2 빌드는 그 버전 라인을 발행하는 저장소가 판정함 (D174)
+- [x] RHEL 빌드는 자기 부 버전의 수정으로 판정함 (D175) — 지원 채널이 그 부 버전을 다시 고친 것도 포함
 - [x] `components`와 subject에 함께 나열된 패키지는 명시된 소스 버전을 지킴 (D165) — 어느 기록이 먼저든;
       서로 어긋나는 두 소스 버전이나 소스 이름은 어느 쪽으로도 판정하지 않고, 둘을 이름 붙인 target 원인 skip
       하나로 남김(엄격 모드에서 종료 2); QA 2026-11-10

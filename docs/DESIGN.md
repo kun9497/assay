@@ -1115,6 +1115,12 @@ exited 0 while 24 findings went unmentioned.
       package database is reported not read, never merged and never read in its place
 - [x] A waiver for one CVE of an errata waives that CVE, not the errata (D171) — the finding
       stays reported with `waived` listing it, until every bundled CVE is waived; schema 23
+- [x] A USN, DSA or DLA whose every CVE is reported for the package is named on those findings
+      (D172) — `findings[].notices`, schema 24
+- [x] The database's content can be verified whole (D173) — `assay db verify`, `scan --verify-db`
+- [x] An Amazon Linux 2 build is judged by the repository that publishes its version line (D174)
+- [x] A RHEL build is judged by its own minor's fix (D175) — and by a support channel's second fix
+      of that minor
 - [x] A package listed in both `components` and the subject keeps its stated source version (D165)
       — whichever listing comes first; two stated versions or source names that contradict are judged
       on neither, as one target-cause skip naming both (exit 2 under the strict gate); QA 2026-11-10
