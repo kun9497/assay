@@ -242,13 +242,18 @@ func keyFreezeDate(p store.Provenance, key string) time.Time {
 //     carried, and the provider's fresh provenance holds no Frozen for it --
 //     the same healing T2 holds for a key that reappears.
 //
-// Under a release past its EOLFrom that the seed ALREADY held frozen, a
-// record not re-emitted is carried by both rules (revised 2026-11-24). The
+// Under a release past its EOLFrom that the seed ALREADY held frozen, and
+// under which this run holds less than half the seed's records, a record not
+// re-emitted is carried by both rules (revised 2026-11-24). The
 // upstream stopped speaking for that release on an earlier night, so what it
 // withdraws since is not a word about it: on 2026-11-24 OSV withdrew 1,360
 // records holding a Debian:11 entry, 1,172 of them with no other, because
 // Debian's tracker lists bullseye no more. The CVEs stand. Only the frozen
 // key's entries come back, never a live key's (D16).
+//
+// Frozen alone would not do: one restored entry freezes a key, and Ubuntu:25.10
+// has stayed so on that since 2026-10-07 while the upstream serves all 13,500
+// of its records and withdraws some (45 on 2026-10-22).
 //
 // A whole-key key the provider declares renamed (Provenance.Renamed, D115)
 // to a key the SAME provider declares this run is neither: it is not
@@ -332,6 +337,14 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 	remnant := map[string]string{}
 	var grown []string
 	past := map[string]string{}
+	// stopped is the past-EOL keys the seed held frozen and this run holds
+	// less than half of.
+	stopped := map[string]bool{}
+	frozenBefore := func(name, key string) bool {
+		_, frozen := seedMeta.Providers[name].Frozen[key]
+		_, ended := past[key]
+		return frozen && ended
+	}
 	if len(eolRows) == 0 {
 		// EOL_ENABLE=0 (a failed EOL fetch aborts the build, D87, so it never
 		// reaches here). Without a catalog no key can be judged past EOL, and
@@ -372,17 +385,29 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 		// is not serving it, and the seed's entries are restored as on a
 		// flat night. Counted from the seed's records, never its index, in
 		// one extra pass that is paid only on a night a past-EOL key grew.
-		if len(grown) > 0 {
-			held, err := seedRecordsUnder(src, grown)
+		// The same measure says which frozen keys the upstream has stopped
+		// serving, for what it withdraws (below), and is asked of those too.
+		measured := slices.Clone(grown)
+		for _, key := range sortedKeys(entry) {
+			if frozenBefore(owner[key], key) {
+				measured = append(measured, key)
+			}
+		}
+		if len(measured) > 0 {
+			held, err := seedRecordsUnder(src, measured)
 			if err != nil {
 				return carryResult{}, fmt.Errorf("count seed %s: %w", label, err)
 			}
-			for _, key := range grown {
+			for _, key := range measured {
 				ids, err := w.IDsUnder(key)
 				if err != nil {
 					return carryResult{}, fmt.Errorf("count %s: %w", key, err)
 				}
-				if len(ids)*2 < held[key] {
+				if len(ids)*2 >= held[key] {
+					continue
+				}
+				stopped[key] = frozenBefore(owner[key], key)
+				if _, flat := entry[key]; !flat {
 					entry[key] = past[key]
 					remnant[key] = fmt.Sprintf("this run holds %d of the seed's %d records under it", len(ids), held[key])
 				}
@@ -394,11 +419,6 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 	// seed counts printKeyCounts reports against, and those lines are the
 	// nightly's erosion signal on every seeded build, not only on one that
 	// carried.
-	stopped := func(name, key string) bool {
-		_, frozen := seedMeta.Providers[name].Frozen[key]
-		_, ended := past[key]
-		return frozen && ended
-	}
 	res := carryResult{ran: true, seedCounts: map[string]int{}, renamed: renamed}
 	wholeN := map[string]int{}
 	wholeWithdrawn := map[string]int{}
@@ -467,7 +487,7 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 				if err != nil {
 					return err
 				}
-				if !ok && !stopped(name, key) {
+				if !ok && !frozenBefore(name, key) {
 					wholeWithdrawn[key]++
 					continue
 				}
@@ -484,7 +504,7 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 				return err
 			}
 			switch {
-			case !ok && stopped(owner[key], key):
+			case !ok && stopped[key]:
 				kept[key]++
 				carried = append(carried, entriesUnder(a, key)...)
 			case !ok:
@@ -569,7 +589,7 @@ func carryForward(seedPath, label string, w *store.Bolt, running map[string]stor
 				restored[key], since.Format("2006-01-02")))
 		}
 		if kept[key] > 0 {
-			parts = append(parts, fmt.Sprintf("%d not re-emitted at all, kept: the seed held the key frozen", kept[key]))
+			parts = append(parts, fmt.Sprintf("%d not re-emitted at all, kept: the key was frozen and is served no more", kept[key]))
 		}
 		if withdrawn[key] > 0 {
 			parts = append(parts, fmt.Sprintf("%d not re-emitted at all, left withdrawn (D16)", withdrawn[key]))

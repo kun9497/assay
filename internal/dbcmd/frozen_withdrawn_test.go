@@ -39,15 +39,18 @@ func TestCarryForward_AWithdrawalUnderAFrozenReleaseIsKept(t *testing.T) {
 		line   string
 	}{
 		{"frozen, still declared", frozen, []string{"Debian:11", "Debian:12"}, flat,
-			[]string{"REC-BOTH", "REC-ONLY"}, "2 not re-emitted at all, kept: the seed held the key frozen"},
+			[]string{"REC-BOTH", "REC-ONLY"}, "2 not re-emitted at all, kept: the key was frozen and is served no more"},
 		{"frozen, a remnant that grew", frozen, []string{"Debian:11", "Debian:12"}, []advisory.Advisory{adv("REC-R1", affects("Debian:12", "libfoo")), adv("REC-NEW", affects("Debian:11", "libnew"))},
-			[]string{"REC-BOTH", "REC-ONLY"}, "kept: the seed held the key frozen"},
+			[]string{"REC-BOTH", "REC-ONLY"}, "kept: the key was frozen and is served no more"},
 		{"frozen, declared no more", frozen, []string{"Debian:12"}, flat[:1],
 			[]string{"REC-BOTH", "REC-ONLY"}, "carried 4 advisories from seed"},
 		{"the first night it is flat", nil, []string{"Debian:11", "Debian:12"}, flat,
 			nil, "2 not re-emitted at all, left withdrawn (D16)"},
 		{"the first night it is not declared", nil, []string{"Debian:12"}, flat[:1],
 			[]string{"REC-ONLY"}, "1 not re-emitted despite affecting a key osv still serves, left withdrawn (D16)"},
+		// Ubuntu:25.10: frozen by one restored entry, and served all the same.
+		{"frozen, but this run holds half of it", frozen, []string{"Debian:11", "Debian:12"}, []advisory.Advisory{adv("REC-R1", affects("Debian:11", "libfoo")), adv("REC-DLA", affects("Debian:11", "libbar"))},
+			nil, "2 not re-emitted at all, left withdrawn (D16)"},
 		{"another provider's freeze is not this one's", map[string]time.Time{"Debian:12": frozenEarlier}, []string{"Debian:11", "Debian:12"}, flat,
 			nil, "left withdrawn (D16)"},
 	} {
@@ -68,7 +71,7 @@ func TestCarryForward_AWithdrawalUnderAFrozenReleaseIsKept(t *testing.T) {
 			if !strings.Contains(logs, tc.line) {
 				t.Errorf("stderr lacks %q:\n%s", tc.line, logs)
 			}
-			if since, ok := m.Providers["osv"].Frozen["Debian:11"]; tc.frozen["Debian:11"] == frozenEarlier && (!ok || !since.Equal(frozenEarlier)) {
+			if since, ok := m.Providers["osv"].Frozen["Debian:11"]; tc.frozen["Debian:11"] == frozenEarlier && tc.want != nil && (!ok || !since.Equal(frozenEarlier)) {
 				t.Errorf("frozen since %v, %v; want the seed's date", since, ok)
 			}
 		})
@@ -80,7 +83,7 @@ func TestCarryForward_AKeptRecordAloneKeepsTheKeyFrozen(t *testing.T) {
 	pinCarryClock(t)
 	path := carrySeed(t, map[string]store.Provenance{
 		"osv": {Ecosystems: []string{"Debian:11", "Debian:12"}, DataAsOf: seedFreezeTime, Frozen: map[string]time.Time{"Debian:11": frozenEarlier}},
-	}, adv("REC-ONLY", affects("Debian:11", "gpac")), adv("REC-DLA", affects("Debian:11", "libbar")))
+	}, adv("REC-ONLY", affects("Debian:11", "gpac")), adv("REC-ONLY2", affects("Debian:11", "ntp")), adv("REC-DLA", affects("Debian:11", "libbar")))
 	dst, code, logs := buildWithEOL(t, path, catalog(debian11Sep, debian12),
 		fakeProvider{name: "osv", covers: []string{"Debian:11", "Debian:12"}, advs: []advisory.Advisory{adv("REC-DLA", affects("Debian:11", "libbar"))}})
 	if code != 0 {

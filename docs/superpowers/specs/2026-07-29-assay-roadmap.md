@@ -4686,9 +4686,11 @@ first run restored got one.
 tracker lists bullseye no more. The CVEs stand: all but one of the 1,172 keep their NVD rating, and
 Debian's own CVE list still has them. "Not re-emitted at all, left withdrawn (D16)" removed them, so
 gpac, asterisk, openjdk-11 and python2.7 on Debian 11 read clean of what they have. A record not
-re-emitted is now kept under a key the seed already held frozen and whose release is past its
-EOLFrom, by the whole-key and the entry-level rule alike; only that key's entries come back, so D16
-holds on every live key. grype keeps its legacy Debian releases the same way. **Gives up:** a CVE
+re-emitted is now kept under a key the seed already held frozen, whose release is past its EOLFrom,
+and of which this run holds less than half the seed's records, by the whole-key and the entry-level
+rule alike; only that key's entries come back, so D16 holds on every live key. Frozen alone is not
+enough (branch review): one restored entry freezes a key, and Ubuntu:25.10 has stayed so since
+2026-10-07 while the upstream serves 13,500 records under it. grype keeps its legacy Debian releases the same way. **Gives up:** a CVE
 really retracted after a release froze stays reported on it. The count floors could not see this
 (2.9% of the key, none of it on the differential's image); the rebuild of 2026-11-24 is seeded from
 `sha256:5b3e4a5e…`, which holds them.
