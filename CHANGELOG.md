@@ -7,7 +7,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-24
+
 ### Changed
+
+- **Breaking** for some callers (`docs/compatibility.md`); JSON `schemaVersion` 22 → 24, both bumps additive:
+  - `--db-max-age`, `--db-max-rating-age`, `--timeout` and `--config` given twice, content after an
+    SBOM's JSON document, an `oci-dir:` layout holding two images of the platform, and an artifact
+    older than the installed database (`db update`) exit 2.
+  - A finding for an errata that was waived by one of its CVEs is reported again (D171).
+  - `--fail-on` can fire on Ubuntu, Red Hat, Bitnami and GitHub advisories that were unrated.
+    Update the database as well: v0.18.6 reads the new one, but v0.19.0's fixes marked "databases
+    built from this version" need a build from 2026-11-24 on.
 
 - A waiver naming one CVE of an errata that bundles several no longer suppresses the whole
   finding (D171). An ALAS, ELSA, RLSA, ALSA or Bodhi update is one finding standing for every
@@ -1586,7 +1597,8 @@ The changes below ship in the Linux and macOS binaries for amd64 and arm64. The 
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.6...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.19.0...main
+[0.19.0]: https://github.com/kun9497/assay/compare/v0.18.6...v0.19.0
 [0.18.6]: https://github.com/kun9497/assay/compare/v0.18.5...v0.18.6
 [0.18.5]: https://github.com/kun9497/assay/compare/v0.18.4...v0.18.5
 [0.18.4]: https://github.com/kun9497/assay/compare/v0.18.3...v0.18.4

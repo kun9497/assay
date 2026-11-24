@@ -7,7 +7,18 @@
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-24
+
 ### Changed
+
+- 일부 사용자에게 **호환되지 않는 변경**입니다(`docs/compatibility.ko.md`). JSON `schemaVersion`은 22 → 24이며 두 번 모두 추가 변경입니다.
+  - `--db-max-age`, `--db-max-rating-age`, `--timeout`, `--config`를 두 번 준 경우, SBOM JSON 문서 뒤에
+    내용이 더 있는 경우, 같은 플랫폼의 이미지가 둘 있는 `oci-dir:` 레이아웃, 설치된 데이터베이스보다
+    오래된 아티팩트(`db update`)는 exit 2입니다.
+  - CVE 하나로 면제했던 묶음 권고의 발견이 다시 보고됩니다(D171).
+  - 등급이 없던 Ubuntu, Red Hat, Bitnami, GitHub 권고에서 `--fail-on`이 새로 걸릴 수 있습니다.
+    데이터베이스도 함께 갱신하세요. v0.18.6도 새 데이터베이스를 읽지만, v0.19.0의 수정 중 "이 버전 이후에
+    빌드한 데이터베이스"에 적용되는 것은 2026-11-24 이후 빌드가 필요합니다.
 
 - 여러 CVE를 묶은 errata의 CVE 하나를 지목한 waiver가 더 이상 finding 전체를 억제하지 않습니다
   (D171). ALAS, ELSA, RLSA, ALSA, Bodhi 업데이트는 자신이 고치는 모든 CVE를 대표하는 finding
@@ -1359,7 +1370,8 @@ Windows용 amd64·arm64 바이너리를 다시 배포합니다. Linux와 macOS�
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.18.6...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.19.0...main
+[0.19.0]: https://github.com/kun9497/assay/compare/v0.18.6...v0.19.0
 [0.18.6]: https://github.com/kun9497/assay/compare/v0.18.5...v0.18.6
 [0.18.5]: https://github.com/kun9497/assay/compare/v0.18.4...v0.18.5
 [0.18.4]: https://github.com/kun9497/assay/compare/v0.18.3...v0.18.4
