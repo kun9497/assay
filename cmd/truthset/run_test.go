@@ -685,8 +685,8 @@ func TestCommittedLabels_LoadAndShape(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(labels) < 145 {
-		t.Errorf("labels = %d, want at least 145 including the Leap compatibility update", len(labels))
+	if len(labels) < 153 {
+		t.Errorf("labels = %d, want at least 153 including the Leap compatibility update and the AL2 lines", len(labels))
 	}
 	type counts struct{ pos, neg, data int }
 	by := map[string]*counts{}
