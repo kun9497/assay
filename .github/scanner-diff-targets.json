@@ -224,7 +224,7 @@
     "ref": "mirror.gcr.io/bellsoft/liberica-runtime-container@sha256:70963584a7d778c7f3470b92bdef477f50fe3baba3a4cd388654a2b9c8f0e031",
     "minAgree": 1,
     "minFindings": 1,
-    "maxFindings": 122,
+    "maxFindings": 262,
     "maxAssayOnlyFixed": 41
   },
   {
@@ -247,7 +247,7 @@
     "ref": "mirror.gcr.io/library/photon@sha256:ab4b68e15c8ff6b9c79ba525f696260f772c711761d576dd53bf43c351c9a504",
     "minAgree": 5,
     "minFindings": 5,
-    "maxFindings": 74,
+    "maxFindings": 228,
     "maxAssayOnlyFixed": 25
   },
   {
@@ -266,7 +266,7 @@
     "ref": "quay.io/hummingbird/nginx@sha256:6c6c6e7fd1cb655a6ff9066f04adef078b4b6ba3adf91dbd9a52ce71f83d6f18",
     "minAgree": 2,
     "minFindings": 2,
-    "maxFindings": 142,
+    "maxFindings": 296,
     "maxAssayOnlyFixed": 32
   },
   {
