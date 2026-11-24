@@ -39,7 +39,7 @@ BINDIR="./bin"
 # Set by scripts/prepare-release.sh when preparing a release.
 # Releases before the first signed one carry no checksums signature and are
 # refused by this script; the README says which release that is.
-VERSION="v0.19.0"
+VERSION="v0.19.1"
 RELEASE_BASE="${ASSAY_RELEASE_BASE:-https://github.com/${REPO}/releases/download}"
 
 # The public keys this installer trusts, PEM, one per release signing key.
