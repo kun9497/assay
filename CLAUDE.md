@@ -152,7 +152,17 @@ key covers is reported not evaluated
 a contradicted Ubuntu codename voids codename-scoped VEX; local OCI-layout and Docker-archive
 metadata is bounded at 100 MiB before it is parsed (D112 revised 2026-11-18). v0.18.5 shipped
 without Windows binaries after AhnLab V3 quarantined a candidate; v0.18.6 ships them again
-(`docs/deferred-decisions.md`, Known hazards). Not built: pep440 leniency (see
+(`docs/deferred-decisions.md`, Known hazards). Since D169 `db update` refuses an artifact built
+before the installed database (`--allow-older` or a digest lifts it); since D170 an image's
+inventory is the database of its own package format, and a second one is reported not read; since
+D171 a waiver naming one CVE of an errata waives that CVE only (`findings[].waived`, schema 23);
+since D172 a USN, DSA or DLA whose every CVE is reported is folded into those findings
+(`findings[].notices`, schema 24); since D173 `db verify` and `scan --verify-db` compare the whole
+database with the digests its build recorded; since D174 an AL2 build is judged by the repository
+that publishes its version line (a livepatch split across core and its topic is one line); since
+D175 a build naming a RHEL minor (`.el10_2`) is judged by that minor's fix alone, and the Red Hat
+provider keeps a support channel's second fix of a mainline minor. v0.19.0 is the latest release
+(2026-11-24). Not built: pep440 leniency (see
 `docs/DESIGN.md` and `docs/deferred-decisions.md`).
 
 **Check what exists before assuming — this paragraph has been wrong six times.** It claimed
