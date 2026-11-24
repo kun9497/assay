@@ -7,6 +7,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.19.1] - 2026-11-24
+
 ### Fixed
 
 - Database builds: a Debian 11 advisory OSV withdrew because bullseye left Debian's tracker is kept
@@ -1609,7 +1611,8 @@ The changes below ship in the Linux and macOS binaries for amd64 and arm64. The 
   ecosystems. Gives CI an exit code of 0, 1 or 2. Output as table, JSON or SARIF.
   **(report schemaVersion 8; store schema 9)** (decision log D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.19.0...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.19.1...main
+[0.19.1]: https://github.com/kun9497/assay/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/kun9497/assay/compare/v0.18.6...v0.19.0
 [0.18.6]: https://github.com/kun9497/assay/compare/v0.18.5...v0.18.6
 [0.18.5]: https://github.com/kun9497/assay/compare/v0.18.4...v0.18.5
