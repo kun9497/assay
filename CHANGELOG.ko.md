@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Hummingbird: 피드가 epoch 없이 적은 수정 버전은 버전과 릴리스로 비교합니다(D176). libpng, nodejs20,
+  nodejs24-npm, perl-Socket, perl-Storable, xz에는 피드가 빠뜨린 epoch가 있어, 모든 빌드가 그런 수정보다
+  위로 판정됐고 취약한 빌드가 깨끗하다고 나왔습니다(libpng 1.6.56에서 CVE 13개). 새 데이터베이스는
+  필요 없습니다.
+
 ## [0.19.1] - 2026-11-24
 
 ### Fixed

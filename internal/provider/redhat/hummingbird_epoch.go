@@ -66,9 +66,9 @@ func carriesHummingbird(adv advisory.Advisory) bool {
 // Rule 2 errs toward reporting. A package whose early builds truly had no
 // epoch would have those fixes raised to the later epoch, and an installed
 // epoch-less build would then be reported against a fix it already carries.
-// Whether the feed holds such a package has not been measured; the
-// alternative is the silent clean verdict this exists to close, and the
-// counters say how often each rule ran.
+// None did on 2026-11-25: every epoch in the database was the one Red Hat's
+// Hummingbird repositories give the build. A fix both rules leave without one
+// is the matcher's (D176).
 func (h *hummingbirdHold) release(st *stats, emit func(advisory.Advisory) error) error {
 	type build struct{ name, versionRelease string }
 	epochOfBuild := map[build]string{}

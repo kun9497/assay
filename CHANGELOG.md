@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Hummingbird: a fix the feed states without an epoch is compared on its version and release (D176).
+  libpng, nodejs20, nodejs24-npm, perl-Socket, perl-Storable and xz have an epoch the feed leaves
+  out, so every build of them was above every such fix and vulnerable ones read clean, libpng 1.6.56
+  of 13 CVEs. No new database is needed.
+
 ## [0.19.1] - 2026-11-24
 
 ### Fixed

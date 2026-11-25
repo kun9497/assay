@@ -1052,7 +1052,8 @@ func (m *Matcher) Match(t pkgmeta.Target) (Result, error) {
 						// someone to upgrade must name the real fix build.
 						evalCmp = moduleTailComparer{inner: cmp}
 					}
-					hit, ev, unreadable, err := version.AffectsVersion(evalCmp, compareVersion, ownMinorOnly(aff, compareVersion))
+					aff = readAtInstalledEpoch(ownMinorOnly(aff, compareVersion), compareVersion)
+					hit, ev, unreadable, err := version.AffectsVersion(evalCmp, compareVersion, aff)
 					// D30: the advisory WAS evaluated, and some enumerated
 					// version in it was not. That is a third state — neither a
 					// clean verdict nor a skipped advisory — and it is recorded
