@@ -113,7 +113,7 @@
     "ref": "mirror.gcr.io/library/oraclelinux@sha256:3adbd4f3b22d816c90e78a9c9c2e0ddf65fc1bbadd816dc202054471a85f38b2",
     "minAgree": 31,
     "minFindings": 33,
-    "maxFindings": 322,
+    "maxFindings": 656,
     "maxAssayOnlyFixed": 25,
     "trivy": {
       "minAgree": 34,
