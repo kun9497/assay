@@ -9817,6 +9817,35 @@ reported on the first, and nothing in the feed tells that from an ordinary fix: 
 CVEs. CVE-2022-32885 is the one channel refix left out, 2.46.3 being above every mainline fix. With
 a database from before this version the 8 CVEs above are cleared as well.
 
+### D176 — A Hummingbird fix stated without an epoch is read at the installed build's
+
+**Decision (2026-11-25).** On the Hummingbird key, a fix that states no epoch is given the epoch of
+the installed version it is compared with, when that has one above 0. A fix that states an epoch
+keeps it, and a build without one stays below such a fix. Every other key keeps rpm's reading, a
+missing epoch is 0.
+
+**Why.** The feed writes part of its fixes without the epoch the builds have. The provider restores
+what another document states (QA 2026-11-20), but libpng, nodejs20, xz, perl-Socket and
+perl-Storable are stated with one nowhere, and nodejs24-npm with two. Every installed build of those
+was above every fix: clean, with nothing skipped.
+
+**Measured** against Red Hat's public Hummingbird repositories on 2026-11-25: of the database's
+37,927 fixed entries all 12,396 that carry an epoch have the repositories' own, the ones the
+provider inferred among them, and 353 that carry none have one there. Over the 3,342 x86_64 builds
+with an epoch, findings go 95,366 to 95,994, none lost, and none of the 628 is on the newest build
+of its package. libpng 1.6.56 gains 13 CVEs and nodejs20 14. mod_ssl and mod_proxy_html, epoch 1
+under httpd's 0, gain 22 from httpd's entries. On nodejs24-npm 195 findings name another of the
+record's fixes.
+
+**What other scanners do.** grype compares epochs only where both sides state one. trivy has no
+Hummingbird support that a search of its code finds.
+
+**Reading the repositories at build time was rejected**: it adds a feed to the nightly, and 72
+entries name builds the repositories no longer hold. This needs no new database.
+
+**Gives up.** A package whose fix truly had epoch 0 and whose version went down when the epoch was
+added is reported on a fixed build. The measurement above holds none.
+
 ---
 
 ## 6. Benchmarking notes

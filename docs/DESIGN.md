@@ -1121,6 +1121,7 @@ exited 0 while 24 findings went unmentioned.
 - [x] An Amazon Linux 2 build is judged by the repository that publishes its version line (D174)
 - [x] A RHEL build is judged by its own minor's fix (D175) — and by a support channel's second fix
       of that minor
+- [x] A Hummingbird fix stated without an epoch is read at the installed build's (D176)
 - [x] A package listed in both `components` and the subject keeps its stated source version (D165)
       — whichever listing comes first; two stated versions or source names that contradict are judged
       on neither, as one target-cause skip naming both (exit 2 under the strict gate); QA 2026-11-10
