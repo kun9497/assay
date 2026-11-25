@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.19.2] - 2026-11-25
+
 ### Fixed
 
 - Hummingbird: 피드가 epoch 없이 적은 수정 버전은 버전과 릴리스로 비교합니다(D176). libpng, nodejs20,
@@ -1390,7 +1392,8 @@ Windows용 amd64·arm64 바이너리를 다시 배포합니다. Linux와 macOS�
   여덟 개 언어 생태계를 다룹니다. CI에 종료 코드 0, 1, 2를 줍니다. 출력은 표, JSON, SARIF입니다.
   **(보고서 schemaVersion 8; 저장소 스키마 9)** (결정 기록 D1–D101)
 
-[Unreleased]: https://github.com/kun9497/assay/compare/v0.19.1...main
+[Unreleased]: https://github.com/kun9497/assay/compare/v0.19.2...main
+[0.19.2]: https://github.com/kun9497/assay/compare/v0.19.1...v0.19.2
 [0.19.1]: https://github.com/kun9497/assay/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/kun9497/assay/compare/v0.18.6...v0.19.0
 [0.18.6]: https://github.com/kun9497/assay/compare/v0.18.5...v0.18.6
