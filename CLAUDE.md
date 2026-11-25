@@ -162,8 +162,8 @@ database with the digests its build recorded; since D174 an AL2 build is judged 
 that publishes its version line (a livepatch split across core and its topic is one line); since
 D175 a build naming a RHEL minor (`.el10_2`) is judged by that minor's fix alone, and the Red Hat
 provider keeps a support channel's second fix of a mainline minor; since D176 a Hummingbird fix
-stated without an epoch is read at the installed build's. v0.19.1 is the latest release
-(2026-11-24). Not built: pep440 leniency (see
+stated without an epoch is read at the installed build's. v0.19.2 is the latest release
+(2026-11-25). Not built: pep440 leniency (see
 `docs/DESIGN.md` and `docs/deferred-decisions.md`).
 
 **Check what exists before assuming — this paragraph has been wrong six times.** It claimed
