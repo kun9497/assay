@@ -197,7 +197,9 @@ jobs:
           # never --force (that is the `force` input, read by Publish). Empty:
           # the published tag, as every night.
           seed="${SEED:-$REF}"
-          if ! ./bin/assay db build --seed "$seed" 2>&1 | tee /tmp/build.log; then
+          # memwatch samples memory around the build and keeps its exit
+          # status: two runners were lost mid-Build (2026-11-24, 11-25).
+          if ! sh scripts/memwatch.sh ./bin/assay db build --seed "$seed" 2>&1 | tee /tmp/build.log; then
             if grep -q DENIED /tmp/build.log; then
               echo "::error::GITHUB_TOKEN cannot reach $seed."
               echo "::error::Link the package to this repository once: the ghcr.io package page ->"
@@ -207,6 +209,7 @@ jobs:
             fi
             exit 2
           fi
+          grep '^memwatch: peak' /tmp/build.log >>"$GITHUB_STEP_SUMMARY" || true
       # D114. The candidate the Build step just wrote is scanned through
       # scandiff against the weekly differential's targets and committed
       # floors, so a database whose matches moved while its counts held --
